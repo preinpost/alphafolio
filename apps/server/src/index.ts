@@ -31,6 +31,7 @@ import {
 } from "@alphafolio/broker";
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
+import { kstParts, SnapshotScheduler, SnapshotStore } from "./snapshots.ts";
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
 import { loadConfig, loadDotEnv } from "./config.ts";
 import { handleLedger, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
@@ -234,6 +235,14 @@ async function main(): Promise<void> {
 		idleMinutes: cfg.idleMinutes,
 	});
 
+	// 일별 포트폴리오 스냅샷 — 과거 평가금액은 브로커가 주지 않으므로 직접 쌓는다
+	const snapshots = new SnapshotStore(ledgerConfig);
+	const snapshotScheduler = new SnapshotScheduler({
+		store: snapshots,
+		users: () => users.users.map((u) => u.name),
+		brokerAccess,
+	});
+
 	const loginLimiter = new LoginRateLimiter(cfg.login);
 
 	const server = createServer((req, res) => {
@@ -361,6 +370,23 @@ async function main(): Promise<void> {
 
 			// ── 증권 ──────────────────────────────────────────
 			// 에이전트를 거치지 않는 조회 경로 (가계부 REST 와 같은 구조).
+			// 스냅샷 수동 촬영 — 시간 조건을 무시하고 지금 값으로 오늘자를 덮어쓴다 (확인·테스트용)
+			if (path === "/api/portfolio/snapshot" && req.method === "POST") {
+				json(res, 200, await snapshotScheduler.takeNow(user));
+				return;
+			}
+
+			if (path === "/api/portfolio/history" && req.method === "GET") {
+				const today = kstParts(new Date()).date;
+				const from = url.searchParams.get("from") ?? `${today.slice(0, 7)}-01`;
+				const to = url.searchParams.get("to") ?? today;
+				if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+					throw new HttpError(400, "from/to 는 YYYY-MM-DD 형식이어야 합니다");
+				}
+				json(res, 200, { items: await snapshots.range(user, from, to) });
+				return;
+			}
+
 			if (path === "/api/portfolio" && req.method === "GET") {
 				json(res, 200, await fetchPortfolio(brokerAccess(user)));
 				return;
@@ -486,10 +512,14 @@ async function main(): Promise<void> {
 				(cfg.login.trustProxy ? " (X-Forwarded-For 신뢰)" : " (소켓 IP 기준)"),
 		);
 		console.log("");
+		// D1 이 없으면 스냅샷을 저장할 곳이 없다 — 가계부와 같은 조건
+		if (process.env.AF_SNAPSHOT_DISABLED === "1") console.log("  스냅샷 비활성 (AF_SNAPSHOT_DISABLED=1)");
+		else snapshotScheduler.start();
 	});
 
 	const shutdown = (): void => {
 		console.log("\n종료 중…");
+		snapshotScheduler.stop();
 		void runtimes.disposeAll();
 		server.close(() => process.exit(0));
 		setTimeout(() => process.exit(0), 3000).unref();

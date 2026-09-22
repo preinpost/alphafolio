@@ -106,7 +106,13 @@ export async function createAlphaFolioRuntime(opts: RuntimeOptions): Promise<Alp
 			cwd,
 			agentDir: opts.agentDir,
 			modelRuntime,
-			resourceLoaderOptions: { systemPrompt: opts.systemPrompt },
+			resourceLoaderOptions: {
+				systemPrompt: opts.systemPrompt,
+				// 스킬을 쓰지 않는다 — 절차는 툴로 만든다 (PLAN.md §21).
+				// pi 스킬은 read 툴로 SKILL.md 를 읽는 구조인데 read 는 파일시스템 전체를 열기 때문에
+				// 빼두었다. 명시적으로 꺼서 확장 패키지가 싣는 스킬도 조용히 들어오지 않게 한다.
+				noSkills: true,
+			},
 		});
 		return {
 			...(await createAgentSessionFromServices({

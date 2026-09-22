@@ -69,6 +69,27 @@ CREATE TABLE IF NOT EXISTS broker_tokens (
 );
 `.trim(),
 	},
+	{
+		// 일별 포트폴리오 스냅샷 — 월간·주간 수익률의 기준점.
+		// 증권 키가 사용자별이라 member 단위로 쌓는다 (가구 합계는 조회 시 합산).
+		// 과거 평가금액은 브로커 API 로 되살릴 수 없어서, 안 쌓으면 영영 없다.
+		id: "0005_portfolio_snapshots",
+		sql: `
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+  member        TEXT NOT NULL,
+  date          TEXT NOT NULL,
+  total_krw     REAL NOT NULL,
+  stock_krw     REAL NOT NULL,
+  cash_krw      REAL NOT NULL,
+  profit_krw    REAL NOT NULL,
+  usd_krw       REAL NOT NULL,
+  brokers       TEXT NOT NULL,
+  holdings_json TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  PRIMARY KEY (member, date)
+);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `
