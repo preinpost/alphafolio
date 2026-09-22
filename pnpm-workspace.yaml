@@ -1,0 +1,22 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "spike"
+
+# postinstall 빌드 스크립트 허용 여부 (pnpm 11 형식)
+#   esbuild: 플랫폼 바이너리를 링크하므로 반드시 실행돼야 한다 (Vite 의존)
+#   그 외: 우리 코드 경로에 필요 없다
+allowBuilds:
+  esbuild: true
+  "@google/genai": false
+  protobufjs: false
+
+# 공급망 보호 — 게시 직후 패키지를 받지 않는다 (탈취된 릴리스 회피).
+# 호스트와 컨테이너가 같은 정책을 써야 --frozen-lockfile 이 일치한다.
+minimumReleaseAge: 1440
+
+# @tanstack/react-query 는 레지스트리 메타데이터에 "time" 필드가 없어 게시일 검사가 불가능하다.
+# 대신 package.json 에서 **정확 버전으로 고정**해 성숙한 릴리스를 쓴다
+# (react-query 가 query-core 를 정확 버전으로 핀하므로 전이 의존도 함께 고정된다).
+minimumReleaseAgeExclude:
+  - "@tanstack/react-query"

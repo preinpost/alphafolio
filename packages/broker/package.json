@@ -1,0 +1,22 @@
+{
+  "name": "@alphafolio/broker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "증권 도메인 — KIS REST 클라이언트(자격증명 주입식) + 시세·잔고 툴. 멀티유저를 위해 process.env 를 읽지 않는다.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tools": "./src/tools.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "dependencies": {
+    "@alphafolio/ledger": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

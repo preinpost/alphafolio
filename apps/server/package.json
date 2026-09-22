@@ -1,0 +1,25 @@
+{
+  "name": "@alphafolio/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AlphaFolio 서버 — node:http + ws, pi 세션 임베드, /api/ledger REST. 런타임 의존성은 ws 하나.",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "dependencies": {
+    "@alphafolio/agent": "workspace:*",
+    "@alphafolio/ledger": "workspace:*",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "typebox": "^1.3.7",
+    "ws": "^8.21.1",
+    "@alphafolio/protocol": "workspace:*",
+    "@alphafolio/broker": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "providers": {
+    "openrouter": {
+      "modelOverrides": {
+        "deepseek/deepseek-v4.1-flash": {
+          "name": "DS V4.1 Flash - Low-cost + tps-guarded",
+          "compat": {
+            "openRouterRouting": {
+              "sort": "throughput",
+              "preferred_min_throughput": {
+                "p50": 50
+              },
+              "preferred_max_latency": {
+                "p90": 3
+              },
+              "max_price": {
+                "prompt": 0.22,
+                "completion": 0.66
+              },
+              "allow_fallbacks": true
+            }
+          }
+        },
+        "deepseek/deepseek-v4-flash-0731": {
+          "name": "DS V4 Flash - Low-cost + tps-guarded",
+          "compat": {
+            "openRouterRouting": {
+              "sort": "throughput",
+              "preferred_min_throughput": {
+                "p50": 30
+              },
+              "preferred_max_latency": {
+                "p90": 3
+              },
+              "max_price": {
+                "prompt": 0.105,
+                "completion": 0.21
+              },
+              "allow_fallbacks": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

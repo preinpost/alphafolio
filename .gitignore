@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+# Taskfile 빌드 캐시
+.task/
+
+# 시크릿 — .env.example 만 커밋한다
+.env
+.env.*
+!.env.example
+infra/compose.yaml
+
+# 런타임 데이터 — 대화 세션 로그(JSONL), 모델 캐시, 복사된 auth.json.
+# ⚠️ 절대 커밋하지 말 것. 세션에는 사용자의 대화와 가계부 내역이 그대로 남는다.
+.data/
+/data/
+
+# pi 확장 패키지 설치 위치 (task agent:install 로 재설치)
+agent-config/npm/node_modules/
+# pi 가 생성하는 캐시 / 시크릿이 든 확장 설정
+agent-config/models-store.json
+agent-config/web-search.json
+agent-config/auth.json
+# pi-web-access 검색 결과 캐시 — 사용자가 검색한 내용이 그대로 남는다
+agent-config/web-search-cache/
+
+# Capacitor (Phase 5)
+apps/mobile/ios/App/Pods/
+apps/mobile/ios/App/App/public/

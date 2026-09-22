@@ -1,0 +1,363 @@
+/**
+ * 서버 ↔ 클라이언트 공용 프로토콜.
+ *
+ * 카드(details) 계약이 여기 있는 이유: 툴이 details로 실어 보낸 구조를 UI가 렌더한다.
+ * 툴 쪽 타입(@alphafolio/ledger의 LedgerSummaryDetails 등)과 모양이 같아야 하므로
+ * 양쪽이 이 파일을 기준으로 맞춘다.
+ */
+
+// ── 카드 (툴 결과 details) ──────────────────────────────────────────────
+
+export interface LedgerTxCard {
+	kind: "ledger-tx";
+	tx: {
+		id: string;
+		date: string;
+		amount: number;
+		category: string | null;
+		merchant: string | null;
+		memo: string | null;
+		account: string | null;
+	};
+}
+
+export interface LedgerSummaryCard {
+	kind: "ledger-summary";
+	from: string;
+	to: string;
+	groupBy: "category" | "month" | "member";
+	rows: Array<{ key: string; income: number; expense: number; net: number; count: number }>;
+}
+
+export interface LedgerTableCard {
+	kind: "ledger-table";
+	rows: Array<{
+		id: string;
+		date: string;
+		amount: number;
+		category: string | null;
+		merchant: string | null;
+	}>;
+}
+
+export interface LedgerBudgetCard {
+	kind: "ledger-budget";
+	action: "set" | "status";
+	month: string;
+	rows: Array<{ category: string; limit_amt: number; spent: number; remaining: number; usedPct: number }>;
+}
+
+/**
+ * 기술적 지표 카드 — market_technical 결과.
+ * 캔들을 그리지 않는다 (차트 UI 를 두지 않기로 한 결정 — PLAN.md §19).
+ */
+export interface IndicatorSnapshotDto {
+	bars: number;
+	lastDate: string;
+	price: number;
+	ma5: number | null;
+	ma20: number | null;
+	ma60: number | null;
+	trend: "정배열" | "역배열" | "혼조";
+	rsi: number | null;
+	macdHistogram: number | null;
+	bollingerUpper: number | null;
+	bollingerLower: number | null;
+	bollingerPct: number | null;
+	atr: number | null;
+	atrPct: number | null;
+	support: number | null;
+	resistance: number | null;
+	periodHigh: number;
+	periodLow: number;
+	periodChangePct: number;
+	signals: string[];
+}
+
+export interface TechnicalCard {
+	kind: "technical-card";
+	symbol: string;
+	name: string;
+	period: string;
+	currency: "KRW" | "USD";
+	snapshot: IndicatorSnapshotDto | null;
+	note?: string;
+}
+
+/** 재무·컨센서스 카드 — market_financials 결과 (국내 전용). */
+export interface FinancialsCard {
+	kind: "financials-card";
+	symbol: string;
+	name: string;
+	periods: Array<{
+		period: string;
+		revenue: number | null;
+		operatingProfit: number | null;
+		netIncome: number | null;
+		roe: number | null;
+		eps: number | null;
+		bps: number | null;
+		debtRatio: number | null;
+	}>;
+	consensus: {
+		covered: boolean;
+		/** 조회 실패 사유 — 있으면 "미커버"라고 말하면 안 된다 */
+		error: string | null;
+		rating: string | null;
+		analyst: string | null;
+		estimatedAt: string | null;
+	};
+	yoy: { revenue: number | null; operatingProfit: number | null; netIncome: number | null } | null;
+}
+
+/** 보유 종목 일괄 점검 카드 — portfolio_signals 결과. */
+export interface PortfolioSignalsCard {
+	kind: "portfolio-signals-card";
+	rows: Array<{
+		symbol: string;
+		name: string;
+		currency: "KRW" | "USD";
+		price: number;
+		avgPrice: number;
+		vsAvgPct: number;
+		trend: string;
+		rsi: number | null;
+		signals: string[];
+	}>;
+	skipped: string[];
+}
+
+/** 현재가 카드 — market_price 결과. */
+export interface QuoteCard {
+	kind: "quote-card";
+	quote: {
+		symbol: string;
+		name: string;
+		market: "domestic" | "overseas";
+		exchange?: string;
+		currency: "KRW" | "USD";
+		price: number;
+		change: number;
+		changePct: number;
+		volume: number | null;
+		per: number | null;
+		pbr: number | null;
+		high52: number | null;
+		low52: number | null;
+		/** 어느 증권사 시세인지 — 토스는 전일대비를 주지 않아 표시가 달라진다 */
+		source: "kis" | "toss";
+	};
+}
+
+export interface BrokerHolding {
+	/** 어느 증권사 계좌인가 (KIS·토스를 함께 쓰면 합산되므로 구분이 필요하다) */
+	broker: "kis" | "toss";
+	symbol: string;
+	name: string;
+	market: "domestic" | "overseas";
+	currency: "KRW" | "USD";
+	quantity: number;
+	avgPrice: number;
+	price: number;
+	value: number;
+	profit: number;
+	profitPct: number;
+	valueKrw: number;
+}
+
+/** 보유종목 카드 — portfolio_holdings 결과. */
+export interface HoldingsCard {
+	kind: "holdings-card";
+	holdings: BrokerHolding[];
+	/** 실제로 조회에 성공한 증권사 */
+	brokers: string[];
+	stockValueKrw: number;
+	cashKrw: number;
+	profitKrw: number;
+	usdKrw: number;
+}
+
+/** 시장 랭킹 카드 — market_movers 결과. */
+export interface MoversCard {
+	kind: "movers-card";
+	title: string;
+	market: "KR" | "US";
+	rankedAt: string | null;
+	movers: Array<{
+		rank: number;
+		symbol: string;
+		name: string;
+		currency: "KRW" | "USD";
+		price: number;
+		changePct: number;
+		tradingAmount: number;
+		tradingVolume: number;
+	}>;
+}
+
+/** 뉴스 카드 — market_news 결과. */
+export interface NewsCard {
+	kind: "news-card";
+	query: string;
+	items: Array<{ title: string; summary: string; link: string; date: string }>;
+}
+
+/**
+ * 주문 확인 카드 — order_prepare 결과.
+ *
+ * ⚠️ 이 카드의 [확인] 버튼이 **실제 주문이 나가는 유일한 경로**다.
+ *    ok=false 면 token 이 null 이고 errors 만 표시한다.
+ */
+export interface OrderPreviewCard {
+	kind: "order-preview-card";
+	ok: boolean;
+	token: string | null;
+	expiresAt: number | null;
+	broker: "toss";
+	symbol: string;
+	name: string;
+	side: "BUY" | "SELL";
+	orderType: "LIMIT" | "MARKET";
+	quantity: number;
+	price: number | null;
+	estimatedAmount: number;
+	currency: "KRW" | "USD";
+	warnings: string[];
+	errors: string[];
+}
+
+export interface BrokerOrder {
+	orderId: string;
+	symbol: string;
+	side: "BUY" | "SELL";
+	orderType: "LIMIT" | "MARKET";
+	status: string;
+	price: string | null;
+	quantity: string;
+	currency: string;
+	orderedAt: string;
+	execution?: { filledQuantity: string; averageFilledPrice: string | null };
+}
+
+/** 주문 목록 카드 — order_list 결과. */
+export interface OrderListCard {
+	kind: "order-list-card";
+	status: "OPEN" | "CLOSED";
+	orders: BrokerOrder[];
+}
+
+/** 자산 현황 카드 — finance_overview 결과 (투자 + 가계부). */
+export interface OverviewCard {
+	kind: "overview-card";
+	from: string;
+	to: string;
+	investKrw: number;
+	cashKrw: number;
+	profitKrw: number;
+	income: number;
+	expense: number;
+	surplus: number;
+}
+
+export type UICard =
+	| LedgerTxCard
+	| LedgerSummaryCard
+	| LedgerTableCard
+	| LedgerBudgetCard
+	| TechnicalCard
+	| PortfolioSignalsCard
+	| FinancialsCard
+	| QuoteCard
+	| HoldingsCard
+	| MoversCard
+	| NewsCard
+	| OrderPreviewCard
+	| OrderListCard
+	| OverviewCard;
+
+// ── 메시지 ──────────────────────────────────────────────────────────────
+
+export interface UIToolResult {
+	text: string;
+	isError: boolean;
+	card?: UICard;
+}
+
+export type UIContentBlock =
+	| { type: "text"; text: string }
+	| { type: "toolCall"; id: string; name: string; args: unknown; result?: UIToolResult }
+	| { type: "image"; dataUrl?: string };
+
+export interface UIMessage {
+	role: "user" | "assistant" | "custom";
+	content: UIContentBlock[];
+	errorMessage?: string;
+}
+
+// ── WebSocket ───────────────────────────────────────────────────────────
+
+export type ClientMessage =
+	| { type: "auth"; token: string }
+	| { type: "prompt"; text: string }
+	| { type: "steer"; text: string }
+	| { type: "abort" }
+	| { type: "new_session" }
+	| { type: "ping" };
+
+export interface ReadyMessage {
+	type: "ready";
+	sessionId: string;
+	model: string;
+	ledgerEnabled: boolean;
+	isStreaming: boolean;
+	messages: UIMessage[];
+}
+
+/**
+ * 서버가 보내는 스트리밍 이벤트 — pi 이벤트를 UI가 쓰는 최소 형태로 좁힌 것.
+ * 원본 이벤트를 그대로 흘리지 않는 이유: 사고 토큰 노출 방지 + 페이로드 축소.
+ */
+export type StreamMessage =
+	| ReadyMessage
+	| { type: "text_delta"; delta: string }
+	| { type: "message_end"; messages: UIMessage[] }
+	| { type: "tool_start"; id: string; name: string; args: unknown }
+	| { type: "tool_end"; id: string; name: string; isError: boolean }
+	| { type: "agent_start" }
+	| { type: "agent_end" }
+	| { type: "error"; message: string }
+	| { type: "pong" };
+
+// ── 가계부 REST ─────────────────────────────────────────────────────────
+
+export interface LedgerTransaction {
+	id: string;
+	date: string;
+	amount: number;
+	currency: string;
+	category: string | null;
+	merchant: string | null;
+	memo: string | null;
+	account: string | null;
+	source: string;
+	/** 기록한 사람 (가계부는 가구 공유) */
+	member: string | null;
+	created_at: string;
+}
+
+export interface LedgerSummaryRow {
+	key: string;
+	income: number;
+	expense: number;
+	net: number;
+	count: number;
+}
+
+export interface LedgerBudgetRow {
+	month: string;
+	category: string;
+	limit_amt: number;
+	spent: number;
+	remaining: number;
+	usedPct: number;
+}

@@ -1,0 +1,238 @@
+version: "3"
+
+# AlphaFolio 로컬 개발용 태스크
+#
+#   task            사용 가능한 태스크 목록
+#   task setup      최초 1회 준비
+#   task dev        서버 + 웹 동시 실행 (개발)
+#
+# .env 는 자동으로 읽는다 (task 의 dotenv). 없으면 task setup 이 만들어준다.
+
+dotenv: [".env"]
+
+vars:
+  PORT: '{{.AF_PORT | default "8080"}}'
+  WEB_PORT: "5173"
+  LOG: ".data/server.log"
+  IMAGE: "alphafolio:local"
+
+tasks:
+  default:
+    desc: 태스크 목록
+    silent: true
+    cmds:
+      - task --list
+
+  # ── 준비 ────────────────────────────────────────────────────────────
+  setup:
+    desc: 최초 1회 — 의존성 설치 + pi 확장 설치 + .env 생성 + 키 생성
+    cmds:
+      - pnpm install
+      - task: agent:install
+      - task: env:init
+      - echo ""
+      - echo "준비 완료. 'task dev' 로 실행하세요."
+
+  env:init:
+    desc: .env 가 없으면 만들고 AF_AUTH_SECRET·비밀번호를 채운다
+    status:
+      - test -f .env
+    cmds:
+      - cp .env.example .env
+      - |
+        SECRET=$(openssl rand -hex 32)
+        PW=$(openssl rand -base64 9 | tr -d '/+=')
+        # macOS/GNU sed 차이를 피하려고 임시 파일로 치환한다
+        awk -v s="$SECRET" -v p="$PW" '
+          /^AF_AUTH_SECRET=$/ { print "AF_AUTH_SECRET=" s; next }
+          /^AF_AUTH_PASSWORD=$/ { print "AF_AUTH_PASSWORD=" p; next }
+          { print }
+        ' .env > .env.tmp && mv .env.tmp .env
+        echo ""
+        echo "  .env 생성됨"
+        echo "  아이디   : $(grep '^AF_AUTH_USER=' .env | cut -d= -f2-)"
+        echo "  비밀번호 : $PW"
+        echo ""
+        echo "  ⚠️  가계부를 쓰려면 .env 의 AF_D1_* 세 값을 채우세요."
+
+  # ── 개발 ────────────────────────────────────────────────────────────
+  dev:
+    desc: 서버 + 웹 dev 서버 동시 실행 (웹은 http://localhost:5173)
+    cmds:
+      # task up 으로 띄워둔 백그라운드 서버가 있으면 포트가 겹친다 (EADDRINUSE).
+      # deps 는 병렬 실행이라 여기서 순차로 먼저 정리한다.
+      - task: down
+      - task: dev:both
+
+  dev:both:
+    internal: true
+    deps: [dev:server, dev:web]
+
+  dev:server:
+    desc: 서버만 (파일 변경 시 자동 재시작)
+    cmds:
+      - node --watch apps/server/src/index.ts
+
+  dev:web:
+    desc: 웹 dev 서버만 (HMR, /api·/ws 는 서버로 프록시)
+    cmds:
+      - pnpm --filter @alphafolio/web dev
+
+  # ── 단일 포트 실행 (빌드된 웹을 서버가 서빙) ──────────────────────────
+  start:
+    desc: 웹 빌드 후 서버 실행 (포그라운드, http://localhost:{{.PORT}})
+    deps: [build]
+    cmds:
+      - node apps/server/src/index.ts
+
+  up:
+    desc: 백그라운드 실행 + 접속 정보 출력
+    deps: [build]
+    cmds:
+      - task: down
+      - mkdir -p .data
+      - nohup node apps/server/src/index.ts > {{.LOG}} 2>&1 &
+      - sleep 4
+      - |
+        for i in $(seq 1 20); do
+          curl -sf http://127.0.0.1:{{.PORT}}/api/health >/dev/null && break
+          sleep 1
+        done
+        echo ""
+        echo "  URL      http://localhost:{{.PORT}}"
+        echo "  아이디    $(grep '^AF_AUTH_USER=' .env | cut -d= -f2-)"
+        echo "  비밀번호  $(grep '^AF_AUTH_PASSWORD=' .env | cut -d= -f2-)"
+        echo ""
+        echo "  로그: task logs   /   중지: task down"
+
+  down:
+    desc: 백그라운드 서버 중지
+    cmds:
+      # task 의 기본 셸(mvdan/sh)에는 kill 빌트인이 없어서 pkill 을 쓴다.
+      # 패턴이 없으면 pkill 이 1을 반환하므로 if 로 감싼다.
+      - |
+        if pkill -f "node .*apps/server/src/index.ts"; then
+          echo "중지됨"
+        else
+          echo "실행 중인 서버 없음"
+        fi
+
+  logs:
+    desc: 서버 로그 따라가기
+    cmds:
+      - tail -f {{.LOG}}
+
+  # ── 검증 ────────────────────────────────────────────────────────────
+  check:
+    desc: 타입체크 + 단위테스트 + 웹 빌드 + 스모크
+    cmds:
+      - task: typecheck
+      - task: test
+      - task: build
+      - task: smoke
+
+  test:
+    desc: 단위 테스트 (주문 검증·확인 토큰 — 실제 주문 없이 돌아간다)
+    cmds:
+      - pnpm -r --if-present test
+
+  typecheck:
+    desc: 전체 워크스페이스 타입체크
+    cmds:
+      - pnpm -r --if-present typecheck
+
+  build:
+    desc: 웹 빌드 (apps/web/dist)
+    # sources/generates 지문 캐시를 쓰지 않는다 — 변경을 놓치면 옛 번들이 서빙되는데,
+    # vite 빌드가 1초라 캐시로 아낄 게 없다. (실제로 한 번 놓쳐서 뺐다)
+    cmds:
+      - pnpm --filter @alphafolio/web build
+
+  smoke:
+    desc: 기동→로그인→가계부→WS 대화 전 구간 검증
+    cmds:
+      - rm -rf .data/smoke
+      - node apps/server/scripts/smoke.mjs
+
+  agent:install:
+    desc: pi 확장 설치 (agent-config/npm — web_search·fetch_content 등)
+    # pi 는 <agentDir>/npm/node_modules/<name> 에서 확장을 찾는다.
+    # 상위 pnpm 워크스페이스를 타지 않도록 agent-config/npm 에 자체 package.json 을 둔다.
+    dir: agent-config/npm
+    cmds:
+      - npm install --no-audit --no-fund
+
+  agent:web-config:
+    desc: 로컬 pi 의 검색 설정을 agent-config 로 복사 (web_search 활성화)
+    cmds:
+      - |
+        SRC="$HOME/.pi/agent/web-search.json"
+        if [ ! -f "$SRC" ]; then
+          echo "$SRC 가 없습니다. pi 에서 웹 검색을 먼저 설정하거나 agent-config/web-search.json 을 직접 만드세요."
+          exit 1
+        fi
+        cp "$SRC" agent-config/web-search.json
+        # 확장의 자체 요약(auto-summary)은 별도 LLM 인증이 필요해 끈다 — 에이전트가 직접 요약한다
+        node -e '
+          const fs=require("fs"), p="agent-config/web-search.json";
+          const j=JSON.parse(fs.readFileSync(p,"utf8"));
+          j.workflow="none"; delete j.summaryModel;
+          fs.writeFileSync(p, JSON.stringify(j,null,2)+"\n");
+        '
+        echo "agent-config/web-search.json 준비 완료 (gitignore 대상 — 시크릿 포함)"
+
+  # ── 도구 ────────────────────────────────────────────────────────────
+  hash:
+    desc: 'AF_USERS 용 비밀번호 해시 생성 (task hash -- ''비번1'' ''비번2'')'
+    cmds:
+      - node apps/server/scripts/hash-password.mjs {{.CLI_ARGS}}
+
+  d1:doctor:
+    desc: D1 자격증명 진단 (401/403 원인 좁히기)
+    cmds:
+      - node spike/00-d1-doctor.ts
+
+  export:
+    desc: 가계부 전체 내보내기 (백업 — Time Travel 이 무료 7일뿐이라 필요)
+    cmds:
+      - |
+        mkdir -p backups
+        OUT="backups/ledger-$(date +%Y%m%d-%H%M%S).json"
+        TOKEN=$(curl -s -X POST http://127.0.0.1:{{.PORT}}/api/auth/login \
+          -H 'content-type: application/json' \
+          -d "{\"user\":\"$AF_AUTH_USER\",\"password\":\"$AF_AUTH_PASSWORD\"}" \
+          | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+        curl -s http://127.0.0.1:{{.PORT}}/api/ledger/export -H "authorization: Bearer $TOKEN" > "$OUT"
+        echo "저장: $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"
+
+  # ── 컨테이너 ────────────────────────────────────────────────────────
+  docker:build:
+    desc: 이미지 빌드
+    cmds:
+      - docker build -f infra/Dockerfile -t {{.IMAGE}} .
+
+  docker:up:
+    desc: compose 로 실행 (infra/compose.yaml 필요)
+    preconditions:
+      - sh: test -f infra/compose.yaml
+        msg: "infra/compose.yaml 이 없습니다. cp infra/compose.example.yaml infra/compose.yaml 후 키를 채우세요."
+    cmds:
+      - docker compose -f infra/compose.yaml up -d --build
+
+  docker:logs:
+    desc: 컨테이너 로그
+    cmds:
+      - docker compose -f infra/compose.yaml logs -f
+
+  docker:down:
+    desc: 컨테이너 중지
+    cmds:
+      - docker compose -f infra/compose.yaml down
+
+  # ── 정리 ────────────────────────────────────────────────────────────
+  clean:
+    desc: 빌드 산출물·로컬 런타임 데이터 삭제 (.env 는 남긴다)
+    prompt: .data (대화 세션 포함) 와 apps/web/dist 를 삭제합니다. 계속할까요?
+    cmds:
+      - rm -rf apps/web/dist .data
+      - echo "삭제 완료"

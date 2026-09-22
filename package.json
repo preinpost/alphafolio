@@ -1,0 +1,27 @@
+{
+  "name": "alphafolio",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AlphaFolio — pi SDK 기반 개인 금융 에이전트 (투자 + 가계부)",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "spike:sdk": "node spike/01-sdk-session.ts",
+    "spike:d1": "node spike/02-d1.ts",
+    "spike:agent-ledger": "node spike/03-agent-ledger.ts",
+    "dev": "pnpm --filter @alphafolio/server dev",
+    "start": "pnpm --filter @alphafolio/server start",
+    "smoke": "node apps/server/scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "pnpm": {
+    "comment": "@google/genai·protobufjs 의 postinstall 은 우리 코드 경로에 필요 없다 (빌드 스크립트 미실행).",
+    "onlyBuiltDependencies": []
+  }
+}

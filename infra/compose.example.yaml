@@ -1,0 +1,78 @@
+# AlphaFolio — compose 템플릿
+#
+#   cp infra/compose.example.yaml infra/compose.yaml
+#   # compose.yaml 에 실제 키 입력 (compose.yaml 은 gitignore 대상)
+#   docker compose -f infra/compose.yaml up -d --build
+#
+# 외부 노출은 리버스 프록시에 맡긴다 (TLS·도메인). 컨테이너는 평문 HTTP만 연다.
+
+services:
+  alphafolio:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    image: alphafolio:local
+    container_name: alphafolio
+    restart: unless-stopped
+
+    ports:
+      # 프록시가 같은 호스트에 있으면 루프백 바인딩을 권장한다 (외부 직접 노출 차단)
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # 대화 이력 보존 — 없으면 컨테이너 재시작 때마다 세션이 사라진다.
+      # 가계부 데이터는 D1(원격)이라 이 볼륨과 무관하다.
+      - alphafolio-data:/data
+      # (b) 호스트 pi 로그인 재사용 시 — 읽기 전용 마운트
+      # - ${HOME}/.pi/agent/auth.json:/secrets/auth.json:ro
+      # 웹 검색 설정 (검색 프로바이더 키 포함) — 필요할 때만
+      # - ./web-search.json:/app/agent-config/web-search.json:ro
+
+    environment:
+      # ── 로그인 (여러 명이 한 컨테이너를 공유한다) ──────────────
+      # 해시 생성: node apps/server/scripts/hash-password.mjs '비밀번호'
+      AF_USERS: >-
+        [{"name":"user1","passwordHash":"scrypt$..."},
+         {"name":"user2","passwordHash":"scrypt$..."}]
+      # ⚠️ 반드시 고정할 것. 비우면 재시작마다 모든 로그인 토큰이 무효화된다.
+      #    생성: openssl rand -hex 32
+      AF_AUTH_SECRET: ""
+
+      # ── 모델 ──────────────────────────────────────────────────
+      AF_DEFAULT_MODEL: openrouter/deepseek/deepseek-v4.1-flash
+      # 아래 둘 중 하나로 LLM 인증을 준다.
+      #  (a) API 키를 env로 주입 (권장 — 배포 정석)
+      OPENROUTER_API_KEY: ""
+      #  (b) 호스트의 pi OAuth 로그인을 재사용 — volumes 의 auth.json 마운트를 함께 켠다
+      # AF_PI_AUTH_PATH: /secrets/auth.json
+
+      # 유휴 런타임 정리 기준(분). 접속이 없으면 세션을 메모리에서 내린다
+      AF_IDLE_MINUTES: "60"
+
+      # ── 웹 검색 (선택) ─────────────────────────────────────────
+      # pi-web-access 는 <agentDir>/web-search.json 을 읽는다. 시크릿이 들어가므로
+      # 이미지에 넣지 말고 파일로 마운트한다 (volumes 참고).
+
+      # ── 가계부 (Cloudflare D1) — 가구 공유, 기록자만 구분된다 ──
+      AF_D1_ACCOUNT_ID: ""
+      AF_D1_DATABASE_ID: ""
+      AF_D1_TOKEN: ""
+
+      # ── 증권·시세 ──────────────────────────────────────────────
+      # 사람마다 다른 증권 계정을 쓰므로 **앱의 설정 화면에서 개인별로 입력**한다
+      # (D1 의 user_secrets 에 암호화 저장). 아래 env 는 전 사용자 공통 기본값일
+      # 뿐이라 가족이 함께 쓸 때는 비워두는 편이 낫다.
+      KIS_APP_KEY: ""
+      KIS_APP_SECRET: ""
+      KIS_ACCOUNT_NO: ""
+      # 모의투자로 붙이려면 paper (모의계좌는 별도 앱키가 필요하다)
+      AF_KIS_ENV: real
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  alphafolio-data:

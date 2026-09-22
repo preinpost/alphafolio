@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+.git
+.data
+.env
+.env.*
+!.env.example
+apps/web/dist
+apps/mobile/ios
+spike
+*.log
+.DS_Store

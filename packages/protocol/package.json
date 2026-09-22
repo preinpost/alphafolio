@@ -1,0 +1,13 @@
+{
+  "name": "@alphafolio/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "서버 ↔ 웹/모바일 공용 프로토콜 타입 — UI 메시지, 카드(details) 계약, WS 메시지.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

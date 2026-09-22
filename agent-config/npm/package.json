@@ -1,0 +1,8 @@
+{
+  "name": "alphafolio-agent-packages",
+  "private": true,
+  "description": "pi 확장 패키지 설치 위치. pi 는 <agentDir>/npm/node_modules/<name> 에서 확장을 찾는다.",
+  "dependencies": {
+    "pi-web-access": "^0.30.0"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@alphafolio/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "pi SDK 접촉면 격리 — 세션 런타임 생성/교체, persona, 툴 조립. SDK 업그레이드로 깨지는 범위를 이 패키지 안으로 국한시킨다 (PLAN.md §11-2).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@alphafolio/ledger": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
