@@ -14,10 +14,10 @@ interface Props {
 }
 
 const SUGGESTIONS = [
-	"어제 김밥천국에서 8천원 썼어",
+	"내 보유 종목 점검해줘",
+	"삼성전자 기술적 분석 해줘",
+	"오늘 증시 주도주 어디야?",
 	"이번 달 얼마나 썼어?",
-	"삼성전자 지금 얼마야?",
-	"내 자산 현황 보여줘",
 ];
 
 export function MessageList({ messages, pending, streaming, runningTools }: Props) {

@@ -36,7 +36,7 @@ import { loadConfig, loadDotEnv } from "./config.ts";
 import { handleLedger, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
-import { SECRET_CATALOG, SecretStore, specFor } from "./secrets.ts";
+import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
 import { serializeMessages } from "./serialize.ts";
 import { authenticate, hasUser, loadUsers } from "./users.ts";
 import { attachWebSocket } from "./ws.ts";
@@ -206,6 +206,20 @@ async function main(): Promise<void> {
 		return { token, expiresAt: payload.exp };
 	};
 
+	/**
+	 * 사용자가 **직접 저장한** LLM 키만 런타임에 넘긴다. env 값까지 넘기면
+	 * auth.json 의 OAuth 로그인을 env 키가 덮어버릴 수 있다 (pi 의 원래 우선순위를 존중).
+	 */
+	const llmKeys = (user: string): Record<string, string> => {
+		const out: Record<string, string> = {};
+		for (const [name, providerId] of Object.entries(LLM_SECRET_PROVIDERS)) {
+			if (secrets.sourceOf(name, user) !== "user") continue;
+			const key = secrets.get(name, user);
+			if (key) out[providerId] = key;
+		}
+		return out;
+	};
+
 	// 사용자별 런타임 — 하나를 공유하면 두 사람의 대화와 세션이 섞인다.
 	const runtimes = new RuntimeManager({
 		dataDir: cfg.dataDir,
@@ -216,6 +230,7 @@ async function main(): Promise<void> {
 		brokerAccess,
 		naverCreds,
 		prepareOrder,
+		llmKeys,
 		idleMinutes: cfg.idleMinutes,
 	});
 
@@ -315,6 +330,9 @@ async function main(): Promise<void> {
 				} catch (err) {
 					throw new HttpError(400, err instanceof Error ? err.message : String(err));
 				}
+				// LLM 키는 떠 있는 런타임에 바로 반영 (재시작·재로그인 불필요)
+				const llmProvider = LLM_SECRET_PROVIDERS[name];
+				if (llmProvider) await runtimes.applyLlmKey(user, llmProvider, secrets.get(name, user) ?? null);
 				json(res, 200, { items: secrets.status(user) });
 				return;
 			}
@@ -323,6 +341,9 @@ async function main(): Promise<void> {
 				const name = decodeURIComponent(path.slice("/api/secrets/".length));
 				if (!specFor(name)) throw new HttpError(400, `알 수 없는 키입니다: ${name}`);
 				await secrets.remove(name, user);
+				// 제거하면 서버 기본(auth.json·env)으로 되돌아간다
+				const llmProvider = LLM_SECRET_PROVIDERS[name];
+				if (llmProvider) await runtimes.applyLlmKey(user, llmProvider, null);
 				json(res, 200, { items: secrets.status(user) });
 				return;
 			}

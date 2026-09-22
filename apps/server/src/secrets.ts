@@ -43,12 +43,12 @@ export const SECRET_CATALOG: readonly SecretSpec[] = [
 	{ name: "TOSS_CLIENT_ID", label: "토스증권 Client ID", group: "증권 (토스)" },
 	{ name: "TOSS_CLIENT_SECRET", label: "토스증권 Client Secret", group: "증권 (토스)" },
 
-	{ name: "OPENROUTER_API_KEY", label: "OpenRouter API 키", group: "LLM" },
-	{ name: "ANTHROPIC_API_KEY", label: "Anthropic API 키", group: "LLM" },
+	// 입력하면 내 계정으로 과금된다. 비워두면 서버 기본 로그인(auth.json·env)을 쓴다.
+	{ name: "OPENROUTER_API_KEY", label: "OpenRouter API 키", group: "LLM", hint: "비우면 서버 기본 계정" },
+	{ name: "ANTHROPIC_API_KEY", label: "Anthropic API 키", group: "LLM", hint: "비우면 서버 기본 계정" },
 
-	{ name: "TWELVE_DATA_API_KEY", label: "Twelve Data 키", group: "시세" },
-	{ name: "FINNHUB_API_KEY", label: "Finnhub 키", group: "시세" },
-	{ name: "COINGECKO_API_KEY", label: "CoinGecko 키", group: "시세" },
+	// Twelve Data·Finnhub·CoinGecko 는 쓰는 툴이 없어 뺐다 (넣어도 아무 일도 안 일어나는 칸이었다).
+	// 해당 시세 소스를 붙일 때 여기와 툴을 같이 추가한다.
 	{
 		name: "NCP_APIGW_API_KEY_ID",
 		label: "네이버 API Key ID",
@@ -57,6 +57,12 @@ export const SECRET_CATALOG: readonly SecretSpec[] = [
 	},
 	{ name: "NCP_APIGW_API_KEY", label: "네이버 API Key", group: "뉴스 (네이버)" },
 ];
+
+/** LLM 키 시크릿 → pi 프로바이더 ID. 여기 없는 LLM 키는 런타임에 전달되지 않는다. */
+export const LLM_SECRET_PROVIDERS: Readonly<Record<string, string>> = {
+	OPENROUTER_API_KEY: "openrouter",
+	ANTHROPIC_API_KEY: "anthropic",
+};
 
 const BY_NAME = new Map(SECRET_CATALOG.map((s) => [s.name, s]));
 

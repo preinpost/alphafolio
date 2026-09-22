@@ -40,6 +40,12 @@ export interface RuntimeOptions {
 	 */
 	authPath?: string;
 	/**
+	 * 사용자가 설정 화면에서 넣은 LLM API 키 (providerId → key).
+	 * auth.json·env 보다 우선하며 **메모리에만** 올린다 — pi 의 setRuntimeApiKey 는
+	 * 파일에 쓰지 않으므로 공유 auth.json 에 남의 키가 섞이지 않는다.
+	 */
+	apiKeys?: Record<string, string>;
+	/**
 	 * 비활성화할 툴 이름 (거부목록).
 	 *
 	 * 허용목록(`tools`)을 쓰면 **확장이 등록한 툴까지 전부 막힌다** — pi-web-access 같은
@@ -74,6 +80,8 @@ export interface AlphaFolioRuntime {
 	readonly modelLabel: string;
 	/** 현재 모델에 노출된 툴 이름 — 확장 로딩 확인·진단용. */
 	readonly toolNames: string[];
+	/** 사용자 LLM 키 교체/제거 (null = 제거 → auth.json·env 로 되돌아간다). 재시작 불필요. */
+	setApiKey(providerId: string, key: string | null): Promise<void>;
 	dispose(): Promise<void>;
 }
 
@@ -84,6 +92,10 @@ export async function createAlphaFolioRuntime(opts: RuntimeOptions): Promise<Alp
 		modelsPath: join(opts.agentDir, "models.json"),
 		...(opts.authPath ? { authPath: opts.authPath } : {}),
 	});
+	// 모델 해석 전에 넣어야 해당 프로바이더가 "인증됨"으로 잡힌다
+	for (const [providerId, key] of Object.entries(opts.apiKeys ?? {})) {
+		await modelRuntime.setRuntimeApiKey(providerId, key);
+	}
 
 	const resolved = opts.model ? resolveCliModel({ cliModel: opts.model, modelRuntime }) : undefined;
 	if (resolved?.error) throw new Error(`모델 해석 실패 (${opts.model}): ${resolved.error}`);
@@ -166,6 +178,10 @@ export async function createAlphaFolioRuntime(opts: RuntimeOptions): Promise<Alp
 		},
 		get messages() {
 			return runtime.session.messages;
+		},
+		async setApiKey(providerId, key) {
+			if (key) await modelRuntime.setRuntimeApiKey(providerId, key);
+			else await modelRuntime.removeRuntimeApiKey(providerId);
 		},
 		get modelLabel() {
 			const m = runtime.session.model;

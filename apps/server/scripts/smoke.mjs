@@ -38,7 +38,7 @@ const server = spawn(process.execPath, [join(ROOT, "apps/server/src/index.ts")],
 		]),
 		AF_AUTH_SECRET: SECRET,
 		// env 폴백 검증용 (카탈로그에 있는 사용자 스코프 키)
-		FINNHUB_API_KEY: "env-fallback-value-xyz",
+		NCP_APIGW_API_KEY_ID: "env-fallback-value-xyz",
 		AF_DATA_DIR: join(ROOT, ".data/smoke"),
 		// 시도 제한을 짧게 잡아 테스트 가능하게 한다 (기본 5회/300초 → 900초 잠금)
 		AF_LOGIN_MAX_ATTEMPTS: "3",
@@ -233,22 +233,22 @@ async function main() {
 	check("D1에 저장됨 (파일 아님)", s1.storageReady === true, `storageReady=${s1.storageReady}`);
 
 	// env 폴백 — 저장값이 없으면 서버 env 를 쓴다
-	const finn = s1.items.find((i) => i.name === "FINNHUB_API_KEY");
-	check("저장값 없으면 env 폴백", finn.source === "env", finn.source);
+	const naverId = s1.items.find((i) => i.name === "NCP_APIGW_API_KEY_ID");
+	check("저장값 없으면 env 폴백", naverId.source === "env", naverId.source);
 
 	// 저장값이 env 를 덮는지 → 삭제하면 다시 env 로 돌아오는지
 	await fetch(`${BASE}/api/secrets`, {
 		method: "PUT",
 		headers: { ...authed, "content-type": "application/json" },
-		body: JSON.stringify({ name: "FINNHUB_API_KEY", value: "my-own-finnhub-key" }),
+		body: JSON.stringify({ name: "NCP_APIGW_API_KEY_ID", value: "my-own-naver-key-id" }),
 	});
 	const s1b = await (await fetch(`${BASE}/api/secrets`, { headers: authed })).json();
-	check("저장값이 env 보다 우선", s1b.items.find((i) => i.name === "FINNHUB_API_KEY").source === "user");
+	check("저장값이 env 보다 우선", s1b.items.find((i) => i.name === "NCP_APIGW_API_KEY_ID").source === "user");
 
-	await fetch(`${BASE}/api/secrets/FINNHUB_API_KEY`, { method: "DELETE", headers: authed });
+	await fetch(`${BASE}/api/secrets/NCP_APIGW_API_KEY_ID`, { method: "DELETE", headers: authed });
 	await fetch(`${BASE}/api/secrets/KIS_APP_KEY`, { method: "DELETE", headers: authed });
 	const s1c = await (await fetch(`${BASE}/api/secrets`, { headers: authed })).json();
-	check("삭제 후 env 값으로 폴백", s1c.items.find((i) => i.name === "FINNHUB_API_KEY").source === "env");
+	check("삭제 후 env 값으로 폴백", s1c.items.find((i) => i.name === "NCP_APIGW_API_KEY_ID").source === "env");
 
 	const d1test = await (await fetch(`${BASE}/api/secrets/test/d1`, { method: "POST", headers: authed })).json();
 	check("D1 연결 테스트", d1test.ok === true, d1test.message);

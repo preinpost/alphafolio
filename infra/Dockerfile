@@ -72,8 +72,7 @@ ENV NODE_ENV=production \
     AF_PORT=8080 \
     AF_WEB_DIR=/app/apps/web/dist \
     AF_AGENT_DIR=/app/agent-config \
-    PI_CODING_AGENT_DIR=/app/agent-config \
-    KIS_SECRET_STORE=file
+    PI_CODING_AGENT_DIR=/app/agent-config
 
 EXPOSE 8080
 

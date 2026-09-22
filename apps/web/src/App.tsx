@@ -25,7 +25,7 @@ export function App() {
 				</div>
 
 				<nav className="flex gap-1 rounded-lg bg-inset p-0.5">
-					{(["chat", "ledger", "portfolio", "settings"] as const).map((v) => (
+					{(["chat", "portfolio", "ledger", "settings"] as const).map((v) => (
 						<button
 							key={v}
 							onClick={() => setView(v)}

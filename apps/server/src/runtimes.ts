@@ -36,6 +36,8 @@ export interface RuntimeManagerOptions {
 	 * /api/orders/execute 를 호출해야 한다.
 	 */
 	prepareOrder: (user: string) => NonNullable<Parameters<typeof createBrokerTools>[0]["prepareOrder"]>;
+	/** 사용자가 직접 저장한 LLM 키 (providerId → key). env 값은 넣지 않는다 — pi 가 알아서 읽는다. */
+	llmKeys: (user: string) => Record<string, string>;
 	/** 유휴 정리 기준(분). 0이면 정리하지 않는다. */
 	idleMinutes: number;
 }
@@ -105,6 +107,7 @@ export class RuntimeManager {
 			sessionsDir,
 			model: this.opts.model,
 			authPath: this.opts.authPath,
+			apiKeys: this.opts.llmKeys(user),
 			excludeTools: EXCLUDED_TOOLS,
 			customTools: [
 				// 가계부는 공유(한 D1)지만 기록자는 사용자별로 박힌다
@@ -140,6 +143,15 @@ export class RuntimeManager {
 		if (!entry) return;
 		entry.refCount = Math.max(0, entry.refCount - 1);
 		entry.lastActive = Date.now();
+	}
+
+	/**
+	 * 설정 화면에서 LLM 키가 바뀌었을 때 떠 있는 런타임에 반영한다.
+	 * 런타임이 없으면 할 일이 없다 — 다음 생성 때 llmKeys 로 읽힌다.
+	 */
+	async applyLlmKey(user: string, providerId: string, key: string | null): Promise<void> {
+		const entry = this.entries.get(user);
+		if (entry) await entry.runtime.setApiKey(providerId, key);
 	}
 
 	touch(user: string): void {
