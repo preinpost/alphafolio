@@ -110,6 +110,41 @@ export interface FinancialsCard {
 	yoy: { revenue: number | null; operatingProfit: number | null; netIncome: number | null } | null;
 }
 
+/**
+ * 타점 판정 카드 — market_timing 결과.
+ * 판정은 규칙 기반이며 매매 권유가 아니다 (카드에 고정 표시).
+ */
+export interface TimingCard {
+	kind: "timing-card";
+	symbol: string;
+	name: string;
+	currency: "KRW" | "USD";
+	result: {
+		verdict: "매수" | "매도" | "관망";
+		summary: string;
+		layers: Array<{ name: string; state: "우호" | "비우호" | "중립"; reasons: string[] }>;
+		scenarios: Array<{
+			id: string;
+			title: string;
+			trigger: string;
+			triggerPrice: number | null;
+			action: string;
+			weightPct: number;
+		}>;
+		price: number;
+		stopLoss: number | null;
+		target1: number | null;
+		target2: number | null;
+		riskReward: number | null;
+		breakeven: number;
+		roundTripCostPct: number;
+		sizing: { riskPct: number; riskBudgetKrw: number; quantity: number } | null;
+		holding: { quantity: number; avgPrice: number; pnlPct: number } | null;
+		snapshot: { lastDate: string; bars: number; rsi: number | null; trend: string };
+	};
+	notes: string[];
+}
+
 /** 보유 종목 일괄 점검 카드 — portfolio_signals 결과. */
 export interface PortfolioSignalsCard {
 	kind: "portfolio-signals-card";
@@ -266,6 +301,7 @@ export type UICard =
 	| LedgerBudgetCard
 	| TechnicalCard
 	| PortfolioSignalsCard
+	| TimingCard
 	| FinancialsCard
 	| QuoteCard
 	| HoldingsCard

@@ -27,7 +27,9 @@ import {
 	type FinancialPeriod,
 } from "./financials.ts";
 import { analyze, type IndicatorSnapshot } from "./indicators.ts";
+import type { KisContext } from "./kis/client.ts";
 import { resolveName } from "./names.ts";
+import { evaluateTiming, type TimingResult } from "./timing.ts";
 import { marketOf, validateOrder, type OrderSide, type OrderType } from "./orders.ts";
 import { defaultAccountSeq, tossBuyingPower } from "./toss/api.ts";
 import { listOrders, sellableQuantity } from "./toss/orders.ts";
@@ -99,6 +101,21 @@ export interface FinancialsDetails {
 	periods: FinancialPeriod[];
 	consensus: Consensus;
 	yoy: { revenue: number | null; operatingProfit: number | null; netIncome: number | null } | null;
+}
+
+/**
+ * 타점 판정 카드. 판정은 **규칙 기반**이며 매매 권유가 아니다 — 카드에 고정 표시한다.
+ */
+export interface TimingDetails {
+	kind: "timing-card";
+	symbol: string;
+	name: string;
+	currency: "KRW" | "USD";
+	result: Omit<TimingResult, "snapshot"> & {
+		snapshot: Pick<IndicatorSnapshot, "lastDate" | "bars" | "rsi" | "trend" | "ma20" | "support" | "resistance">;
+	};
+	/** 판정에 쓰지 못한 입력 (재무 조회 실패 등) */
+	notes: string[];
 }
 
 export interface PortfolioSignalsDetails {
@@ -191,6 +208,26 @@ const PERIOD_ENUM = Type.Union(
 	{ description: "조회 기간 (기본 this_month)" },
 );
 
+/**
+ * 국내 재무 + 컨센서스 묶음 조회 (market_financials · market_timing 공용).
+ * 컨센서스는 실패해도 재무는 돌려주되, 실패와 미커버를 섞지 않는다.
+ */
+async function loadFinancials(
+	ctx: KisContext,
+	symbol: string,
+	limit: number,
+): Promise<{ periods: FinancialPeriod[]; consensus: Consensus; yoy: ReturnType<typeof yoyChange> }> {
+	const [ratiosRes, incomeRes, consensus] = await Promise.all([
+		domesticFinancialRatios(ctx, symbol),
+		domesticIncomeStatement(ctx, symbol),
+		domesticConsensus(ctx, symbol).then(parseConsensus, (err: unknown) =>
+			consensusError(err instanceof Error ? err.message : String(err)),
+		),
+	]);
+	const periods = mergeFinancials(ratiosRes, incomeRes, limit);
+	return { periods, consensus, yoy: yoyChange(periods) };
+}
+
 export function createBrokerTools(deps: BrokerToolDeps) {
 	const marketPrice = defineTool({
 		name: "market_price",
@@ -234,7 +271,8 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 		label: "기술적 분석",
 		description:
 			"기간별 시세로 기술적 지표를 계산한다 — 이동평균(5/20/60)·RSI(14)·MACD·볼린저·ATR·" +
-			"지지/저항·추세·신호 라벨. '차트 분석', '타점', '지금 사도 돼?', '추세 어때?' 같은 요청에 쓴다. " +
+			"지지/저항·추세·신호 라벨. '차트 분석', '추세 어때?', 'RSI 얼마야?' 같은 **지표 확인** 요청에 쓴다. " +
+				"매수·매도 판단이나 손절가가 필요하면 이 툴이 아니라 market_timing 을 쓴다. " +
 			"⚠️ 지표는 이 툴이 계산한다. 직접 계산하거나 추정하지 말고 반환된 숫자만 인용한다. " +
 			"봉 데이터는 반환하지 않으므로 개별 봉 값을 나열하려 하지 않는다.",
 		parameters: Type.Object({
@@ -583,22 +621,8 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 				throw new Error(`재무 조회는 국내 종목(6자리 코드)만 지원합니다: ${symbol}`);
 			}
 
-			const ctx = kis();
 			const limit = Math.min(Math.max(params.quarters ?? 8, 1), 20);
-
-			// 컨센서스는 실패해도(미커버·권한) 재무는 보여준다
-			const [ratiosRes, incomeRes, consensusRes] = await Promise.all([
-				domesticFinancialRatios(ctx, symbol),
-				domesticIncomeStatement(ctx, symbol),
-				// 실패해도 재무는 보여주되, 실패와 미커버를 섞지 않는다
-				domesticConsensus(ctx, symbol).then(parseConsensus, (err: unknown) =>
-					consensusError(err instanceof Error ? err.message : String(err)),
-				),
-			]);
-
-			const periods = mergeFinancials(ratiosRes, incomeRes, limit);
-			const consensus: Consensus = consensusRes;
-			const yoy = yoyChange(periods);
+			const { periods, consensus, yoy } = await loadFinancials(kis(), symbol, limit);
 
 			// 종목명은 재무 응답에 없다 — 이름 해석기를 재사용한다
 			const name = await resolveName(deps.brokers, symbol);
@@ -630,6 +654,114 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 						: "애널리스트 컨센서스: 한국투자 리서치 커버 종목이 아닙니다 (데이터 없음이 아니라 미커버).",
 				`※ 분기 수치는 연단위 누적 기준입니다 (${periods.length}개 기간 조회).`,
 			];
+
+			return { content: [{ type: "text" as const, text: lines.join("\n") }], details };
+		},
+	});
+
+	const marketTiming = defineTool({
+		name: "market_timing",
+		label: "타점 분석",
+		description:
+			"매수·매도 타점을 규칙 기반으로 판정한다 — 추세·모멘텀·밸류·리스크 4층 판단, 결론(매수/매도/관망), " +
+			"조건부 시나리오 3개(트리거 가격 포함), 손절가·목표가·손익비, 손익분기, 매수 시 권장 수량(총자산 1% 리스크). " +
+			"보유 종목이면 평단을 반영해 청산 시나리오를 준다. " +
+			"'지금 사도 돼?', '타점', '손절 어디?', '팔까?', '진입 시점' 같은 **매매 판단** 요청에 쓴다. " +
+			"단순히 지표·추세만 물으면 market_technical 을 쓴다. " +
+			"⚠️ 판정·가격은 이 툴이 계산한다 — 직접 계산하거나 바꾸지 말고 그대로 인용한다. " +
+			"실적·공시·거시 이벤트 리스크는 이 툴이 보지 않으므로 필요하면 market_news 로 확인해 덧붙인다. " +
+			"결과는 매매 권유가 아니라 규칙 기반 판정임을 밝힌다.",
+		parameters: Type.Object({
+			symbol: Type.String({ description: "6자리 국내 종목코드 또는 해외 티커" }),
+		}),
+		execute: async (_id, params) => {
+			const notes: string[] = [];
+			const chart = await fetchChart(deps.brokers, params.symbol, "D");
+			const symbol = chart.symbol;
+			const market = marketOf(symbol);
+			const currency: "KRW" | "USD" = market === "KR" ? "KRW" : "USD";
+
+			// 보유·총자산과 재무는 없어도 판정은 한다 (각각 해당 층·수량 제안만 빠진다)
+			const [portfolio, fin] = await Promise.all([
+				fetchPortfolio(deps.brokers).catch((err: unknown) => {
+					notes.push(`보유 조회 실패 — 보유 반영·수량 제안 생략 (${err instanceof Error ? err.message.slice(0, 60) : err})`);
+					return null;
+				}),
+				market === "KR" && deps.brokers.kis
+					? Promise.resolve()
+							.then(() => loadFinancials((deps.brokers.kis as () => KisContext)(), symbol, 8))
+							.catch((err: unknown) => {
+								notes.push(`재무 조회 실패 — 밸류층 판단 보류 (${err instanceof Error ? err.message.slice(0, 60) : err})`);
+								return null;
+							})
+					: Promise.resolve(null),
+			]);
+
+			const holding = portfolio?.holdings.find((h) => h.symbol === symbol) ?? null;
+			const latest = fin?.periods[0];
+			const result = evaluateTiming({
+				bars: chart.bars,
+				market,
+				holding: holding
+					? { quantity: holding.quantity, avgPrice: holding.avgPrice, pnlPct: holding.profitPct }
+					: null,
+				fundamentals: fin
+					? {
+							operatingYoy: fin.yoy?.operatingProfit ?? null,
+							operatingProfit: latest?.operatingProfit ?? null,
+							rating: fin.consensus.covered ? fin.consensus.rating : null,
+						}
+					: null,
+				totalAssetsKrw: portfolio ? portfolio.stockValueKrw + portfolio.cashKrw : null,
+				usdKrw: portfolio?.usdKrw ?? null,
+			});
+
+			if (!result) {
+				throw new Error(`${chart.name}(${symbol}) 시세 데이터가 없어 판정할 수 없습니다.`);
+			}
+
+			const { snapshot, ...rest } = result;
+			const details: TimingDetails = {
+				kind: "timing-card",
+				symbol,
+				name: chart.name,
+				currency,
+				result: {
+					...rest,
+					snapshot: {
+						lastDate: snapshot.lastDate,
+						bars: snapshot.bars,
+						rsi: snapshot.rsi,
+						trend: snapshot.trend,
+						ma20: snapshot.ma20,
+						support: snapshot.support,
+						resistance: snapshot.resistance,
+					},
+				},
+				notes,
+			};
+
+			const m = (v: number | null): string => (v === null ? "—" : money(v, currency));
+			const lines = [
+				`${chart.name} (${symbol}) 타점 판정 — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
+				`결론: ${result.verdict} — ${result.summary}`,
+				...result.layers.map((l) => `[${l.name}] ${l.state}: ${l.reasons.join(" / ")}`),
+				`손절 ${m(result.stopLoss)} · 목표1 ${m(result.target1)} · 목표2 ${m(result.target2)}` +
+					(result.riskReward !== null ? ` · 손익비 1:${result.riskReward}` : ""),
+				result.holding
+					? `보유 ${result.holding.quantity}주 · 평단 ${m(result.holding.avgPrice)} (${result.holding.pnlPct >= 0 ? "+" : ""}${result.holding.pnlPct}%) · 손익분기 ${m(result.breakeven)}`
+					: `손익분기(진입 시) ${m(result.breakeven)}`,
+				`  ※ 왕복 비용 ${result.roundTripCostPct}% 가정 (실제 수수료·세금과 다를 수 있음)`,
+				result.sizing
+					? `권장 수량 ${result.sizing.quantity}주 — 손절 시 손실이 총자산의 ${result.sizing.riskPct}%(${m(result.sizing.riskBudgetKrw)}) 이내`
+					: "",
+				"시나리오 (조건부 대응 — 예측 아님):",
+				...result.scenarios.map(
+					(sc) => `  ${sc.id} ${sc.title}: ${sc.trigger} → ${sc.action}${sc.weightPct > 0 ? ` (${sc.weightPct}%)` : ""}`,
+				),
+				...notes.map((n) => `⚠️ ${n}`),
+				"※ 규칙 기반 판정이며 매매 권유가 아닙니다. 실적·공시·거시 이벤트는 반영되지 않았습니다.",
+			].filter(Boolean);
 
 			return { content: [{ type: "text" as const, text: lines.join("\n") }], details };
 		},
@@ -877,6 +1009,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 	return [
 		marketPrice,
 		marketTechnical,
+		marketTiming,
 		marketMovers,
 		marketNews,
 		marketFinancials,
@@ -891,6 +1024,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 export const BROKER_TOOL_NAMES = [
 	"market_price",
 	"market_technical",
+	"market_timing",
 	"market_movers",
 	"market_news",
 	"market_financials",

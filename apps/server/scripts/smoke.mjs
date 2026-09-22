@@ -272,6 +272,7 @@ async function main() {
 		"ledger_add",
 		"market_price",
 		"market_technical",
+		"market_timing",
 		"market_movers",
 		"market_news",
 		"market_financials",

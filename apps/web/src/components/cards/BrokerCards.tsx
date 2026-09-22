@@ -14,6 +14,7 @@ import type {
 	PortfolioSignalsCard,
 	QuoteCard,
 	TechnicalCard,
+	TimingCard,
 } from "@alphafolio/protocol";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
@@ -208,6 +209,104 @@ export function TechnicalCardView({ card }: { card: TechnicalCard }) {
 			)}
 
 			{card.note && <p className="mt-2 text-[11px] text-faint">{card.note}</p>}
+		</div>
+	);
+}
+
+// ── 타점 판정 ───────────────────────────────────────────────────────────
+
+const VERDICT_CLASS: Record<string, string> = {
+	매수: "border-up/60 text-up",
+	매도: "border-down/60 text-down",
+	관망: "border-line text-muted",
+};
+
+const LAYER_DOT: Record<string, string> = { 우호: "bg-up", 비우호: "bg-down", 중립: "bg-faint" };
+
+export function TimingCardView({ card }: { card: TimingCard }) {
+	const r = card.result;
+	const cur = card.currency;
+	const m = (v: number | null): string => (v === null ? "—" : money(v, cur));
+
+	return (
+		<div className="mt-2 rounded-xl border border-line bg-inset p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div className="min-w-0">
+					<div className="truncate text-sm font-medium text-ink">{card.name}</div>
+					<div className="text-xs text-faint">
+						{card.symbol} · 일봉 {r.snapshot.bars}개 · {r.snapshot.lastDate} · {m(r.price)}
+					</div>
+				</div>
+				<span className={`shrink-0 rounded-lg border px-2.5 py-1 text-sm font-semibold ${VERDICT_CLASS[r.verdict]}`}>
+					{r.verdict}
+				</span>
+			</div>
+			<p className="mt-2 text-xs text-ink">{r.summary}</p>
+
+			<div className="mt-3 space-y-1.5 border-t border-line pt-3">
+				{r.layers.map((l) => (
+					<div key={l.name} className="flex gap-2 text-xs">
+						<span className={`mt-1.5 size-1.5 shrink-0 rounded-full ${LAYER_DOT[l.state]}`} />
+						<span className="w-10 shrink-0 text-muted">{l.name}</span>
+						<span className="text-ink">{l.reasons.join(" · ")}</span>
+					</div>
+				))}
+			</div>
+
+			<div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3 text-xs">
+				<div>
+					<div className="text-faint">손절</div>
+					<div className="text-down">{m(r.stopLoss)}</div>
+				</div>
+				<div>
+					<div className="text-faint">목표 1 / 2</div>
+					<div className="text-up">
+						{m(r.target1)}
+						<span className="text-faint"> / {m(r.target2)}</span>
+					</div>
+				</div>
+				<div>
+					<div className="text-faint">손익비</div>
+					<div className="text-ink">{r.riskReward !== null ? `1 : ${r.riskReward}` : "—"}</div>
+				</div>
+			</div>
+
+			<div className="mt-3 space-y-1 border-t border-line pt-3">
+				{r.scenarios.map((sc) => (
+					<div key={sc.id} className="text-xs">
+						<span className="text-faint">{sc.id}</span> <span className="text-ink">{sc.title}</span>
+						<span className="text-muted">
+							{" "}
+							— {sc.trigger} → {sc.action}
+							{sc.weightPct > 0 ? ` (${sc.weightPct}%)` : ""}
+						</span>
+					</div>
+				))}
+			</div>
+
+			<div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-3 text-[11px] text-muted">
+				{r.holding && (
+					<span>
+						보유 {r.holding.quantity}주 · 평단 {m(r.holding.avgPrice)} ({sign(r.holding.pnlPct)}
+						{r.holding.pnlPct}%)
+					</span>
+				)}
+				<span>
+					손익분기 {m(r.breakeven)} (왕복 {r.roundTripCostPct}% 가정)
+				</span>
+				{r.sizing && (
+					<span>
+						권장 {r.sizing.quantity}주 (손절 시 총자산 {r.sizing.riskPct}%)
+					</span>
+				)}
+			</div>
+
+			{card.notes.map((n) => (
+				<p key={n} className="mt-1 text-[11px] text-faint">
+					⚠️ {n}
+				</p>
+			))}
+			<p className="mt-2 text-[11px] text-faint">규칙 기반 판정 · 매매 권유 아님 · 실적·공시 이벤트 미반영</p>
 		</div>
 	);
 }

@@ -28,6 +28,7 @@ const CARD_KINDS = new Set([
 	"ledger-budget",
 	"technical-card",
 	"portfolio-signals-card",
+	"timing-card",
 	"financials-card",
 	"quote-card",
 	"holdings-card",
