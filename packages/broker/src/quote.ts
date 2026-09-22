@@ -67,6 +67,18 @@ export interface QuoteResult extends Quote {
 	source: BrokerId;
 }
 
+/** 시세로 인정할 수 있는 가격인가 — 0·음수·NaN 은 "없는 종목"의 빈 응답이다. */
+export function isTradablePrice(price: number): boolean {
+	return Number.isFinite(price) && price > 0;
+}
+
+export class QuoteNotFoundError extends Error {
+	constructor(symbol: string) {
+		super(`${symbol} 시세가 없습니다 — 종목코드가 틀렸거나 상장되지 않은(거래정지·상장폐지) 종목일 수 있습니다.`);
+		this.name = "QuoteNotFoundError";
+	}
+}
+
 export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promise<QuoteResult> {
 	const symbol = normalizeSymbol(rawSymbol);
 	const brokers = available(access);
@@ -80,17 +92,23 @@ export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promi
 	for (const broker of brokers) {
 		try {
 			if (broker.id === "kis") {
-				if (isDomesticSymbol(symbol)) {
-					return await withName({ ...toDomesticQuote(await domesticPrice(broker.ctx, symbol), symbol), source: "kis" });
+				const q = isDomesticSymbol(symbol)
+					? toDomesticQuote(await domesticPrice(broker.ctx, symbol), symbol)
+					: await overseasPriceAuto(broker.ctx, symbol).then(({ data, excd }) => toOverseasQuote(data, symbol, excd));
+				// KIS 는 없는 종목코드에 오류 대신 **0으로 채운 정상 응답**을 준다 (rt_cd=0, 현재가 0).
+				// 성공으로 받으면 시세 0원이 화면에 뜨고, order_prepare 의 괴리율 검사가 0% 가 되어
+				// 자릿수 오타 방어가 꺼진다. 다음 브로커로 넘긴다.
+				if (!isTradablePrice(q.price)) {
+					lastError = new QuoteNotFoundError(symbol);
+					continue;
 				}
-				const { data, excd } = await overseasPriceAuto(broker.ctx, symbol);
-				return await withName({ ...toOverseasQuote(data, symbol, excd), source: "kis" });
+				return await withName({ ...q, source: "kis" });
 			}
 
 			const prices = await tossPrices(broker.ctx, [symbol]);
 			const hit = prices[0];
 			if (hit && Number(hit.lastPrice) > 0) return await withName({ ...toTossQuote(hit), source: "toss" });
-			lastError = new Error(`토스에서 ${symbol} 시세를 찾지 못했습니다.`);
+			lastError = new QuoteNotFoundError(symbol);
 		} catch (err) {
 			lastError = err;
 		}

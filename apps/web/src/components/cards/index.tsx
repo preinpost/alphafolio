@@ -16,6 +16,7 @@ import {
 	QuoteCardView,
 	TechnicalCardView,
 	TimingCardView,
+	ResearchCardView,
 } from "./BrokerCards.tsx";
 import { OrderListCardView, OrderPreviewCardView } from "./OrderCards.tsx";
 
@@ -25,6 +26,8 @@ export function CardView({ card }: { card: UICard }) {
 			return <QuoteCardView card={card} />;
 		case "technical-card":
 			return <TechnicalCardView card={card} />;
+		case "research-card":
+			return <ResearchCardView card={card} />;
 		case "timing-card":
 			return <TimingCardView card={card} />;
 		case "portfolio-signals-card":

@@ -29,6 +29,7 @@ const CARD_KINDS = new Set([
 	"technical-card",
 	"portfolio-signals-card",
 	"timing-card",
+	"research-card",
 	"financials-card",
 	"quote-card",
 	"holdings-card",

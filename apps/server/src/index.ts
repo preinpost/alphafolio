@@ -24,6 +24,7 @@ import {
 	defaultAccountSeq,
 	listOrders,
 	NaverCredentialsMissingError,
+	QuoteNotFoundError,
 	type BrokerAccess,
 	type KisContext,
 	type NaverCredentials,
@@ -253,7 +254,9 @@ async function main(): Promise<void> {
 				err instanceof TossCredentialsMissingError ||
 				err instanceof NaverCredentialsMissingError ||
 				err instanceof NoBrokerConfiguredError;
-			const status = err instanceof HttpError ? err.status : needsSetup ? 503 : 500;
+			// 없는 종목은 잘못된 입력이다 — 500 으로 내면 서버 장애처럼 보인다
+			const notFound = err instanceof QuoteNotFoundError;
+			const status = err instanceof HttpError ? err.status : needsSetup ? 503 : notFound ? 404 : 500;
 			const message = err instanceof Error ? err.message : String(err);
 			if (status === 500) console.error("[server]", err);
 			if (!res.headersSent) json(res, status, { error: message });

@@ -90,6 +90,17 @@ export function validateOrder(intent: OrderIntent, ctx: OrderContext): Validatio
 	const errors: string[] = [];
 	const warnings: string[] = [];
 
+	// 현재가를 모르면 괴리율 검사(자릿수 오타 방어)와 시장가 예상금액이 전부 무의미해진다.
+	// 시세 조회 쪽에서 막고 있지만(QuoteNotFoundError) 여기서도 한 번 더 막는다.
+	if (!Number.isFinite(ctx.lastPrice) || ctx.lastPrice <= 0) {
+		return {
+			ok: false,
+			errors: ["현재가를 확인할 수 없어 주문을 준비할 수 없습니다 (종목코드를 확인하세요)."],
+			warnings,
+			estimatedAmount: 0,
+		};
+	}
+
 	// ── 수량 ────────────────────────────────────────────────────
 	if (!Number.isFinite(intent.quantity) || intent.quantity <= 0) {
 		errors.push("수량은 1주 이상이어야 합니다.");

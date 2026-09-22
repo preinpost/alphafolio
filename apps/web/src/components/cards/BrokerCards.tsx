@@ -13,6 +13,8 @@ import type {
 	OverviewCard,
 	PortfolioSignalsCard,
 	QuoteCard,
+	ResearchCard,
+	ResearchSection,
 	TechnicalCard,
 	TimingCard,
 } from "@alphafolio/protocol";
@@ -307,6 +309,142 @@ export function TimingCardView({ card }: { card: TimingCard }) {
 				</p>
 			))}
 			<p className="mt-2 text-[11px] text-faint">규칙 기반 판정 · 매매 권유 아님 · 실적·공시 이벤트 미반영</p>
+		</div>
+	);
+}
+
+// ── 종목 리서치 ─────────────────────────────────────────────────────────
+
+/** 실패·해당 없음 섹션은 조용히 숨기지 않고 한 줄로 이유를 보여준다. */
+function SectionGap({ label, s }: { label: string; s: ResearchSection<unknown> }) {
+	if (s.status === "ok") return null;
+	return (
+		<div className="text-[11px] text-faint">
+			{label}: {s.status === "skipped" ? s.reason : `조회 실패 — ${s.error}`}
+		</div>
+	);
+}
+
+function eokShort(value: number | null): string {
+	if (value === null) return "—";
+	return Math.abs(value) >= 10_000
+		? `${(value / 10_000).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}조`
+		: `${Math.round(value).toLocaleString("ko-KR")}억`;
+}
+
+export function ResearchCardView({ card }: { card: ResearchCard }) {
+	const cur = card.currency;
+	const m = (v: number | null): string => (v === null ? "—" : money(v, cur));
+	const pct = (v: number | null): string => (v === null ? "—" : `${sign(v)}${v}%`);
+	const q = card.quote.status === "ok" ? card.quote.data : null;
+	const t = card.technical.status === "ok" ? card.technical.data : null;
+	const f = card.financials.status === "ok" ? card.financials.data : null;
+	const h = card.holding.status === "ok" ? card.holding.data : null;
+
+	return (
+		<div className="mt-2 rounded-xl border border-line bg-inset p-4">
+			<div className="flex items-baseline justify-between gap-3">
+				<div className="min-w-0">
+					<div className="truncate text-sm font-medium text-ink">{card.name}</div>
+					<div className="text-xs text-faint">{card.symbol} · 종목 리서치</div>
+				</div>
+				{q && (
+					<div className="shrink-0 text-right">
+						<div className="text-base font-semibold text-ink">{m(q.price)}</div>
+						<div className={`text-xs ${moveClass(q.changePct)}`}>{pct(q.changePct)}</div>
+					</div>
+				)}
+			</div>
+
+			{q && (q.per !== null || q.pos52 !== null) && (
+				<div className="mt-3 border-t border-line pt-3 text-xs">
+					<div className="flex flex-wrap gap-x-4 text-muted">
+						{q.per !== null && <span>PER {q.per}</span>}
+						{q.pbr !== null && <span>PBR {q.pbr}</span>}
+					</div>
+					{q.pos52 !== null && (
+						<div className="mt-2">
+							<div className="flex justify-between text-[11px] text-faint">
+								<span>52주 {m(q.low52)}</span>
+								<span>{m(q.high52)}</span>
+							</div>
+							<div className="relative mt-1 h-1.5 rounded-full bg-hover">
+								<div
+									className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent"
+									style={{ left: `${Math.min(100, Math.max(0, q.pos52))}%` }}
+								/>
+							</div>
+						</div>
+					)}
+				</div>
+			)}
+
+			{t && (
+				<div className="mt-3 border-t border-line pt-3 text-xs text-muted">
+					<span className={t.trend === "정배열" ? "text-up" : t.trend === "역배열" ? "text-down" : "text-ink"}>{t.trend}</span>
+					{" · "}RSI {t.rsi ?? "—"} · 지지 {m(t.support)} / 저항 {m(t.resistance)}
+					{t.signals.length > 0 && <div className="mt-1 text-[11px] text-ink">{t.signals.join(" · ")}</div>}
+				</div>
+			)}
+
+			{f?.latest && (
+				<div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3 text-xs">
+					<div>
+						<div className="text-faint">매출</div>
+						<div className="text-ink">{eokShort(f.latest.revenue)}</div>
+						<div className="text-[11px] text-muted">{pct(f.yoy?.revenue ?? null)}</div>
+					</div>
+					<div>
+						<div className="text-faint">영업익</div>
+						<div className="text-ink">{eokShort(f.latest.operatingProfit)}</div>
+						<div className="text-[11px] text-muted">{pct(f.yoy?.operatingProfit ?? null)}</div>
+					</div>
+					<div>
+						<div className="text-faint">투자의견</div>
+						<div className="text-ink">
+							{f.consensus.covered ? f.consensus.rating : f.consensus.error ? "조회 실패" : "미커버"}
+						</div>
+						<div className="text-[11px] text-muted">ROE {f.latest.roe ?? "—"}%</div>
+					</div>
+				</div>
+			)}
+
+			{card.holding.status === "ok" && (
+				<div className="mt-3 border-t border-line pt-3 text-xs text-muted">
+					{h ? (
+						<>
+							내 보유 {h.quantity}주 · 평단 {m(h.avgPrice)} ·{" "}
+							<span className={moveClass(h.profitPct)}>{pct(h.profitPct)}</span>
+						</>
+					) : (
+						"보유하지 않음"
+					)}
+				</div>
+			)}
+
+			{card.news.status === "ok" && card.news.data.length > 0 && (
+				<div className="mt-3 space-y-1 border-t border-line pt-3">
+					{card.news.data.map((n) => (
+						<a
+							key={n.link || n.title}
+							href={n.link}
+							target="_blank"
+							rel="noreferrer noopener"
+							className="block truncate text-xs text-ink hover:underline"
+						>
+							<span className="text-faint">{n.date.slice(5)}</span> {n.title}
+						</a>
+					))}
+				</div>
+			)}
+
+			<div className="mt-3 space-y-0.5">
+				<SectionGap label="시세" s={card.quote} />
+				<SectionGap label="지표" s={card.technical} />
+				<SectionGap label="재무" s={card.financials} />
+				<SectionGap label="뉴스" s={card.news} />
+				<SectionGap label="보유" s={card.holding} />
+			</div>
 		</div>
 	);
 }

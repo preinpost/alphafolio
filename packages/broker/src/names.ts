@@ -54,8 +54,18 @@ async function fromKis(ctx: KisContext, symbol: string): Promise<void> {
 		query: { PRDT_TYPE_CD: "300", PDNO: symbol },
 	});
 	const out = (Array.isArray(res.output) ? res.output[0] : res.output) as Record<string, unknown> | undefined;
+	// 없는 코드에도 이름이 든 빈 껍데기 레코드가 온다 (실측: 999999 → "(주)피에스엠",
+	// 표준코드·시장코드·상장일이 전부 빈 값). 표준코드(ISIN)나 시장코드가 있을 때만 믿는다.
+	if (!isListedRecord(out)) return;
 	const name = out?.prdt_abrv_name ?? out?.prdt_name;
 	if (typeof name === "string" && name.trim()) cache.set(symbol, name.trim());
+}
+
+/** CTPF1002R 레코드가 실제 상장 종목의 것인가. */
+export function isListedRecord(out: Record<string, unknown> | undefined): boolean {
+	if (!out) return false;
+	const has = (k: string): boolean => String(out[k] ?? "").trim() !== "";
+	return has("std_pdno") || has("mket_id_cd");
 }
 
 /**

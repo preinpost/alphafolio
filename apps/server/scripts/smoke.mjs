@@ -273,6 +273,7 @@ async function main() {
 		"market_price",
 		"market_technical",
 		"market_timing",
+		"stock_research",
 		"market_movers",
 		"market_news",
 		"market_financials",

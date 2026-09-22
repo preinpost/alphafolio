@@ -145,6 +145,56 @@ export interface TimingCard {
 	notes: string[];
 }
 
+/** 리서치 섹션 — 성공 / 조회 실패 / 해당 없음을 구분한다. */
+export type ResearchSection<T> =
+	| { status: "ok"; data: T }
+	| { status: "failed"; error: string }
+	| { status: "skipped"; reason: string };
+
+/** 종목 리서치 카드 — stock_research 결과. */
+export interface ResearchCard {
+	kind: "research-card";
+	symbol: string;
+	name: string;
+	currency: "KRW" | "USD";
+	quote: ResearchSection<{
+		price: number;
+		change: number;
+		changePct: number;
+		per: number | null;
+		pbr: number | null;
+		high52: number | null;
+		low52: number | null;
+		pos52: number | null;
+		source: string;
+	}>;
+	technical: ResearchSection<{
+		lastDate: string;
+		trend: string;
+		rsi: number | null;
+		ma20: number | null;
+		ma60: number | null;
+		support: number | null;
+		resistance: number | null;
+		periodChangePct: number;
+		signals: string[];
+	}>;
+	financials: ResearchSection<{
+		latest: {
+			period: string;
+			revenue: number | null;
+			operatingProfit: number | null;
+			netIncome: number | null;
+			roe: number | null;
+			debtRatio: number | null;
+		} | null;
+		yoy: { revenue: number | null; operatingProfit: number | null; netIncome: number | null } | null;
+		consensus: { covered: boolean; error: string | null; rating: string | null; analyst: string | null; estimatedAt: string | null };
+	}>;
+	news: ResearchSection<Array<{ title: string; date: string; link: string }>>;
+	holding: ResearchSection<{ quantity: number; avgPrice: number; profitPct: number; valueKrw: number } | null>;
+}
+
 /** 보유 종목 일괄 점검 카드 — portfolio_signals 결과. */
 export interface PortfolioSignalsCard {
 	kind: "portfolio-signals-card";
@@ -302,6 +352,7 @@ export type UICard =
 	| TechnicalCard
 	| PortfolioSignalsCard
 	| TimingCard
+	| ResearchCard
 	| FinancialsCard
 	| QuoteCard
 	| HoldingsCard
