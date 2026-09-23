@@ -17,6 +17,7 @@ export * from "./portfolio.ts";
 export * from "./toss/client.ts";
 export * from "./toss/api.ts";
 export * from "./toss/orders.ts";
+export * from "./toss/gateway.ts";
 export * from "./orders.ts";
 export * from "./financials.ts";
 export * from "./quote.ts";

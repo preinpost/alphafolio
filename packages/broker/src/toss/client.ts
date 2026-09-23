@@ -98,6 +98,10 @@ async function getToken(ctx: TossContext): Promise<string> {
  * 토스는 엔드포인트 그룹별로 한도가 다르다 (시세 10/s, 차트 5/s, 계좌 1/s …).
  * 가장 빡빡한 계좌 조회에 맞춰 보수적으로 잡되, 클라이언트 단위로 직렬화한다.
  */
+/**
+ * 그룹별 최소 호출 간격 (ms). 그룹 이름은 규격의 "Rate Limits Group" (catalog.json 의 group).
+ * 규격에 초당 한도가 없어 옛 pi-toss 의 표(5/s·10/s 등)를 따르고, 거기 없던 새 그룹은 보수적으로 잡는다.
+ */
 const RATE_MS: Record<string, number> = {
 	MARKET_DATA: 120,
 	MARKET_DATA_CHART: 220,
@@ -105,6 +109,16 @@ const RATE_MS: Record<string, number> = {
 	ACCOUNT: 1100,
 	ASSET: 220,
 	ORDER_INFO: 180,
+	STOCK: 250,
+	STOCK_ALL: 1100, // 새 그룹 — 전체 종목 목록(응답이 크다)
+	STOCK_TRADING_TREND: 300, // 새 그룹 — 종목별 투자자·공매도·신용·대차·프로그램
+	RANKING: 250,
+	MARKET_INDICATOR: 150,
+	MARKET_INDICATOR_CHART: 250,
+	ORDER: 120,
+	ORDER_HISTORY: 250,
+	CONDITIONAL_ORDER: 250,
+	CONDITIONAL_ORDER_HISTORY: 150,
 };
 
 const lanes = new Map<string, { tail: Promise<void>; lastStartAt: number }>();
@@ -129,14 +143,14 @@ export interface TossRequestOptions {
 	query?: Record<string, string | number | boolean | undefined>;
 	/** X-Tossinvest-Account 값 (계좌·자산 API). */
 	accountSeq?: number;
-	/** 레이트 리밋 그룹 (기본 MARKET_DATA). */
-	group?: keyof typeof RATE_MS;
+	/** 레이트 리밋 그룹 (기본 MARKET_DATA). 규격의 그룹 이름 — 모르는 그룹은 300ms */
+	group?: string;
 }
 
 export interface TossWriteOptions {
 	accountSeq: number;
 	body?: unknown;
-	group?: keyof typeof RATE_MS;
+	group?: string;
 }
 
 /** `{ result: ... }` 래퍼 해제. */

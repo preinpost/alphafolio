@@ -91,7 +91,7 @@ export async function fetchMovers(
 			count,
 			excludeInvestmentCaution: true,
 		},
-		group: "MARKET_DATA",
+		group: "RANKING", // 규격의 랭킹 그룹 (5/s) — 예전엔 MARKET_DATA(10/s)로 잘못 잡혀 있었다
 	});
 
 	const items = res.rankings ?? [];

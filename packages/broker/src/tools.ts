@@ -57,6 +57,16 @@ import {
 	resolveDateToken,
 	resolveKisApi,
 } from "./kis/gateway.ts";
+import {
+	callTossApi,
+	describeTossApi,
+	renderTossResult,
+	resolveTossApi,
+	TOSS_DEFAULT_ROWS,
+	TOSS_MAX_ROWS,
+	tossDateToken,
+	tossReadIndex,
+} from "./toss/gateway.ts";
 import type { Bar, Holding, Quote } from "./normalize.ts";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
@@ -1376,6 +1386,52 @@ ${out.text}${note}` }],
 		},
 	});
 
+	// ── 토스 범용 조회 (PLAN §32) ────────────────────────────
+	const tossQuery = defineTool({
+		name: "toss_query",
+		label: "토스 조회",
+		description:
+			"토스증권 조회 API 29개(공개 OpenAPI 규격)를 호출한다. **전용 툴로 안 되는 토스 조회**에 쓴다 — 호가·체결·상하한가, " +
+			"매수 유의사항(투자경고·VI 등), 장 운영 일정(한국·미국 프리/정규/애프터), 코스피·코스닥 지수와 국채 금리, " +
+			"시장 투자자별 매매대금, 종목별 투자자·공매도·신용·대차·프로그램매매 동향(거래량 기준), 랭킹 전 종류, 수수료, 주문·조건주문 조회. " +
+			"api 에 아래 id 를, params 에 파라미터를 넣는다 (*=필수). 파라미터 선택지·지수 심볼 목록이 필요하면 describe: true. " +
+			"날짜는 YYYY-MM-DD 또는 'today' / 'today-30'. 계좌는 서버가 넣는다. 주문·정정·취소는 실행되지 않는다.\n" +
+			tossReadIndex(),
+		parameters: Type.Object({
+			api: Type.String({ description: "위 목록의 id (예: getStockInvestorTrading)" }),
+			params: Type.Optional(
+				Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()]), { description: "파라미터 (예: { symbol: '005930', count: 10 })" }),
+			),
+			describe: Type.Optional(Type.Boolean({ description: "true 면 호출하지 않고 파라미터 설명·선택지·그룹 안내를 준다" })),
+			limit: Type.Optional(Type.Integer({ description: `목록 최대 행 수 (기본 ${TOSS_DEFAULT_ROWS}, 최대 ${TOSS_MAX_ROWS})` })),
+			fields: Type.Optional(Type.Array(Type.String(), { description: "보고 싶은 필드만 (경로 일부 또는 설명 일부, 예: ['date', 'foreigner'])" })),
+		}),
+		execute: async (_id, params) => {
+			const today = tossDateToken("today");
+			if (params.describe) {
+				const hit = resolveTossApi(params.api);
+				if (!hit) throw new Error(`없는 토스 API: "${params.api}"`);
+				return {
+					content: [{ type: "text" as const, text: `${describeTossApi(hit.id, hit.api)}
+
+오늘(KST) ${today}` }],
+					details: { kind: "toss-query", api: hit.id, rows: 0 },
+				};
+			}
+			const toss = deps.brokers.toss;
+			if (!toss) throw new Error("토스 조회는 토스증권 연결이 필요합니다. 설정 화면의 '증권 (토스)' 에서 키를 입력하세요.");
+			const r = await callTossApi(toss(), params.api, params.params ?? {});
+			const out = renderTossResult(r.api, r.data, {
+				...(params.limit ? { limit: params.limit } : {}),
+				...(params.fields ? { fields: params.fields } : {}),
+			});
+			return {
+				content: [{ type: "text" as const, text: `[토스] ${r.api.summary} (${r.id}) · 오늘(KST) ${today}\n\n${out.text}` }],
+				details: { kind: "toss-query", api: r.id, rows: out.rowCount },
+			};
+		},
+	});
+
 	return [
 		marketPrice,
 		marketTechnical,
@@ -1391,6 +1447,7 @@ ${out.text}${note}` }],
 		orderList,
 		kisFind,
 		kisCall,
+		tossQuery,
 	];
 }
 
@@ -1409,6 +1466,7 @@ export const BROKER_TOOL_NAMES = [
 	"order_list",
 	"kis_find",
 	"kis_call",
+	"toss_query",
 ] as const;
 
 /** 현재 월(KST) — 기본값 계산용으로 재노출 (모델이 날짜를 만들지 않게 한다). */

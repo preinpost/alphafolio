@@ -140,6 +140,21 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
 - 필요한 열만 보려면 \`fields\`, 긴 목록은 \`limit\` 을 쓴다 (토큰 절약).
 - 주문·정정·취소는 이 툴로 실행되지 않는다.
 
+### 토스 조회 — \`toss_query\`
+
+토스증권 조회 29개. 툴 설명의 id 목록에서 바로 고른다 (선택지·지수 심볼이 필요하면 describe: true).
+
+- 장 운영 일정·휴장: getKrMarketCalendar / getUsMarketCalendar (미국 프리·정규·애프터 시간 포함)
+- 코스피·코스닥 지수, 국채 금리(2·3·5·10·20·30년): getMarketIndicatorPrices (symbols: KOSPI, KOSDAQ, KR_BOND_10Y …)
+- 시장 전체 투자자별 매매**대금**(코스피·코스닥): getMarketIndicatorInvestorTrading
+- 호가·최근 체결·상하한가: getOrderbook · getTrades · getPriceLimit
+- 매수 유의사항(투자경고·VI·정리매매 등): getStockWarnings — 매수 준비 전에 확인하면 좋다
+- 랭킹은 먼저 \`market_movers\`, 1주~1년 누적·토스증권 내 거래 순위가 필요할 때 getRankings
+- 수수료: getCommissions · 주문 상세: getOrder · 조건주문 목록: getConditionalOrders
+- **KIS 와 겹치는 것 — 종목별 투자자·공매도·신용·대차·프로그램**: 토스는 **거래량(주) 기준**이고 금액이 없으며 외국인은 등록외국인만이다.
+  금액(순매수 대금)이 필요하면 KIS(\`kis_call\` FHPTJ04160001), KIS 가 연결되지 않았으면 토스로 하고 "거래량 기준" 이라고 밝힌다.
+- 결과의 "필드 설명" 범례로 필드 뜻·단위를 확인하고 숫자는 그대로 인용한다.
+
 ### 주문
 
 - 매수·매도는 \`order_prepare\` 로 **준비만** 한다. 이 툴은 주문을 실행하지 않는다 —
