@@ -15,6 +15,7 @@ import {
 	createAlphaFolioAgent,
 	type AlphaFolioAgent,
 	type AlphaFolioConversation,
+	type ThinkingLevel,
 } from "@alphafolio/agent";
 import { createLedgerTools, type D1Provider } from "@alphafolio/ledger/tools";
 import { createBrokerTools } from "@alphafolio/broker/tools";
@@ -26,6 +27,7 @@ export interface RuntimeManagerOptions {
 	dataDir: string;
 	agentDir: string;
 	model: string | undefined;
+	thinking: ThinkingLevel;
 	authPath: string | undefined;
 	/**
 	 * 가계부 D1 설정 공급자. 호출 시점에 조회하므로 앱에서 키를 나중에 넣어도
@@ -122,6 +124,7 @@ export class RuntimeManager {
 			agentDir: this.opts.agentDir,
 			sessionsDir,
 			model: this.opts.model,
+			thinkingLevel: this.opts.thinking,
 			authPath: this.opts.authPath,
 			apiKeys: this.opts.llmKeys(user),
 			excludeTools: EXCLUDED_TOOLS,

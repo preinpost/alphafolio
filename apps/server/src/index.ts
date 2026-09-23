@@ -226,6 +226,7 @@ async function main(): Promise<void> {
 
 	// 사용자별 런타임 — 하나를 공유하면 두 사람의 대화와 세션이 섞인다.
 	const runtimes = new RuntimeManager({
+		thinking: cfg.agent.thinking,
 		dataDir: cfg.dataDir,
 		agentDir: cfg.agent.agentDir,
 		model: cfg.agent.model,
@@ -571,7 +572,7 @@ async function main(): Promise<void> {
 	server.listen(cfg.port, cfg.host, () => {
 		console.log(`\n  AlphaFolio  http://${cfg.host}:${cfg.port}`);
 		console.log(`  ├ env      ${envFile ?? "(없음 — process.env만 사용)"}`);
-		console.log(`  ├ model    ${cfg.agent.model ?? "(기본)"}`);
+		console.log(`  ├ model    ${cfg.agent.model ?? "(기본)"} · thinking ${cfg.agent.thinking}`);
 		console.log(
 			`  ├ users    ${users.users.map((u) => u.name).join(", ")} (관리자)` +
 				(accounts.ready ? ` + 가입 ${accounts.names().length - users.users.length}명` : " — 가입 비활성 (D1 미설정)"),

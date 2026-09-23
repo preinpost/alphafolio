@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseCorsOrigins } from "./cors.ts";
+import { parseThinkingLevel, type ThinkingLevel } from "@alphafolio/agent";
 
 /** 저장소 루트 (apps/server/src → ../../..). */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -40,7 +41,15 @@ export interface Config {
 	host: string;
 	port: number;
 	auth: { user: string; password: string; secret: string; generatedPassword: boolean; ephemeralSecret: boolean };
-	agent: { cwd: string; agentDir: string; sessionsDir: string; model: string | undefined; authPath: string | undefined };
+	agent: {
+		cwd: string;
+		agentDir: string;
+		sessionsDir: string;
+		model: string | undefined;
+		/** AF_DEFAULT_THINKING — 기본 high */
+		thinking: ThinkingLevel;
+		authPath: string | undefined;
+	};
 	login: { maxAttempts: number; windowSec: number; lockoutSec: number; trustProxy: boolean };
 	/** KIS 실전/모의 — 서버 단위 설정. 모의계좌는 별도 앱키가 필요하다. */
 	kisEnv: "real" | "paper";
@@ -113,6 +122,7 @@ export function loadConfig(): Config {
 			agentDir,
 			sessionsDir: process.env.AF_SESSIONS_DIR ?? join(dataDir, "sessions"),
 			model: process.env.AF_DEFAULT_MODEL,
+			thinking: parseThinkingLevel(process.env.AF_DEFAULT_THINKING),
 			authPath: resolveAuthPath(agentDir),
 		},
 		login: {

@@ -56,6 +56,22 @@ export interface RuntimeOptions {
 	excludeTools: string[];
 	customTools: ToolDefinition[];
 	systemPrompt: string;
+	/** 사고(추론) 강도. 모델이 추론을 지원하지 않으면 pi 가 무시한다. */
+	thinkingLevel?: ThinkingLevel;
+}
+
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+/** 기본은 high — 판정·계산은 툴이 하지만, 툴을 고르고 결과를 해석하는 데 추론이 필요하다 */
+export const DEFAULT_THINKING: ThinkingLevel = "high";
+
+/** env 문자열 → 사고 강도. 모르는 값이면 기본값 + 경고 (오타로 조용히 off 가 되지 않게). */
+export function parseThinkingLevel(raw: string | undefined): ThinkingLevel {
+	const v = raw?.trim().toLowerCase();
+	if (!v) return DEFAULT_THINKING;
+	if ((THINKING_LEVELS as readonly string[]).includes(v)) return v as ThinkingLevel;
+	console.warn(`[agent] AF_DEFAULT_THINKING="${raw}" 는 알 수 없는 값 — ${DEFAULT_THINKING} 로 둔다 (${THINKING_LEVELS.join("/")})`);
+	return DEFAULT_THINKING;
 }
 
 export interface SessionSummary {
@@ -145,7 +161,7 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 				sessionManager,
 				sessionStartEvent,
 				model: resolved?.model,
-				thinkingLevel: "off",
+				thinkingLevel: opts.thinkingLevel ?? DEFAULT_THINKING,
 				excludeTools: opts.excludeTools,
 				customTools: opts.customTools,
 			})),

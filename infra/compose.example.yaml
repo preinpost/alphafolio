@@ -40,6 +40,8 @@ services:
 
       # ── 모델 ──────────────────────────────────────────────────
       AF_DEFAULT_MODEL: openrouter/deepseek/deepseek-v4.1-flash
+      # 사고 강도 off/minimal/low/medium/high/xhigh/max (기본 high)
+      AF_DEFAULT_THINKING: high
       # 아래 둘 중 하나로 LLM 인증을 준다.
       #  (a) API 키를 env로 주입 (권장 — 배포 정석)
       OPENROUTER_API_KEY: ""
