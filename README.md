@@ -52,11 +52,14 @@ task check              # 타입체크 + 테스트 + 빌드 + 스모크
 ## 배포 (Docker)
 
 ```bash
-cp infra/compose.example.yaml infra/compose.yaml   # 키 입력 (compose.yaml 은 gitignore)
-docker compose -f infra/compose.yaml up -d --build
+cp infra/compose.example.yaml compose.yaml && chmod 600 compose.yaml   # 빈 값 채우기 (git 에 넣지 않는다)
+docker compose up -d
 ```
 
-- 리버스 프록시 뒤에 두는 전제다 (TLS·도메인은 프록시 담당, 컨테이너는 평문 HTTP).
+- 템플릿은 `infra/compose.example.yaml` 한 파일이다. 릴리스 이미지(GHCR)를 쓰고, 버전은 `image` 태그로 고정한다.
+- 비밀번호 해시는 `node apps/server/scripts/hash-password.mjs --name <id>` 가 compose 용(`$` → `$$`) 줄을 찍어 준다.
+- 증권·뉴스 키는 compose 에 넣지 않는다 — 각자 앱 설정에서 입력한다 (사용자별 암호화 저장).
+- 리버스 프록시·터널 뒤에 두는 전제다 (TLS·도메인은 앞단 담당, 컨테이너는 평문 HTTP·루프백 포트).
 - **여러 명이 한 컨테이너를 공유한다.** 계정은 `AF_USERS`(scrypt 해시)로 주고,
   사용자마다 독립 세션을 쓴다. 가계부만 가구 공유(기록자 `member` 로 구분).
 

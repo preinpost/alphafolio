@@ -212,17 +212,20 @@ tasks:
       - docker build -f infra/Dockerfile -t {{.IMAGE}} .
 
   docker:up:
-    desc: compose 로 실행 (infra/compose.yaml 필요)
+    desc: compose 로 실행 (infra/compose.yaml 필요 — 운영과 같은 구성)
     preconditions:
       - sh: test -f infra/compose.yaml
-        msg: "infra/compose.yaml 이 없습니다. cp infra/compose.example.yaml infra/compose.yaml 후 키를 채우세요."
+        msg: "infra/compose.yaml 이 없습니다. cp infra/compose.example.yaml infra/compose.yaml 후 값을 채우세요 (chmod 600)."
+      - sh: test -e infra/web-search.json
+        msg: "infra/web-search.json 이 없습니다. 웹 검색을 안 쓰면: echo '{}' > infra/web-search.json"
     cmds:
-      - docker compose -f infra/compose.yaml up -d --build
+      # 로컬 이미지로 띄우려면 먼저 task docker:build, compose.yaml 의 image 를 alphafolio:local + pull_policy: missing
+      - docker compose -f infra/compose.yaml up -d
 
   docker:logs:
     desc: 컨테이너 로그
     cmds:
-      - docker compose -f infra/compose.yaml logs -f
+      - docker compose -f infra/compose.yaml logs -f app
 
   docker:down:
     desc: 컨테이너 중지

@@ -1,77 +1,82 @@
-# AlphaFolio — compose 템플릿
+# AlphaFolio — 운영 compose 템플릿 (이 파일 하나로 관리한다)
 #
-#   cp infra/compose.example.yaml infra/compose.yaml
-#   # compose.yaml 에 실제 키 입력 (compose.yaml 은 gitignore 대상)
-#   docker compose -f infra/compose.yaml up -d --build
+#   cp <repo>/infra/compose.example.yaml compose.yaml && chmod 600 compose.yaml
+#   # 아래 environment 의 빈 값을 채운다 — 비밀이 들어가므로 compose.yaml 은 git 에 넣지 않는다
+#   docker compose up -d
 #
-# 외부 노출은 리버스 프록시에 맡긴다 (TLS·도메인). 컨테이너는 평문 HTTP만 연다.
+#   버전 올리기   image 태그만 바꾸고 docker compose up -d
+#   로그          docker compose logs -f app
+#   중지          docker compose down                (대화 볼륨은 남는다)
+#
+# 템플릿이 바뀌면 서버의 compose.yaml 과 비교해서 반영한다:
+#   diff <(grep -v '^\s*#' compose.yaml) <(grep -v '^\s*#' <repo>/infra/compose.example.yaml)
+#
+# ⚠️ compose.yaml 안의 $ 는 변수로 해석된다. 값에 $ 가 있으면 $$ 로 적는다 (비밀번호 해시가 대표적).
+#
+# 컨테이너는 평문 HTTP 만 연다. TLS·도메인은 앞단(리버스 프록시·터널)이 맡는다.
+name: alphafolio
 
 services:
-  alphafolio:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile
-    image: alphafolio:local
-    container_name: alphafolio
+  app:
+    # 금융 앱이라 latest 대신 버전을 고정한다 (Actions → Bump & release 로 나온 버전)
+    # 로컬 빌드로 띄우려면: image: alphafolio:local + pull_policy: missing  (task docker:build)
+    image: ghcr.io/preinpost/alphafolio:latest
+    pull_policy: always
+    init: true              # PID 1 = tini — 시그널·좀비 처리
     restart: unless-stopped
-
     ports:
-      # 프록시가 같은 호스트에 있으면 루프백 바인딩을 권장한다 (외부 직접 노출 차단)
+      # 루프백에만 연다 — 같은 호스트의 프록시·터널만 들어온다.
+      # 0.0.0.0 으로 열면 프록시를 거치지 않고 붙을 수 있어 AF_TRUST_PROXY=1 을 쓰면 안 된다.
       - "127.0.0.1:8080:8080"
-
     volumes:
-      # 대화 이력 보존 — 없으면 컨테이너 재시작 때마다 세션이 사라진다.
-      # 가계부 데이터는 D1(원격)이라 이 볼륨과 무관하다.
-      - alphafolio-data:/data
-      # (b) 호스트 pi 로그인 재사용 시 — 읽기 전용 마운트
+      - data:/data          # 대화 세션. 가계부·계정·개인 키는 D1 에 있다
+      # 웹 검색 확장 설정 (검색 프로바이더 키 포함). 파일이 없으면 Docker 가 디렉터리를 만들어 버리므로
+      # 안 쓰면 이 줄을 지우거나 빈 설정을 둔다:  echo '{}' > web-search.json && chmod 600 web-search.json
+      - ./web-search.json:/app/agent-config/web-search.json:ro
+      # LLM 을 API 키 대신 호스트의 pi 로그인(OAuth)으로 쓸 때 — 아래 AF_PI_AUTH_PATH 와 함께
       # - ${HOME}/.pi/agent/auth.json:/secrets/auth.json:ro
-      # 웹 검색 설정 (검색 프로바이더 키 포함) — 필요할 때만
-      # - ./web-search.json:/app/agent-config/web-search.json:ro
 
     environment:
-      # ── 로그인 (여러 명이 한 컨테이너를 공유한다) ──────────────
-      # 해시 생성: node apps/server/scripts/hash-password.mjs '비밀번호'
-      AF_USERS: >-
-        [{"name":"user1","passwordHash":"scrypt$..."},
-         {"name":"user2","passwordHash":"scrypt$..."}]
-      # ⚠️ 반드시 고정할 것. 비우면 재시작마다 모든 로그인 토큰이 무효화된다.
-      #    생성: openssl rand -hex 32
+      # ── 인증 ────────────────────────────────────────────────────────
+      # 토큰 서명 + D1 에 저장되는 사용자별 키(증권·LLM)의 암호화 마스터.
+      # 반드시 고정. 바꾸면 모든 로그인이 끊기고, 이미 저장된 개인 키를 읽을 수 없게 된다.
+      #   생성: openssl rand -hex 32
       AF_AUTH_SECRET: ""
 
-      # ── 모델 ──────────────────────────────────────────────────
-      AF_DEFAULT_MODEL: openrouter/deepseek/deepseek-v4.1-flash
-      # 사고 강도 off/minimal/low/medium/high/xhigh/max (기본 high)
-      AF_DEFAULT_THINKING: high
-      # 아래 둘 중 하나로 LLM 인증을 준다.
-      #  (a) API 키를 env로 주입 (권장 — 배포 정석)
-      OPENROUTER_API_KEY: ""
-      #  (b) 호스트의 pi OAuth 로그인을 재사용 — volumes 의 auth.json 마운트를 함께 켠다
-      # AF_PI_AUTH_PATH: /secrets/auth.json
+      # env 계정 = 슈퍼관리자 (초대 코드 발급·계정 관리). 가입한 사용자는 D1 에 저장된다.
+      #   생성: node apps/server/scripts/hash-password.mjs --name admin   ← compose 용($$) 줄을 그대로 붙인다
+      AF_USERS: '[{"name":"admin","passwordHash":"scrypt$$..."}]'
 
-      # 유휴 런타임 정리 기준(분). 접속이 없으면 세션을 메모리에서 내린다
-      AF_IDLE_MINUTES: "60"
-
-      # iOS 앱 오리진 허용 목록 (비우면 capacitor://localhost)
-      # AF_CORS_ORIGINS: "capacitor://localhost"
-
-      # ── 웹 검색 (선택) ─────────────────────────────────────────
-      # pi-web-access 는 <agentDir>/web-search.json 을 읽는다. 시크릿이 들어가므로
-      # 이미지에 넣지 말고 파일로 마운트한다 (volumes 참고).
-
-      # ── 가계부 (Cloudflare D1) — 가구 공유, 기록자만 구분된다 ──
+      # ── 가계부·계정·개인 키 DB (Cloudflare D1) ──────────────────────
       AF_D1_ACCOUNT_ID: ""
       AF_D1_DATABASE_ID: ""
       AF_D1_TOKEN: ""
 
-      # ── 증권·시세 ──────────────────────────────────────────────
-      # 사람마다 다른 증권 계정을 쓰므로 **앱의 설정 화면에서 개인별로 입력**한다
-      # (D1 의 user_secrets 에 암호화 저장). 아래 env 는 전 사용자 공통 기본값일
-      # 뿐이라 가족이 함께 쓸 때는 비워두는 편이 낫다.
-      KIS_APP_KEY: ""
-      KIS_APP_SECRET: ""
-      KIS_ACCOUNT_NO: ""
-      # 모의투자로 붙이려면 paper (모의계좌는 별도 앱키가 필요하다)
-      AF_KIS_ENV: real
+      # ── 모델 ────────────────────────────────────────────────────────
+      AF_DEFAULT_MODEL: openrouter/deepseek/deepseek-v4.1-flash
+      # 사고 강도 off/minimal/low/medium/high/xhigh/max
+      AF_DEFAULT_THINKING: high
+      # 서버 기본 LLM 키. 사용자가 설정 화면에 자기 키를 넣으면 그게 우선한다.
+      OPENROUTER_API_KEY: ""
+      # 대신 호스트 pi 로그인을 쓰려면 위 auth.json 마운트를 켜고:
+      # AF_PI_AUTH_PATH: /secrets/auth.json
+
+      # ── 네트워크 ────────────────────────────────────────────────────
+      # 프록시·터널 뒤에서만 "1". 로그인·가입 시도 제한이 실제 클라이언트 IP 로 센다
+      AF_TRUST_PROXY: "1"
+      # iOS 앱 오리진 (비우면 capacitor://localhost)
+      # AF_CORS_ORIGINS: capacitor://localhost
+
+      # ── 선택 ────────────────────────────────────────────────────────
+      # 유휴 대화를 메모리에서 내리는 기준(분). 응답 중인 대화는 기준과 무관하게 끝까지 돈다
+      # AF_IDLE_MINUTES: "60"
+      # KIS 모의투자 (모의계좌는 별도 앱키)
+      # AF_KIS_ENV: paper
+      # 일별 포트폴리오 스냅샷 끄기
+      # AF_SNAPSHOT_DISABLED: "1"
+
+      # ⚠️ 증권(KIS·토스)·뉴스 키는 여기 넣지 않는다 — env 값은 모든 사용자의 공통 기본값이 된다.
+      #    각자 앱의 설정 → 연결 탭에서 입력한다 (D1 에 사용자별로 암호화 저장).
 
     logging:
       driver: json-file
@@ -80,4 +85,4 @@ services:
         max-file: "3"
 
 volumes:
-  alphafolio-data:
+  data:

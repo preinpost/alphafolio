@@ -10,6 +10,7 @@ dist/
 .env.*
 !.env.example
 infra/compose.yaml
+infra/web-search.json
 
 # 런타임 데이터 — 대화 세션 로그(JSONL), 모델 캐시, 복사된 auth.json.
 # ⚠️ 절대 커밋하지 말 것. 세션에는 사용자의 대화와 가계부 내역이 그대로 남는다.
