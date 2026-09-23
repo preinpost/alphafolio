@@ -79,8 +79,8 @@ export function SettingsPage() {
 					<h2 className="mb-2 text-sm font-medium text-muted">서버 연결</h2>
 					<div className="space-y-2 rounded-xl border border-line p-3">
 						<p className="text-xs text-faint">
-							가계부와 개인 키는 서버에 등록된 Cloudflare D1 한 곳에 저장됩니다. 접속 정보는 서버 환경변수로만
-							설정합니다.
+							가계부와 개인 키는 서버 DB에 저장됩니다. DB 연결은 서버에서 관리하므로 여기서는 따로
+							설정하지 않아도 됩니다.
 						</p>
 						<div className="flex items-center gap-2">
 							<button

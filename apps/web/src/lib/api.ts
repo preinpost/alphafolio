@@ -1,5 +1,6 @@
 /** REST 클라이언트 — Bearer 토큰을 붙이고 401이면 로그아웃시킨다. */
 import type {
+	ConversationListItem,
 	BrokerHolding,
 	BrokerOrder,
 	LedgerBudgetRow,
@@ -75,6 +76,9 @@ export const api = {
 	health: () => request<{ ok: boolean; ledger: boolean; model: string }>("/api/health"),
 
 	me: () => request<{ user: string; groups: string[] }>("/api/me"),
+
+	/** 대화 목록 (최근 순) — 응답 중인 대화 표시 포함 */
+	sessions: () => request<ConversationListItem[]>("/api/sessions"),
 
 	portfolio: () =>
 		request<{

@@ -188,6 +188,32 @@ body {
 html.ua-keyboard .composer-bar {
   padding-bottom: 0.5rem;
 }
+/* 키보드가 열리면 화면이 좁으니 보조 문구는 접는다 */
+html.ua-keyboard .hide-on-keyboard {
+  display: none;
+}
+
+/*
+ * 네이티브 앱 느낌 (Capacitor WKWebView / 모바일 Safari).
+ * - 탭 하이라이트(회색 박스) 제거 — 눌림 피드백은 active: 유틸리티로 준다
+ * - 버튼·내비는 길게 눌러도 텍스트 선택/콜아웃 메뉴가 뜨지 않게 (메시지 본문은 선택 가능 유지)
+ */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+button,
+nav,
+header,
+aside {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+img {
+  -webkit-touch-callout: none;
+}
 
 /* 마크다운 본문 색을 토큰에 맞춤 (라이트/다크 자동) */
 .prose {

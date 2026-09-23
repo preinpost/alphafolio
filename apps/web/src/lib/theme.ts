@@ -31,7 +31,7 @@ export function applyTheme(mode: ThemeMode): void {
 
 	// 모바일 브라우저 주소창·상태바 색도 맞춘다
 	const meta = document.querySelector('meta[name="theme-color"]');
-	if (meta) meta.setAttribute("content", dark ? "#1f1e1d" : "#faf9f5");
+	if (meta) meta.setAttribute("content", dark ? "#0e1622" : "#f6f8fb");
 }
 
 export function setThemeMode(mode: ThemeMode): void {

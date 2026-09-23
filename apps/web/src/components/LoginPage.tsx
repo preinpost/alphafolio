@@ -23,7 +23,7 @@ export function LoginPage({ onSuccess }: { onSuccess: () => void }) {
 	}
 
 	return (
-		<div className="flex min-h-dvh items-center justify-center bg-canvas px-6">
+		<div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-canvas px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
 			<form onSubmit={submit} className="w-full max-w-sm space-y-5">
 				<div className="flex flex-col items-center gap-3">
 					<div className="flex size-12 items-center justify-center rounded-2xl bg-accent text-2xl font-semibold text-accent-ink">
