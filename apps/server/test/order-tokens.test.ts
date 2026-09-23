@@ -20,16 +20,23 @@ const SECRET = "test-master-secret-0123456789";
 function base(): Omit<OrderTokenPayload, "exp" | "nonce"> {
 	return {
 		u: "ms",
-		broker: "toss",
-		symbol: "005930",
-		side: "BUY",
-		orderType: "LIMIT",
-		quantity: 10,
-		price: 277_500,
-		estimatedAmount: 2_775_000,
-		currency: "KRW",
+		action: {
+			kind: "place",
+			broker: "toss",
+			symbol: "005930",
+			market: "KR",
+			currency: "KRW",
+			side: "BUY",
+			orderType: "LIMIT",
+			quantity: 10,
+			price: 277_500,
+			estimatedAmount: 2_775_000,
+		},
 	};
 }
+
+type Place = Extract<OrderTokenPayload["action"], { kind: "place" }>;
+const place = (p: OrderTokenPayload): Place => p.action as Place;
 
 /** 토큰 본문을 바꿔치기한다 (서명은 원본 그대로 둔다). */
 function tamper(token: string, mutate: (p: OrderTokenPayload) => void): string {
@@ -47,8 +54,8 @@ describe("정상 경로", () => {
 		const r = guard.verify(token, SECRET, "ms");
 
 		assert.equal(r.ok, true);
-		assert.equal(r.ok && r.payload.symbol, "005930");
-		assert.equal(r.ok && r.payload.quantity, 10);
+		assert.equal(r.ok && place(r.payload).symbol, "005930");
+		assert.equal(r.ok && place(r.payload).quantity, 10);
 		assert.equal(r.ok && r.payload.nonce, payload.nonce);
 	});
 
@@ -78,7 +85,7 @@ describe("변조 차단", () => {
 		const guard = new OrderTokenGuard();
 		const { token } = createOrderToken(base(), SECRET);
 		const forged = tamper(token, (p) => {
-			p.quantity = 10_000;
+			place(p).quantity = 10_000;
 		});
 		const r = guard.verify(forged, SECRET, "ms");
 		assert.equal(r.ok, false);
@@ -89,7 +96,25 @@ describe("변조 차단", () => {
 		const guard = new OrderTokenGuard();
 		const { token } = createOrderToken(base(), SECRET);
 		const forged = tamper(token, (p) => {
-			p.side = "SELL";
+			place(p).side = "SELL";
+		});
+		assert.equal(guard.verify(forged, SECRET, "ms").ok, false);
+	});
+
+	it("증권사를 바꾼 토큰을 거절한다 (토스로 준비한 주문을 KIS 로)", () => {
+		const guard = new OrderTokenGuard();
+		const { token } = createOrderToken(base(), SECRET);
+		const forged = tamper(token, (p) => {
+			place(p).broker = "kis";
+		});
+		assert.equal(guard.verify(forged, SECRET, "ms").ok, false);
+	});
+
+	it("신규 주문을 취소로 바꾼 토큰을 거절한다 (동작 종류 변조)", () => {
+		const guard = new OrderTokenGuard();
+		const { token } = createOrderToken(base(), SECRET);
+		const forged = tamper(token, (p) => {
+			(p.action as { kind: string }).kind = "cancel";
 		});
 		assert.equal(guard.verify(forged, SECRET, "ms").ok, false);
 	});

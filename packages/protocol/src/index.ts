@@ -312,7 +312,7 @@ export interface OrderPreviewCard {
 	ok: boolean;
 	token: string | null;
 	expiresAt: number | null;
-	broker: "toss";
+	broker: "toss" | "kis";
 	symbol: string;
 	name: string;
 	side: "BUY" | "SELL";

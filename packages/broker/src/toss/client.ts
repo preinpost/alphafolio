@@ -162,7 +162,7 @@ function unwrap(json: unknown): unknown {
 }
 
 interface CallSpec {
-	method: "GET" | "POST";
+	method: "GET" | "POST" | "DELETE";
 	path: string;
 	query?: TossRequestOptions["query"];
 	accountSeq?: number;
@@ -244,6 +244,24 @@ export async function tossGet<T>(ctx: TossContext, path: string, opts: TossReque
  *    중복 주문이 될 수 있기 때문이다. 토큰 만료(401)만 1회 재시도하는데, 이때도
  *    호출부가 clientOrderId(멱등성 키)를 실어 보내므로 중복이 생기지 않는다.
  */
+/**
+ * 토스 DELETE (조건주문 취소). POST 와 같은 규칙 — 자동 재시도 없음, 토큰 만료(401)만 1회.
+ */
+export async function tossDelete<T>(ctx: TossContext, path: string, opts: { accountSeq: number; group?: string }): Promise<T> {
+	const group = opts.group ?? "CONDITIONAL_ORDER";
+	const lane = `${ctx.creds.clientId}:${group}`;
+	const spec: CallSpec = { method: "DELETE", path, accountSeq: opts.accountSeq };
+	return throttled(lane, RATE_MS[group] ?? 300, async () => {
+		const first = await callOnce<T>(ctx, spec, await getToken(ctx));
+		if (first.ok) return first.data;
+		if (first.err.status !== 401) throw first.err;
+		await ctx.store.delete(tokenKey(ctx.owner, ctx.creds.clientId));
+		const retry = await callOnce<T>(ctx, spec, await getToken(ctx));
+		if (retry.ok) return retry.data;
+		throw retry.err;
+	});
+}
+
 export async function tossPost<T>(ctx: TossContext, path: string, opts: TossWriteOptions): Promise<T> {
 	const group = opts.group ?? "ORDER_INFO";
 	const lane = `${ctx.creds.clientId}:${group}`;

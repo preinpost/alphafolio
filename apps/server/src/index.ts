@@ -20,7 +20,6 @@ import {
 	parseAccount,
 	TossCredentialsMissingError,
 	cancelOrder,
-	createOrder,
 	defaultAccountSeq,
 	listOrders,
 	NaverCredentialsMissingError,
@@ -29,6 +28,9 @@ import {
 	type KisContext,
 	type NaverCredentials,
 	type TossContext,
+	describeAction,
+	executeOrderAction,
+	type OrderAction,
 } from "@alphafolio/broker";
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
@@ -200,11 +202,9 @@ async function main(): Promise<void> {
 	 * 토큰을 모르므로 이 엔드포인트를 스스로 부를 수 없다.
 	 */
 	const orderGuard = new OrderTokenGuard();
-	const prepareOrder = (user: string) => (p: Parameters<typeof createOrderToken>[0] extends never ? never : Omit<Parameters<typeof createOrderToken>[0], "u">) => {
-		const { token, payload } = createOrderToken({ ...p, u: user }, cfg.auth.secret);
-		console.log(
-			`[order] 준비 user=${user} ${p.symbol} ${p.side} ${p.quantity}주 ${p.orderType} nonce=${payload.nonce}`,
-		);
+	const prepareOrder = (user: string) => (action: OrderAction) => {
+		const { token, payload } = createOrderToken({ u: user, action }, cfg.auth.secret);
+		console.log(`[order] 준비 user=${user} ${describeAction(action)} nonce=${payload.nonce}`);
 		return { token, expiresAt: payload.exp };
 	};
 
@@ -482,26 +482,15 @@ async function main(): Promise<void> {
 				const verified = orderGuard.verify(String(body.token ?? ""), cfg.auth.secret, user);
 				if (!verified.ok) throw new HttpError(400, failureMessage(verified.reason));
 
-				const order = verified.payload;
+				const { action, nonce } = verified.payload;
 				// 주문을 보내기 **전에** 소비한다 — 더블클릭·재전송이 두 번 나가지 않게.
 				// 실패해도 재사용을 허용하지 않는 쪽이 안전하다 (재요청은 새 확인을 받는다).
-				orderGuard.consume(order.nonce);
+				orderGuard.consume(nonce);
+				console.log(`[order] 실행 user=${user} ${describeAction(action)} nonce=${nonce}`);
 
-				const ctx = tossContext(user);
-				const accountSeq = await defaultAccountSeq(ctx);
-				console.log(`[order] 실행 user=${user} ${order.symbol} ${order.side} ${order.quantity} nonce=${order.nonce}`);
-
-				const created = await createOrder(ctx, accountSeq, {
-					symbol: order.symbol,
-					side: order.side,
-					orderType: order.orderType,
-					quantity: String(order.quantity),
-					...(order.orderType === "LIMIT" && order.price !== undefined ? { price: String(order.price) } : {}),
-					// nonce 를 멱등성 키로 — 브로커 레벨에서도 중복 주문이 막힌다
-					clientOrderId: order.nonce,
-				});
-
-				json(res, 200, { ok: true, orderId: created.orderId, symbol: order.symbol });
+				// 동작 종류·증권사는 토큰 값만 본다 (execute.ts)
+				const result = await executeOrderAction(action, nonce, brokerAccess(user));
+				json(res, 200, { ok: true, ...result });
 				return;
 			}
 

@@ -10,30 +10,23 @@
  *   1. 에이전트는 `order_prepare` 로 **준비만** 한다 → 서명된 토큰이 담긴 확인 카드
  *   2. 사람이 카드에서 [확인] 클릭 → `POST /api/orders/execute` 가 토큰을 받아 실행
  *
- * 토큰은 주문 내용 전체에 서명돼 있어 모델이 위조·변조할 수 없고,
+ * 토큰에는 동작(OrderAction — 신규·정정·취소·조건주문) 전체가 담기고 서명돼 있어 모델이 위조·변조할 수 없고,
  * **1회용 + 짧은 만료**라 재사용도 안 된다. nonce 는 브로커의 멱등성 키로도 쓰여
  * 더블클릭·네트워크 재시도가 중복 주문이 되지 않는다.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import type { OrderAction } from "@alphafolio/broker";
 
 export const ORDER_TOKEN_TTL_MS = 2 * 60_000;
 
 export interface OrderTokenPayload {
 	/** 토큰을 발급받은 사용자 — 다른 사용자가 쓰지 못하게 검증한다 */
 	u: string;
-	broker: "toss" | "kis";
-	symbol: string;
-	side: "BUY" | "SELL";
-	orderType: "LIMIT" | "MARKET";
-	quantity: number;
-	/** 지정가일 때만 */
-	price?: number;
-	/** 표시용 — 실행 시 재계산하지 않고 로그에만 쓴다 */
-	estimatedAmount: number;
-	currency: "KRW" | "USD";
+	/** 실행할 동작 전체 — 실행기는 이 값만 보고 증권사·API 를 고른다 */
+	action: OrderAction;
 	/** epoch ms */
 	exp: number;
-	/** 1회용 식별자 = 브로커 멱등성 키 */
+	/** 1회용 식별자 = 브로커 멱등성 키 (토스 clientOrderId) */
 	nonce: string;
 }
 

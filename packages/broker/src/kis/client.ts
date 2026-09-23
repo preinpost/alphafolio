@@ -113,6 +113,66 @@ export async function kisGetPage(ctx: KisContext, opts: CallOptions): Promise<Ki
 	});
 }
 
+export interface PostOptions {
+	path: string;
+	trId: string;
+	/** KIS 규격: POST 본문 키는 대문자, 값은 문자열 */
+	body: Record<string, string>;
+	label: string;
+}
+
+/**
+ * KIS POST — **주문·정정·취소처럼 돈을 움직이는 호출.** 서버의 확인 실행 경로(execute.ts)에서만 쓴다.
+ *
+ * ⚠️ 자동 재시도하지 않는다. KIS 주문에는 멱등성 키가 없어서, 응답을 못 받은 뒤 다시 보내면
+ *    **중복 주문**이 된다. 예외는 토큰 만료(EGW00121 등) 하나 — 게이트웨이가 인증 단계에서 거절한 것이라
+ *    주문이 접수되지 않았으므로 한 번만 다시 보낸다.
+ * hashkey 헤더는 규격상 선택이라 쓰지 않는다 (호출이 하나 늘고, 그 호출의 실패가 주문 실패가 된다).
+ */
+export async function kisPost(ctx: KisContext, opts: PostOptions): Promise<KisResponse> {
+	const lane = appKeyHash(ctx.creds.appKey);
+	const send = async (token: string): Promise<KisResponse> => {
+		const res = await fetch(new URL(opts.path, baseUrl(ctx.creds.env)), {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${token}`,
+				appkey: ctx.creds.appKey,
+				appsecret: ctx.creds.appSecret,
+				tr_id: opts.trId,
+				custtype: "P",
+				"content-type": "application/json; charset=utf-8",
+			},
+			body: JSON.stringify(opts.body),
+		});
+		const text = await res.text();
+		let json: KisResponse;
+		try {
+			json = JSON.parse(text) as KisResponse;
+		} catch {
+			throw new KisError(`응답을 파싱할 수 없습니다 (HTTP ${res.status}): ${text.slice(0, 200)}`, { status: res.status, api: opts.label });
+		}
+		if (!res.ok || (json.rt_cd !== undefined && json.rt_cd !== "0")) {
+			throw new KisError(`${opts.label} 실패: ${json.msg1 ?? text.slice(0, 200)}`, {
+				status: res.status,
+				code: typeof json.msg_cd === "string" ? json.msg_cd : undefined,
+				api: opts.label,
+			});
+		}
+		return json;
+	};
+	return withRateLimit(lane, async () => {
+		const token = await getToken(ctx.creds, ctx.store, ctx.owner);
+		try {
+			return await send(token);
+		} catch (err) {
+			const tokenError = err instanceof KisError && err.code !== undefined && TOKEN_ERROR_CODES.has(err.code);
+			if (!tokenError) throw err;
+			await invalidateToken(ctx.creds, ctx.store, ctx.owner);
+			return send(await getToken(ctx.creds, ctx.store, ctx.owner));
+		}
+	});
+}
+
 /** 계좌가 필요한 API 에서 CANO/ACNT_PRDT_CD 를 뽑는다. */
 export function accountParams(creds: KisCredentials): { CANO: string; ACNT_PRDT_CD: string } {
 	if (!creds.cano) {
