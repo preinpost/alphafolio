@@ -46,6 +46,22 @@ describe("호가단위 (KRX 2023 개정)", () => {
 		assert.equal(roundToTick("US", 342.789), 342.78);
 	});
 
+	it("이미 센트 단위인 미국 가격은 그대로 둔다 — $0.01~$10,000 전수 (1센트 깎이던 버그)", () => {
+		const wrong: string[] = [];
+		for (let cents = 1; cents <= 1_000_000; cents++) {
+			const p = cents / 100;
+			if (roundToTick("US", p) !== p || !isOnTick("US", p)) wrong.push(String(p));
+		}
+		assert.deepEqual(wrong.slice(0, 5), [], `${wrong.length}개 틀림`);
+	});
+
+	it("센트 아래는 여전히 내림한다 (반올림으로 바뀌지 않았다)", () => {
+		assert.equal(roundToTick("US", 4.359), 4.35);
+		assert.equal(roundToTick("US", 4.351), 4.35);
+		assert.equal(roundToTick("US", 1084.2599), 1084.25);
+		assert.equal(roundToTick("US", 0.299), 0.29);
+	});
+
 	it("부동소수점 오차 없이 판정한다", () => {
 		assert.equal(isOnTick("US", 342.8), true);
 		assert.equal(isOnTick("US", 342.789), false);

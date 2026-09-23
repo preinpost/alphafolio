@@ -65,10 +65,15 @@ export function tickSize(market: Market, price: number): number {
 
 /** 호가단위에 맞춰 내림한다 (매수·매도 모두 — 올림은 의도치 않게 비싸게 산다). */
 export function roundToTick(market: Market, price: number): number {
+	if (market === "US") {
+		// 센트 정수로 계산한다. price / 0.01 로 나누면 4.35 가 434.99999… 가 되어 floor 가 1센트를 깎았다
+		// ($1~$1,000 센트 가격의 9% — 사용자가 넣은 지정가가 조용히 1센트 내려갔다). 마이크로달러로 먼저
+		// 반올림해 부동소수점 잡음을 없앤 뒤 센트로 내림한다.
+		const micros = Math.round(price * 1_000_000);
+		return Math.floor(micros / 10_000) / 100;
+	}
 	const tick = tickSize(market, price);
-	const rounded = Math.floor(price / tick) * tick;
-	// 부동소수점 오차 제거 (US 0.01 단위)
-	return market === "US" ? Math.round(rounded * 100) / 100 : rounded;
+	return Math.floor(price / tick) * tick;
 }
 
 export function isOnTick(market: Market, price: number): boolean {
