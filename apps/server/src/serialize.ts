@@ -37,6 +37,8 @@ const CARD_KINDS = new Set([
 	"news-card",
 	"order-preview-card",
 	"order-list-card",
+	"order-change-card",
+	"conditional-order-card",
 	"overview-card",
 ]);
 

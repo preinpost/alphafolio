@@ -132,7 +132,7 @@ export const api = {
 
 	// ⚠️ 실제 주문이 나가는 유일한 클라이언트 경로. 확인 카드의 버튼에서만 호출한다.
 	executeOrder: (token: string) =>
-		request<{ ok: boolean; orderId: string; symbol: string }>("/api/orders/execute", {
+		request<{ ok: boolean; message: string; orderId?: string; conditionalOrderId?: string }>("/api/orders/execute", {
 			method: "POST",
 			body: JSON.stringify({ token }),
 		}),

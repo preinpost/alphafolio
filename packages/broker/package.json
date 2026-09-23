@@ -6,7 +6,8 @@
   "description": "증권 도메인 — KIS REST 클라이언트(자격증명 주입식) + 시세·잔고 툴. 멀티유저를 위해 process.env 를 읽지 않는다.",
   "exports": {
     ".": "./src/index.ts",
-    "./tools": "./src/tools.ts"
+    "./tools": "./src/tools.ts",
+    "./order-tools": "./src/order-tools.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

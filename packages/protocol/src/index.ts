@@ -8,6 +8,9 @@
 
 // ── 카드 (툴 결과 details) ──────────────────────────────────────────────
 
+import type { ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
+export type { ConditionalLegView, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
+
 export interface LedgerTxCard {
 	kind: "ledger-tx";
 	/** 실제로 쓴·읽은 가계부 이름 (가계부 분리 이전 세션의 카드에는 없다) */
@@ -380,6 +383,8 @@ export type UICard =
 	| NewsCard
 	| OrderPreviewCard
 	| OrderListCard
+	| OrderChangeCard
+	| ConditionalOrderCard
 	| OverviewCard;
 
 // ── 메시지 ──────────────────────────────────────────────────────────────

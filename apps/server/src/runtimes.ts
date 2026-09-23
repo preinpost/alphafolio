@@ -19,6 +19,7 @@ import {
 } from "@alphafolio/agent";
 import { createLedgerTools, type D1Provider } from "@alphafolio/ledger/tools";
 import { createBrokerTools } from "@alphafolio/broker/tools";
+import { createOrderTools } from "@alphafolio/broker/order-tools";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
 import { ConversationPool, SESSION_ID_RE } from "./conversations.ts";
@@ -139,6 +140,8 @@ export class RuntimeManager {
 					naver: () => this.opts.naverCreds(user),
 					prepareOrder: this.opts.prepareOrder(user),
 				}),
+				// 정정·취소·조건주문 — 역시 준비만 (확인 카드)
+				...createOrderTools({ brokers: this.opts.brokerAccess(user), prepareOrder: this.opts.prepareOrder(user) }),
 			],
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});
