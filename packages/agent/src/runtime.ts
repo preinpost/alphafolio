@@ -75,12 +75,20 @@ export interface SessionSummary {
  * 같은 대화를 끌어다 쓴다. 대화별로 두면 한 대화가 응답하는 동안 다른 대화를 읽을 수 있고,
  * 클라이언트가 끊겨도(앱 종료) 그 대화는 서버에서 끝까지 돈다.
  */
+/** 첨부 이미지 — base64 (data: 접두사 없음). 검증은 서버(images.ts)가 먼저 한다. */
+export interface ImageInput {
+	mimeType: string;
+	data: string;
+}
+
 export interface AlphaFolioConversation {
 	subscribe(listener: (event: unknown) => void): () => void;
-	prompt(text: string): Promise<void>;
-	steer(text: string): Promise<void>;
-	followUp(text: string): Promise<void>;
+	prompt(text: string, images?: ImageInput[]): Promise<void>;
+	steer(text: string, images?: ImageInput[]): Promise<void>;
+	followUp(text: string, images?: ImageInput[]): Promise<void>;
 	abort(): Promise<void>;
+	/** 지금 모델이 이미지를 읽을 수 있는가 — 못 읽는데 보내면 SDK 가 이미지를 조용히 뺄 수 있어 미리 막는다 */
+	readonly acceptsImages: boolean;
 	readonly sessionId: string;
 	readonly isStreaming: boolean;
 	readonly messages: unknown[];
@@ -172,10 +180,14 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 				listeners.add(listener);
 				return () => listeners.delete(listener);
 			},
-			prompt: (text) => session.prompt(text),
-			steer: (text) => session.steer(text),
-			followUp: (text) => session.followUp(text),
+			prompt: (text, images) => session.prompt(text, images?.length ? { images: toContent(images) } : undefined),
+			steer: (text, images) => session.steer(text, images?.length ? toContent(images) : undefined),
+			followUp: (text, images) => session.followUp(text, images?.length ? toContent(images) : undefined),
 			abort: () => session.abort(),
+			get acceptsImages() {
+				const input = (session.model as { input?: string[] } | undefined)?.input;
+				return Array.isArray(input) && input.includes("image");
+			},
 			get sessionId() {
 				return session.sessionId;
 			},
@@ -222,4 +234,8 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 			else await modelRuntime.removeRuntimeApiKey(providerId);
 		},
 	};
+}
+
+function toContent(images: ImageInput[]): Array<{ type: "image"; mimeType: string; data: string }> {
+	return images.map((i) => ({ type: "image" as const, mimeType: i.mimeType, data: i.data }));
 }

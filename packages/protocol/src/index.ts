@@ -392,6 +392,15 @@ export interface UIMessage {
 // ── WebSocket ───────────────────────────────────────────────────────────
 
 /**
+ * 채팅 이미지 첨부 — base64 (data: 접두사 없음).
+ * 앱이 긴 변 1600px JPEG 로 줄여서 보낸다. 최대 4장·장당 4MB (서버 images.ts 가 검증).
+ */
+export interface ImageAttachment {
+	mimeType: string;
+	data: string;
+}
+
+/**
  * 한 소켓은 한 번에 **대화 하나**에 붙는다 (PLAN §24). prompt·steer·abort 는 그 대화에 간다.
  * sessionId 가 null/없음이면 새 대화.
  */
@@ -399,8 +408,8 @@ export type ClientMessage =
 	| { type: "auth"; token: string; sessionId?: string | null }
 	/** 다른 대화로 옮기기 (사이드바 클릭·뒤로 가기). null 이면 새 대화 */
 	| { type: "open"; sessionId: string | null }
-	| { type: "prompt"; text: string }
-	| { type: "steer"; text: string }
+	| { type: "prompt"; text: string; images?: ImageAttachment[] }
+	| { type: "steer"; text: string; images?: ImageAttachment[] }
 	| { type: "abort" }
 	/** open(null) 과 같다 — 이전 클라이언트 호환 */
 	| { type: "new_session" }

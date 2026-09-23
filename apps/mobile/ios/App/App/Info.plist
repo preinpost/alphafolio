@@ -29,6 +29,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>영수증이나 화면을 찍어 채팅에 첨부합니다.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>사진을 골라 채팅에 첨부합니다.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

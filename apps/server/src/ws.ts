@@ -19,6 +19,7 @@ import type { Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { ClientMessage, StreamMessage } from "@alphafolio/protocol";
 import { verifyToken } from "./auth.ts";
+import { checkImages, MAX_WS_PAYLOAD } from "./images.ts";
 import type { RuntimeManager } from "./runtimes.ts";
 import { serializeMessages } from "./serialize.ts";
 import { CotStreamFilter } from "./thinkingText.ts";
@@ -53,7 +54,8 @@ interface Client {
 }
 
 export function attachWebSocket(server: Server, deps: WsDeps): void {
-	const wss = new WebSocketServer({ noServer: true });
+	// 기본 한도(100MB)는 너무 크다 — 이미지 첨부 최대치까지만 받는다
+	const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
 	/** 사용자별 인증된 소켓 */
 	const clients = new Map<string, Set<Client>>();
 	/** 대화별 사고 독백 필터 — 대화마다 스트림이 따로라 상태도 따로 둔다 */
@@ -268,20 +270,41 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 		}
 		deps.runtimes.touch(c.user, sessionId);
 
+		// 이미지 — 형식·크기 검증, 모델이 못 읽으면 보내기 전에 알린다 (SDK 가 조용히 빼지 않게)
+		let images: Array<{ mimeType: string; data: string }> = [];
+		if (msg.type === "prompt" || msg.type === "steer") {
+			const checked = checkImages(msg.images);
+			if (!checked.ok) {
+				sendTo(c, { type: "error", message: checked.error });
+				return;
+			}
+			images = checked.images;
+			if (images.length > 0 && !conv.acceptsImages) {
+				sendTo(c, { type: "error", message: `지금 모델(${conv.modelLabel})은 이미지를 읽지 못합니다` });
+				return;
+			}
+		}
+		// 이미지만 보내도 된다 — 질문이 없으면 무엇인지 묻는 것으로 본다
+		const text = (msg.type === "prompt" || msg.type === "steer") && !msg.text.trim() && images.length > 0
+			? "이 이미지를 봐줘."
+			: msg.type === "prompt" || msg.type === "steer"
+				? msg.text
+				: "";
+
 		switch (msg.type) {
 			case "prompt":
-				if (!msg.text.trim()) return;
+				if (!text.trim()) return;
 				// 응답은 기다리지 않는다 — 기다리면 이 소켓의 다음 명령(다른 대화로 옮기기 등)이 답이 끝날 때까지 막힌다.
 				// 소켓이 끊겨도 대화는 끝까지 돈다. 실패는 그때 보고 있는 사람에게 알리고 로그에 남긴다.
 				// 클라이언트의 streaming 상태는 믿지 않는다 — 다른 탭·기기에서 같은 대화가 진행 중일 수 있다.
-				void (conv.isStreaming ? conv.followUp(msg.text) : conv.prompt(msg.text)).catch((err: unknown) => {
+				void (conv.isStreaming ? conv.followUp(text, images) : conv.prompt(text, images)).catch((err: unknown) => {
 					console.warn(`[agent] 응답 실패 — user=${c.user} session=${sessionId}:`, err);
 					toViewers(c.user, sessionId, { type: "error", message: err instanceof Error ? err.message : String(err) });
 				});
 				return;
 			case "steer":
-				if (!msg.text.trim()) return;
-				await conv.steer(msg.text);
+				if (!text.trim()) return;
+				await conv.steer(text, images);
 				return;
 			case "abort":
 				await conv.abort();

@@ -5,6 +5,7 @@
  * 서버를 임의 포트로 직접 띄우고 끝나면 종료시킨다 (실행 중인 서버가 있어도 충돌 없음).
  */
 import { spawn } from "node:child_process";
+import { deflateSync } from "node:zlib";
 import { hashPassword } from "../src/users.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -238,6 +239,18 @@ async function main() {
 		`목록 ${listed ? `"${listed.title}" streaming=${listed.streaming}` : "없음"} / 답 "${answer.slice(0, 40)}"`,
 	);
 	check("대화 목록 제목 = 첫 메시지", listed?.title?.startsWith("숫자 1부터 5까지") === true, listed?.title ?? "(없음)");
+
+	// 이미지 첨부 — 서버 검증 → 모델까지 실제로 가는지 (단색 PNG 의 색을 맞히게 한다)
+	console.log("\n── 이미지 첨부 ───────────────────────────────────────");
+	const fake = await wsTest(token, "이거 봐줘", [{ mimeType: "image/png", data: Buffer.from("%PDF-1.7 not an image").toString("base64") }]);
+	check("이미지가 아닌 첨부는 모델 호출 전에 거절", /지원하는 이미지/.test(fake.error ?? ""), fake.error ?? "(오류 없음)");
+	const red = await wsTest(token, "이 이미지는 무슨 색이야? 색 이름 한 단어로만 답해.", [{ mimeType: "image/png", data: solidPng(64, 64, [230, 20, 20]) }]);
+	check("모델이 첨부 이미지를 읽음", /빨|레드|red|적색/i.test(red.text), red.error ?? red.text.slice(0, 40));
+	const redBack = red.sessionId ? await wsOpen(token, red.sessionId) : {};
+	check(
+		"첨부 이미지가 대화에 남음 (다시 열면 보임)",
+		(redBack.messages ?? []).some((m) => m.role === "user" && m.content.some((b) => b.type === "image" && b.dataUrl?.startsWith("data:image/png"))),
+	);
 
 	// 가계부 분리 (PLAN §23) — 가입을 열면 모르는 사람이 같은 D1 을 쓴다. 남의 가계부에 닿으면 안 된다.
 	if (health.ledger) {
@@ -555,6 +568,41 @@ function wsWatch(token, sessionId = null) {
 	};
 }
 
+/** 단색 PNG (base64) — 이미지 첨부 스모크용. 외부 파일 없이 만든다. */
+function solidPng(w, h, [r, g, b]) {
+	const crcTable = Array.from({ length: 256 }, (_, n) => {
+		let c = n;
+		for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+		return c >>> 0;
+	});
+	const crc = (buf) => {
+		let c = 0xffffffff;
+		for (const x of buf) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
+		return (c ^ 0xffffffff) >>> 0;
+	};
+	const chunk = (type, data) => {
+		const len = Buffer.alloc(4);
+		len.writeUInt32BE(data.length);
+		const body = Buffer.concat([Buffer.from(type), data]);
+		const sum = Buffer.alloc(4);
+		sum.writeUInt32BE(crc(body));
+		return Buffer.concat([len, body, sum]);
+	};
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(w, 0);
+	ihdr.writeUInt32BE(h, 4);
+	ihdr[8] = 8; // bit depth
+	ihdr[9] = 2; // RGB
+	const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: w }, () => [r, g, b]).flat())]);
+	const raw = Buffer.concat(Array.from({ length: h }, () => row));
+	return Buffer.concat([
+		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		chunk("IHDR", ihdr),
+		chunk("IDAT", deflateSync(raw)),
+		chunk("IEND", Buffer.alloc(0)),
+	]).toString("base64");
+}
+
 /** 대화 하나를 열고 첫 응답(ready 또는 session_missing)을 돌려준다. */
 function wsOpen(token, sessionId) {
 	return new Promise((resolve) => {
@@ -595,10 +643,10 @@ function wsFireAndClose(token, prompt) {
 }
 
 /** WS로 프롬프트 한 번 왕복. { ready, sessionId, text, toolCalls } 를 돌려준다. */
-function wsTest(token, prompt) {
+function wsTest(token, prompt, images) {
 	return new Promise((resolve) => {
 		const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-		const out = { ready: false, sessionId: null, text: "", toolCalls: [] };
+		const out = { ready: false, sessionId: null, text: "", toolCalls: [], error: null };
 		let settled = false;
 
 		const finish = () => {
@@ -617,14 +665,16 @@ function wsTest(token, prompt) {
 			if (msg.type === "ready") {
 				out.ready = true;
 				out.sessionId = msg.sessionId;
-				ws.send(JSON.stringify({ type: "prompt", text: prompt }));
+				ws.send(JSON.stringify({ type: "prompt", text: prompt, ...(images ? { images } : {}) }));
 				return;
 			}
 			// 서버가 pi 원본 이벤트를 그대로 흘리지 않고 StreamMessage로 좁혀서 보낸다
 			// (@alphafolio/protocol — 사고 토큰 비노출 + 페이로드 축소)
 			switch (msg.type) {
 				case "error":
-					check("WS 오류", false, msg.message);
+					out.error = msg.message;
+					// 이미지 검증 거절처럼 일부러 오류를 기대하는 경우는 호출부가 판정한다
+					if (!images) check("WS 오류", false, msg.message);
 					finish();
 					return;
 				case "text_delta":
