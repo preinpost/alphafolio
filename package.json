@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "license": "MIT",
+  "packageManager": "pnpm@11.0.9",
   "type": "module",
   "description": "AlphaFolio — pi SDK 기반 개인 금융 에이전트 (투자 + 가계부)",
   "engines": {
