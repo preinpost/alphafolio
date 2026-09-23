@@ -137,12 +137,16 @@ export function SettingsPage() {
 	return (
 		<Tabs.Root value={current} onValueChange={(v) => select(v as Tab)} className="flex min-h-0 flex-1 flex-col">
 			<div className="shrink-0 border-b border-line px-4">
-				<Tabs.List className="mx-auto flex max-w-2xl gap-1 overflow-x-auto" aria-label="설정 분류">
+				{/* 좁은 화면에서는 가로로 밀어 넘기되 스크롤바는 숨긴다. 세로는 막는다 (밑줄 때문에 1px 넘치면 세로 스크롤바가 생겼다) */}
+				<Tabs.List
+					className="mx-auto flex max-w-2xl gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+					aria-label="설정 분류"
+				>
 					{tabs.map((t) => (
 						<Tabs.Tab
 							key={t.value}
 							value={t.value}
-							className="-mb-px shrink-0 border-b-2 border-transparent px-3 py-2.5 text-sm text-muted transition hover:text-ink aria-selected:border-accent aria-selected:font-medium aria-selected:text-ink"
+							className="shrink-0 border-b-2 border-transparent px-3 py-2.5 text-sm text-muted transition hover:text-ink aria-selected:border-accent aria-selected:font-medium aria-selected:text-ink"
 						>
 							{t.label}
 						</Tabs.Tab>
