@@ -62,6 +62,11 @@ export interface PortfolioSummary {
 	stockValueKrw: number;
 	/** 예수금 (원화) — 국내 계좌 기준 */
 	cashKrw: number;
+	/**
+	 * 달러 예수금 (토스 매수가능금액, USD). 원화로 환산하지 않고 따로 둔다 — 미국 주식은 달러로 주문하고,
+	 * 원화 예수금과 합치면 총자산·스냅샷 기록의 뜻이 바뀐다. 두 금액은 서로를 포함하지 않는다 (실측, PLAN §30).
+	 */
+	cashUsd: number;
 	/** 평가손익 합계 (원화 환산) */
 	profitKrw: number;
 	/** 적용한 USD/KRW 환율 */

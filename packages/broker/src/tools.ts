@@ -48,6 +48,12 @@ import type { Bar, Holding, Quote } from "./normalize.ts";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
 const usd = (n: number): string => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+/** 예수금처럼 센트까지 보여야 하는 금액 — $1,234.5 가 아니라 $1,234.50 */
+const usdCash = (n: number): string => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** 원화 예수금 + (있으면) 달러 예수금 — 환산하지 않고 나란히 */
+const cashText = (krw: number, usdAmt: number): string =>
+	won(krw) +
+	(usdAmt > 0 ? ` · 달러 ${usdCash(usdAmt)} (달러 그대로 말한다 — 미국 주식은 달러로 주문하므로 원화로 환산하지 않는다. 사용자가 환산을 요청할 때만)` : "");
 
 function money(value: number, currency: "KRW" | "USD"): string {
 	return currency === "KRW" ? won(value) : usd(value);
@@ -195,6 +201,7 @@ export interface HoldingsDetails {
 	brokers: string[];
 	stockValueKrw: number;
 	cashKrw: number;
+	cashUsd: number;
 	profitKrw: number;
 	usdKrw: number;
 }
@@ -242,6 +249,7 @@ export interface OverviewDetails {
 	to: string;
 	investKrw: number;
 	cashKrw: number;
+	cashUsd: number;
 	profitKrw: number;
 	income: number;
 	expense: number;
@@ -397,6 +405,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 				brokers: p.brokers,
 				stockValueKrw: p.stockValueKrw,
 				cashKrw: p.cashKrw,
+				cashUsd: p.cashUsd,
 				profitKrw: p.profitKrw,
 				usdKrw: p.usdKrw,
 			};
@@ -407,7 +416,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 						{
 							type: "text" as const,
 							text:
-								`보유 종목이 없습니다. 예수금 ${won(p.cashKrw)}` +
+								`보유 종목이 없습니다. 예수금 ${cashText(p.cashKrw, p.cashUsd)}` +
 								(p.warnings.length > 0 ? `\n\n⚠️ ${p.warnings.join("\n⚠️ ")}` : ""),
 						},
 					],
@@ -429,7 +438,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 						type: "text" as const,
 						text:
 							`보유 ${p.holdings.length}종목 · 평가금액 ${won(p.stockValueKrw)} · ` +
-							`평가손익 ${signed(p.profitKrw, "KRW")} · 예수금 ${won(p.cashKrw)}` +
+							`평가손익 ${signed(p.profitKrw, "KRW")} · 예수금 ${cashText(p.cashKrw, p.cashUsd)}` +
 							(p.usdKrw > 0 ? ` (환율 ${p.usdKrw.toLocaleString("ko-KR")}원)` : "") +
 							`\n\n${top.join("\n")}` +
 							(p.holdings.length > top.length ? `\n… 외 ${p.holdings.length - top.length}종목 (화면에 표시됨)` : "") +
@@ -478,6 +487,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 				to,
 				investKrw: p?.stockValueKrw ?? 0,
 				cashKrw: p?.cashKrw ?? 0,
+				cashUsd: p?.cashUsd ?? 0,
 				profitKrw: p?.profitKrw ?? 0,
 				income,
 				expense,
@@ -490,6 +500,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 				lines.push(
 					`투자자산 ${won(p.stockValueKrw + p.cashKrw)} ` +
 						`(주식 ${won(p.stockValueKrw)} / 예수금 ${won(p.cashKrw)}) · ` +
+						(p.cashUsd > 0 ? `달러 예수금 ${usdCash(p.cashUsd)} (투자자산 합계에는 미포함, 원화로 환산해 말하지 않는다) · ` : "") +
 						`평가손익 ${signed(p.profitKrw, "KRW")}`,
 				);
 				for (const w of p.warnings) lines.push(`⚠️ ${w}`);

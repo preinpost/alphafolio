@@ -27,6 +27,11 @@ function money(value: number, currency: "KRW" | "USD"): string {
 		: `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
+/** 예수금 — 센트까지 ($1,234.50). 원화로 환산하지 않는다 (미국 주식은 달러로 주문) */
+export function usdCash(value: number): string {
+	return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** 등락 색 — 한국 증시 관례(상승=빨강, 하락=파랑). 가계부와 색 언어가 다르다. */
 function moveClass(n: number): string {
 	if (n > 0) return "text-up";
@@ -540,10 +545,13 @@ export function HoldingsCardView({ card }: { card: HoldingsCard }) {
 				))}
 			</div>
 
-			{card.cashKrw > 0 && (
+			{(card.cashKrw > 0 || (card.cashUsd ?? 0) > 0) && (
 				<div className="mt-3 flex justify-between border-t border-line pt-2 text-xs text-muted">
 					<span>예수금</span>
-					<span>{won(card.cashKrw)}</span>
+					<span className="text-right">
+						<span className="block">{won(card.cashKrw)}</span>
+						{(card.cashUsd ?? 0) > 0 && <span className="block">{usdCash(card.cashUsd ?? 0)}</span>}
+					</span>
 				</div>
 			)}
 		</div>

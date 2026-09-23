@@ -46,6 +46,8 @@ function reason(err: unknown): string {
 interface BrokerResult {
 	holdings: Holding[];
 	cashKrw: number;
+	/** KIS 는 지금 쓰는 잔고 API 에 외화 예수금이 없어 0 (TODO) */
+	cashUsd: number;
 	usdKrw: number;
 	warnings: string[];
 }
@@ -79,16 +81,17 @@ async function fetchKis(ctx: KisContext): Promise<BrokerResult> {
 		warnings.push(`KIS 해외 잔고를 불러오지 못했습니다: ${reason(overseas.reason)}`);
 	}
 
-	return { holdings, cashKrw, usdKrw, warnings };
+	return { holdings, cashKrw, cashUsd: 0, usdKrw, warnings };
 }
 
 async function fetchToss(ctx: TossContext): Promise<BrokerResult> {
 	const warnings: string[] = [];
 	const seq = await defaultAccountSeq(ctx);
 
-	const [holdingsRes, cashRes, rateRes] = await Promise.allSettled([
+	const [holdingsRes, cashRes, usdCashRes, rateRes] = await Promise.allSettled([
 		tossHoldings(ctx, seq),
 		tossBuyingPower(ctx, seq, "KRW"),
+		tossBuyingPower(ctx, seq, "USD"),
 		tossExchangeRate(ctx),
 	]);
 
@@ -117,7 +120,15 @@ async function fetchToss(ctx: TossContext): Promise<BrokerResult> {
 		warnings.push(`토스 예수금을 불러오지 못했습니다: ${reason(cashRes.reason)}`);
 	}
 
-	return { holdings, cashKrw, usdKrw, warnings };
+	let cashUsd = 0;
+	if (usdCashRes.status === "fulfilled") {
+		const c = Number(usdCashRes.value.cashBuyingPower);
+		if (Number.isFinite(c)) cashUsd = c;
+	} else {
+		warnings.push(`토스 달러 예수금을 불러오지 못했습니다: ${reason(usdCashRes.reason)}`);
+	}
+
+	return { holdings, cashKrw, cashUsd, usdKrw, warnings };
 }
 
 export async function fetchPortfolio(access: BrokerAccess): Promise<PortfolioSummary> {
@@ -145,6 +156,7 @@ export async function fetchPortfolio(access: BrokerAccess): Promise<PortfolioSum
 
 	let holdings: Holding[] = [];
 	let cashKrw = 0;
+	let cashUsd = 0;
 	let usdKrw = 0;
 	const warnings: string[] = [];
 	const brokers: BrokerId[] = [];
@@ -158,6 +170,7 @@ export async function fetchPortfolio(access: BrokerAccess): Promise<PortfolioSum
 		brokers.push(id);
 		holdings = holdings.concat(result.value.holdings);
 		cashKrw += result.value.cashKrw;
+		cashUsd += result.value.cashUsd;
 		if (result.value.usdKrw > 0 && usdKrw === 0) usdKrw = result.value.usdKrw;
 		warnings.push(...result.value.warnings);
 	});
@@ -177,5 +190,8 @@ export async function fetchPortfolio(access: BrokerAccess): Promise<PortfolioSum
 
 	holdings.sort((a, b) => b.valueKrw - a.valueKrw);
 
-	return { holdings, brokers, stockValueKrw, cashKrw, profitKrw, usdKrw, warnings };
+	// 달러는 센트 단위로 (합산 부동소수점 잡음 제거)
+	cashUsd = Math.round(cashUsd * 100) / 100;
+
+	return { holdings, brokers, stockValueKrw, cashKrw, cashUsd, profitKrw, usdKrw, warnings };
 }

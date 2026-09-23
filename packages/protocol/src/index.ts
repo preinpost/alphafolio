@@ -270,6 +270,8 @@ export interface HoldingsCard {
 	brokers: string[];
 	stockValueKrw: number;
 	cashKrw: number;
+	/** 달러 예수금 (환산 안 함). 이전에 저장된 대화에는 없다 */
+	cashUsd?: number;
 	profitKrw: number;
 	usdKrw: number;
 }
@@ -350,6 +352,7 @@ export interface OverviewCard {
 	to: string;
 	investKrw: number;
 	cashKrw: number;
+	cashUsd?: number;
 	profitKrw: number;
 	income: number;
 	expense: number;

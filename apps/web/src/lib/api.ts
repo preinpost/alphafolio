@@ -122,6 +122,7 @@ export const api = {
 			brokers: string[];
 			stockValueKrw: number;
 			cashKrw: number;
+			cashUsd: number;
 			profitKrw: number;
 			usdKrw: number;
 			warnings: string[];

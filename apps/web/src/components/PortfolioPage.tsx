@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
+import { usdCash } from "./cards/BrokerCards.tsx";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
 
@@ -124,6 +125,7 @@ export function PortfolioPage() {
 								<div className={`text-xs ${moveClass(p.profitKrw)}`}>
 									평가손익 {sign(p.profitKrw)}
 									{won(p.profitKrw)} · 예수금 {won(p.cashKrw)}
+									{p.cashUsd > 0 ? ` · ${usdCash(p.cashUsd)}` : ""}
 								</div>
 							</div>
 						</div>
