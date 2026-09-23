@@ -29,7 +29,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 	});
 
 	if (res.status === 401) {
-		clearToken();
+		// 앱(Keychain)은 삭제가 비동기다 — 끝나기 전에 reload 하면 만료 토큰을 다시 읽는다
+		await clearToken();
 		location.reload();
 		throw new ApiError(401, "인증이 만료되었습니다");
 	}

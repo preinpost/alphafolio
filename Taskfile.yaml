@@ -229,6 +229,40 @@ tasks:
     cmds:
       - docker compose -f infra/compose.yaml down
 
+  # ── iOS 앱 (Capacitor) ──────────────────────────────────────────────
+  # 앱은 씬 클라이언트다 — 에이전트·키는 전부 서버에 있고, 번들에는 서버 주소만 들어간다.
+  # 시뮬레이터는 호스트와 네트워크를 공유하므로 기본값 localhost 로 로컬 서버(task up)에 붙는다.
+  mobile:build:
+    desc: 앱용 웹 번들 빌드 → apps/mobile/www → iOS 프로젝트에 복사 (API_BASE=서버 주소)
+    vars:
+      API_BASE: '{{.API_BASE | default (printf "http://localhost:%s" .PORT)}}'
+    cmds:
+      # apps/web/dist 는 서버가 서빙하는 웹용 — 덮어쓰지 않게 따로 빌드한다
+      - VITE_AF_API_BASE={{.API_BASE}} pnpm --filter @alphafolio/web exec vite build --outDir ../mobile/www --emptyOutDir
+      - cd apps/mobile && pnpm exec cap sync ios
+      - 'echo "앱 번들 서버 주소: {{.API_BASE}}"'
+
+  mobile:open:
+    desc: Xcode 로 iOS 프로젝트 열기 (실기기·서명은 여기서)
+    cmds:
+      - cd apps/mobile && pnpm exec cap open ios
+
+  mobile:sim:
+    desc: 시뮬레이터에서 빌드·설치·실행 (SIM=기기이름, 서버는 task up 으로 먼저)
+    vars:
+      SIM: '{{.SIM | default "iPhone 17"}}'
+      APP: apps/mobile/ios/DerivedData/Build/Products/Debug-iphonesimulator/App.app
+    cmds:
+      - task: mobile:build
+      - >-
+        xcodebuild -quiet -project apps/mobile/ios/App/App.xcodeproj -scheme App -configuration Debug
+        -destination "platform=iOS Simulator,name={{.SIM}}" -derivedDataPath apps/mobile/ios/DerivedData build
+      - xcrun simctl boot "{{.SIM}}" 2>/dev/null || true
+      # Xcode 27 부터 Simulator.app 대신 DeviceHub.app — 화면 창일 뿐이라 없어도 실행은 된다
+      - open -a DeviceHub 2>/dev/null || open -a Simulator 2>/dev/null || true
+      - xcrun simctl install "{{.SIM}}" {{.APP}}
+      - xcrun simctl launch "{{.SIM}}" com.alphafolio.app
+
   # ── 정리 ────────────────────────────────────────────────────────────
   clean:
     desc: 빌드 산출물·로컬 런타임 데이터 삭제 (.env 는 남긴다)

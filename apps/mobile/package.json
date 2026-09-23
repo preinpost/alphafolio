@@ -1,0 +1,17 @@
+{
+  "name": "@alphafolio/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AlphaFolio iOS 앱 — apps/web 번들을 Capacitor 로 감싼 씬 클라이언트. 에이전트는 서버에서 돈다 (PLAN.md §8).",
+  "scripts": {
+    "cap": "cap"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

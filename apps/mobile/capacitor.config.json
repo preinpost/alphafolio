@@ -1,0 +1,9 @@
+{
+  "appId": "com.alphafolio.app",
+  "appName": "AlphaFolio",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "scheme": "AlphaFolio"
+  }
+}

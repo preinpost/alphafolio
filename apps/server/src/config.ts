@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseCorsOrigins } from "./cors.ts";
 
 /** 저장소 루트 (apps/server/src → ../../..). */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -47,6 +48,8 @@ export interface Config {
 	idleMinutes: number;
 	webDir: string;
 	dataDir: string;
+	/** iOS 앱(Capacitor) 등 크로스 오리진 클라이언트 허용 목록 (cors.ts) */
+	corsOrigins: string[];
 }
 
 /**
@@ -122,6 +125,7 @@ export function loadConfig(): Config {
 		idleMinutes: Number(process.env.AF_IDLE_MINUTES ?? 60),
 		webDir: process.env.AF_WEB_DIR ?? join(REPO_ROOT, "apps/web/dist"),
 		dataDir,
+		corsOrigins: parseCorsOrigins(process.env.AF_CORS_ORIGINS),
 	};
 }
 

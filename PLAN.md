@@ -333,7 +333,7 @@ pi SDK는 Node에서 돌고 파일시스템·bash 툴을 쓴다. **iOS 단말에
 | **2. 가계부** | D1 스키마·마이그레이션, `/api/ledger`, 툴 8개, 원장 UI | 입력·조회·수정·집계·예산·export | 핵심 가치 |
 | **3. 통합** | 증권 연동(시세·잔고) + 자산 현황 | 가계부가 투자와 연결됨 | **✅ 조회 범위 완료** — §16 |
 | **4. 배포** | 컨테이너 배포, 구 구성 deprecate | 이전 완료 | Dockerfile·compose는 Phase 1에서 선행 완료 |
-| **5. 모바일** | Capacitor iOS, 토큰 인증, 카메라/FaceID/푸시 | TestFlight | 서버 공개 배포 선행 필요 |
+| **5. 모바일** | Capacitor iOS, 토큰 인증, 카메라/FaceID/푸시 | TestFlight | **🚧 시뮬레이터 동작** — §22. 실기기·TestFlight 는 서버 공개 배포 선행 |
 
 ---
 
@@ -957,3 +957,34 @@ RSI 58.7 · 볼린저 내 98.9% · ATR 4.5%
 1. `fetchQuote`: 가격 ≤ 0 이면 성공으로 치지 않고 다음 브로커로 → 전부 없으면 `QuoteNotFoundError` (REST 404)
 2. 이름 해석: 표준코드(ISIN)·시장코드가 모두 빈 레코드는 버린다
 3. `validateOrder`: 현재가 ≤ 0 이면 주문 준비 자체를 거절 (1이 뚫려도)
+
+## 22. iOS 앱 (Capacitor) — 착수 (2026-09-23)
+
+**iOS 만.** 안드로이드는 하지 않는다. 구조는 §8 그대로 — `apps/web` 번들을 감싼 씬 클라이언트이고,
+에이전트·키·D1 은 전부 서버에 있다. 번들에 들어가는 건 서버 주소(`VITE_AF_API_BASE`) 하나뿐이다.
+
+| 항목 | 결정 |
+|---|---|
+| 위치 | `apps/mobile` — Capacitor 8.5.2, iOS 프로젝트는 SPM (CocoaPods 없음, node_modules 경로 비의존) |
+| 번들 | `task mobile:build` 가 `apps/mobile/www` 로 **따로** 빌드한다 — `apps/web/dist` 는 서버가 서빙하는 웹용 |
+| CORS | 서버 `cors.ts`. 앱 오리진 `capacitor://localhost` 만 허용 (`AF_CORS_ORIGINS`), `*`·credentials 없음, `/api/*` 에만 |
+| 토큰 | **Keychain** — 앱 로컬 Swift 플러그인(`KeychainPlugin.swift`, 외부 의존 없음). `AfterFirstUnlockThisDeviceOnly` |
+| ATS | `NSAllowsLocalNetworking` 만 — 시뮬레이터가 로컬 서버(http)에 붙기 위함. 운영은 HTTPS |
+| WS 재연결 | 이미 있음 — `chat.ts` 의 `visibilitychange` 복귀 시 재연결 |
+
+**토큰 저장을 Preferences 가 아니라 Keychain 으로 한 이유**: `@capacitor/preferences` 는 UserDefaults(평문
+plist)라 기기 백업에 실린다. localStorage 도 마찬가지. 금융 계좌가 붙은 토큰이다.
+
+Keychain 은 비동기인데 `getToken()` 은 동기로 여러 곳(App 초기 상태·api·chat)에서 불린다. 호출부를 바꾸지
+않으려고 `auth.ts` 에서 **top-level await 로 한 번 읽어 메모리에 올린다.** 대신 `clearToken()` 은 await 한
+뒤 reload 해야 한다 — 삭제 전에 새로고침하면 만료 토큰을 다시 읽어 401 → reload 가 반복된다 (`api.ts`).
+
+**검증 (시뮬레이터 iPhone 17, 로컬 서버):** 앱 WebView(`capacitor://localhost`)에서 서버로
+- `GET /api/health` 200, `authorization` 헤더 요청(프리플라이트) → 401 본문까지 읽힘, `ws://` 연결·인증 거절 수신
+- **음성 대조**: 서버 허용 목록에서 앱 오리진을 빼면 REST 는 `Load failed` 로 막히고 WS 만 붙는다 — 통과가
+  CORS 덕임을 확인 (WS 는 CORS 대상이 아니고, 첫 메시지 토큰으로 인증한다)
+- Keychain get 왕복 확인 (미로그인 → null)
+
+**Xcode 27 참고**: `Simulator.app` 이 없어지고 `DeviceHub.app` 으로 바뀌었다. `task mobile:sim` 은 둘 다 시도한다.
+
+남은 일은 TODO.md 의 "iOS 앱" 절.

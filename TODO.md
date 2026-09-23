@@ -14,6 +14,17 @@
 - [ ] 토스 정정 주문, OCO 조건주문
 - [ ] 사용자별 MCP 서버 설정
 
+## iOS 앱 (Phase 5, PLAN §22)
+
+- [ ] 시뮬레이터에서 실제 로그인 → 채팅·카드·주문 확인 카드 흐름 점검 (사람 손 — 입력이 필요)
+- [ ] 실제 앱에서 로그인 후 재실행 시 Keychain 토큰 유지 확인, 로그아웃 시 삭제 확인
+- [ ] safe area·키보드 — 다른 세션의 `viewport.ts` 작업과 합친 뒤 실기기 확인
+- [ ] 앱 아이콘·스플래시 (지금은 Capacitor 기본 이미지)
+- [ ] 번들 ID 확정 (현재 `com.alphafolio.app` — 첫 TestFlight 전에만 바꿀 수 있다고 보면 된다)
+- [ ] 앱 번들에서 PWA 서비스워커 빼기 — WKWebView 에서 등록이 실패할 뿐 무해하지만 불필요 (`vite.config.ts`)
+- [ ] 실기기 — 서명(팀 ID 는 커밋하지 않는다), HTTPS 서버 주소로 빌드 (`task mobile:build API_BASE=https://...`)
+- [ ] Face ID 잠금 → 카메라(영수증) → 푸시 순
+
 ## 배포 (Phase 4)
 
 - [ ] Docker 이미지 실제 빌드 확인 — 확장 설치 단계(`agent-config/npm` 의 `npm ci`) 추가 후 한 번도 안 돌려봄

@@ -35,6 +35,7 @@ import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-token
 import { kstParts, SnapshotScheduler, SnapshotStore } from "./snapshots.ts";
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
 import { loadConfig, loadDotEnv } from "./config.ts";
+import { corsFor } from "./cors.ts";
 import { handleLedger, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
@@ -267,6 +268,17 @@ async function main(): Promise<void> {
 		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 		const path = url.pathname;
 
+		// iOS 앱은 capacitor://localhost 에서 부른다 — API 에만 CORS 를 붙인다 (정적 파일은 앱 번들에 있다)
+		if (path.startsWith("/api/")) {
+			const cors = corsFor(req.headers.origin, req.method, cfg.corsOrigins);
+			for (const [k, v] of Object.entries(cors.headers)) res.setHeader(k, v);
+			if (cors.preflight) {
+				res.writeHead(204);
+				res.end();
+				return;
+			}
+		}
+
 		// ── 공개 엔드포인트 ────────────────────────────────────────
 		if (path === "/api/health") {
 			json(res, 200, { ok: true, ledger: ledgerReady(), model: cfg.agent.model ?? "(기본)" });
@@ -497,6 +509,7 @@ async function main(): Promise<void> {
 		console.log(`  ├ users    ${users.users.map((u) => u.name).join(", ")}`);
 		console.log(`  ├ auth     ${cfg.agent.authPath ?? "(env API 키 사용)"}`);
 		console.log(`  ├ agent    ${cfg.agent.agentDir}`);
+		console.log(`  ├ cors     ${cfg.corsOrigins.join(", ")}`);
 		console.log(`  ├ ledger   ${ledgerReady() ? "설정됨" : "미설정 — 앱 설정 화면에서 입력"}`);
 		console.log(`  ├ sessions ${cfg.agent.sessionsDir}`);
 		console.log(`  └ web      ${existsSync(cfg.webDir) ? cfg.webDir : "(미빌드 — API만 제공)"}`);

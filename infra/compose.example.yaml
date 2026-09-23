@@ -49,6 +49,9 @@ services:
       # 유휴 런타임 정리 기준(분). 접속이 없으면 세션을 메모리에서 내린다
       AF_IDLE_MINUTES: "60"
 
+      # iOS 앱 오리진 허용 목록 (비우면 capacitor://localhost)
+      # AF_CORS_ORIGINS: "capacitor://localhost"
+
       # ── 웹 검색 (선택) ─────────────────────────────────────────
       # pi-web-access 는 <agentDir>/web-search.json 을 읽는다. 시크릿이 들어가므로
       # 이미지에 넣지 말고 파일로 마운트한다 (volumes 참고).

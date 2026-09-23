@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@alphafolio/protocol": "workspace:*"
+    "@alphafolio/protocol": "workspace:*",
+    "@capacitor/core": "8.5.2"
   },
   "devDependencies": {
     "@base-ui-components/react": "^1.0.0-rc.0",
