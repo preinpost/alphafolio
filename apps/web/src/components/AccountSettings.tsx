@@ -59,16 +59,7 @@ function OneTime({ label, value, onDone }: { label: string; value: string; onDon
 	);
 }
 
-export function AccountSettings({ me }: { me: MeDto }) {
-	return (
-		<>
-			<MyAccount me={me} />
-			{me.admin && <AdminPanel me={me} />}
-		</>
-	);
-}
-
-function MyAccount({ me }: { me: MeDto }) {
+export function MyAccount({ me }: { me: MeDto }) {
 	const [current, setCurrent] = useState("");
 	const [next, setNext] = useState("");
 	const [confirm, setConfirm] = useState("");
@@ -156,7 +147,7 @@ function MyAccount({ me }: { me: MeDto }) {
 /** window.confirm — 컴포넌트의 confirm 상태 이름과 겹쳐서 따로 둔다 */
 const confirm_ = (msg: string): boolean => window.confirm(msg);
 
-function AdminPanel({ me }: { me: MeDto }) {
+export function AdminPanel({ me }: { me: MeDto }) {
 	const qc = useQueryClient();
 	const invites = useQuery({ queryKey: ["admin-invites"], queryFn: api.invites });
 	const accounts = useQuery({ queryKey: ["admin-accounts"], queryFn: api.accounts });
@@ -178,7 +169,7 @@ function AdminPanel({ me }: { me: MeDto }) {
 	const members = (accounts.data ?? []).filter((a) => a.source === "db");
 
 	return (
-		<Card title="관리자">
+		<Card title="초대 · 계정">
 			<div className="space-y-2">
 				<div className="text-xs font-medium text-muted">초대 코드 발급 — 한 번 쓰면 끝나는 코드입니다</div>
 				<div className="flex gap-2">
