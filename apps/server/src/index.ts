@@ -548,6 +548,15 @@ async function main(): Promise<void> {
 				return;
 			}
 
+			// 대화 삭제 — 앱 화면에서만 (에이전트 툴 없음). 응답 중이어도 멈추고 지운다
+			const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(path);
+			if (sessionMatch && req.method === "DELETE") {
+				const ok = await runtimes.deleteConversation(user, sessionMatch[1] ?? "");
+				if (!ok) throw new HttpError(404, "없는 대화입니다");
+				json(res, 200, { deleted: true });
+				return;
+			}
+
 			if (path === "/api/state") {
 				json(res, 200, { user, ...(await runtimes.describe(user)) });
 				return;

@@ -23,6 +23,15 @@ class FakeConv implements PooledConversation {
 	emit(e: unknown): void {
 		for (const l of this.listeners) l(e);
 	}
+	aborted = false;
+	/** 닫힌 뒤에 멈추면 파일을 다시 쓸 수 있다 — 순서 검증용 */
+	abortedAfterDispose = false;
+	async abort(): Promise<void> {
+		if (this.disposed) this.abortedAfterDispose = true;
+		this.aborted = true;
+		this.isStreaming = false;
+		this.emit({ type: "agent_end" });
+	}
 	async dispose(): Promise<void> {
 		this.disposed = true;
 	}
@@ -33,18 +42,24 @@ function setup(saved: string[] = []) {
 	let seq = 0;
 	let opens = 0;
 	const events: Array<[string, unknown]> = [];
+	/** 소스가 연 대화 전부 (풀에 등록되지 않은 것 포함) */
+	const made: FakeConv[] = [];
 	const source: ConversationSource<FakeConv> = {
 		create: async () => new FakeConv(`new-session-${++seq}`),
 		open: async (id) => {
 			opens++;
 			await new Promise((r) => setTimeout(r, 5)); // 파일 읽기 흉내 — 동시 호출이 겹치게
-			return saved.includes(id) ? new FakeConv(id) : null;
+			if (!saved.includes(id)) return null;
+			const conv = new FakeConv(id);
+			made.push(conv);
+			return conv;
 		},
 	};
 	const pool = new ConversationPool(source, (id, e) => events.push([id, e]), () => clock);
 	return {
 		pool,
 		events,
+		made,
 		opens: () => opens,
 		advance: (ms: number) => (clock += ms),
 	};
@@ -158,5 +173,74 @@ describe("유휴 정리 — 앱을 꺼도 답은 끝까지", () => {
 		pool.attach(c.sessionId);
 		advance(2 * HOUR);
 		assert.deepEqual(await pool.sweep(HOUR), [], "붙어 있는 클라이언트 하나를 잃어버리면 안 된다");
+	});
+});
+
+describe("대화 삭제 (remove)", () => {
+	it("응답 중이면 멈춘 다음 닫는다 — 닫은 뒤에 멈추지 않는다", async () => {
+		const { pool } = setup(["saved-session-1"]);
+		const conv = (await pool.get("saved-session-1")) as FakeConv;
+		conv.isStreaming = true;
+		await pool.remove("saved-session-1");
+		assert.equal(conv.aborted, true);
+		assert.equal(conv.disposed, true);
+		assert.equal(conv.abortedAfterDispose, false);
+		assert.equal(pool.peek("saved-session-1"), undefined);
+	});
+
+	it("응답 중이 아니면 멈추지 않고 닫기만 한다", async () => {
+		const { pool } = setup(["saved-session-1"]);
+		const conv = (await pool.get("saved-session-1")) as FakeConv;
+		await pool.remove("saved-session-1");
+		assert.equal(conv.aborted, false);
+		assert.equal(conv.disposed, true);
+	});
+
+	it("지운 대화는 다시 열리지 않는다 (파일이 남아 있어도)", async () => {
+		const { pool, opens } = setup(["saved-session-1"]);
+		await pool.get("saved-session-1");
+		await pool.remove("saved-session-1");
+		assert.equal(await pool.get("saved-session-1"), null);
+		assert.equal(opens(), 1, "소스를 다시 읽지도 않는다");
+	});
+
+	it("여는 도중에 지우면 연 대화를 닫고 없음으로 끝난다 (다른 탭이 되살리지 못하게)", async () => {
+		const { pool } = setup(["saved-session-1"]);
+		const opening = pool.get("saved-session-1"); // 아직 열리는 중 (5ms)
+		await pool.remove("saved-session-1");
+		assert.equal(await opening, null);
+		assert.equal(pool.peek("saved-session-1"), undefined);
+		assert.equal(pool.size, 0);
+	});
+
+	it("여는 도중에 지워도 remove 가 끝났을 때는 이미 닫혀 있다 — 그다음 파일을 지우므로", async () => {
+		const { pool, made } = setup(["saved-session-1"]);
+		void pool.get("saved-session-1");
+		await pool.remove("saved-session-1");
+		assert.equal(made.length, 1);
+		assert.equal(made[0]?.disposed, true);
+	});
+
+	it("멈추면서 나오는 이벤트는 퍼지지 않는다 — 지운 대화가 사이드바에 활동으로 뜨지 않게", async () => {
+		const { pool, events } = setup(["saved-session-1"]);
+		const conv = (await pool.get("saved-session-1")) as FakeConv;
+		conv.isStreaming = true;
+		await pool.remove("saved-session-1");
+		assert.deepEqual(events, []);
+	});
+
+	it("다른 대화에는 영향이 없다", async () => {
+		const { pool } = setup(["saved-session-1", "saved-session-2"]);
+		await pool.get("saved-session-1");
+		const other = (await pool.get("saved-session-2")) as FakeConv;
+		await pool.remove("saved-session-1");
+		assert.equal(other.disposed, false);
+		assert.equal(pool.peek("saved-session-2"), other);
+	});
+
+	it("떠 있지 않은 대화도 지울 수 있다 (파일만 있는 경우) — 이후 열리지 않는다", async () => {
+		const { pool } = setup(["saved-session-1"]);
+		await pool.remove("saved-session-1");
+		assert.equal(await pool.get("saved-session-1"), null);
 	});
 });

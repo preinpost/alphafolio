@@ -5,7 +5,7 @@ import { api } from "./lib/api.ts";
 import { clearToken, getToken, isNativeApp } from "./lib/auth.ts";
 import { useChat, type ChatState } from "./lib/chat.ts";
 import { navigate, parseRoute, type View } from "./lib/route.ts";
-import { isUnread, lastSession, markSeen } from "./lib/seen.ts";
+import { forgetSeen, isUnread, lastSession, markSeen } from "./lib/seen.ts";
 import { ChatPage } from "./components/ChatPage.tsx";
 import { LedgerPage } from "./components/LedgerPage.tsx";
 import { PortfolioPage } from "./components/PortfolioPage.tsx";
@@ -17,6 +17,7 @@ import {
 	MenuIcon,
 	PlusIcon,
 	SettingsIcon,
+	TrashIcon,
 	TrendingIcon,
 	WalletIcon,
 	XIcon,
@@ -178,11 +179,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 					</button>
 					<div className="flex min-w-0 flex-1 items-center gap-2 px-1">
 						<span className="truncate text-sm font-medium text-ink">{TITLE[view]}</span>
-						{view === "chat" && chat.model && (
-							<span className="hidden truncate rounded-md bg-inset px-2 py-0.5 text-xs text-muted sm:inline">
-								{chat.model}
-							</span>
-						)}
 					</div>
 					{view === "chat" && (
 						<button
@@ -276,7 +272,9 @@ function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClos
 			<div className="mt-auto space-y-1 border-t border-line pt-3">
 				<div className="flex items-center gap-2 px-3 py-1 text-xs text-faint">
 					<span className={`size-1.5 rounded-full ${chat.connected ? "bg-success" : "bg-faint animate-pulse"}`} />
-					<span className="truncate">{chat.connected ? chat.model || "연결됨" : "연결 중…"}</span>
+					<span className="truncate" title={chat.model || undefined}>
+						{chat.connected ? modelName(chat.model) || "연결됨" : "연결 중…"}
+					</span>
 				</div>
 				<button
 					onClick={onLogout}
@@ -290,13 +288,41 @@ function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClos
 	);
 }
 
+/** "openrouter/deepseek/deepseek-v4.1-flash" → "deepseek-v4.1-flash" — 제공자·경로는 빼고 모델명만 (전체는 title 로) */
+function modelName(label: string): string {
+	return label.split("/").pop() ?? label;
+}
+
 /**
  * 최근 대화 — 응답 중(서버에서 도는 중) 표시와, 안 본 사이 끝난 답 표시.
  * 목록은 대화 활동(activity)·화면 복귀 때 다시 읽는다.
  */
 function ConversationList({ current, onOpen }: { current: string | null; onOpen: (id: string) => void }) {
+	const qc = useQueryClient();
 	const list = useQuery({ queryKey: ["sessions"], queryFn: api.sessions, refetchOnWindowFocus: true });
 	const items = list.data ?? [];
+	const [deleting, setDeleting] = useState<string | null>(null);
+
+	/**
+	 * 삭제 — 되돌릴 수 없어 확인을 받는다. 보고 있던 대화면 서버가 이 소켓에 session_missing 을 보내
+	 * 새 대화로 넘어간다 (다른 탭·기기도 같은 경로). 여기서는 목록과 로컬 기록만 정리한다.
+	 */
+	async function remove(item: ConversationListItem): Promise<void> {
+		const warn = item.streaming ? "\n작성 중인 답도 멈춥니다." : "";
+		if (!window.confirm(`"${item.title}"\n대화를 삭제할까요? 되돌릴 수 없습니다.${warn}`)) return;
+		setDeleting(item.id);
+		try {
+			await api.deleteSession(item.id);
+			forgetSeen(item.id);
+			if (lastSession.get() === item.id) lastSession.set(null);
+			qc.setQueryData<ConversationListItem[]>(["sessions"], (old) => old?.filter((c) => c.id !== item.id));
+		} catch (err) {
+			window.alert(`삭제하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			setDeleting(null);
+			void qc.invalidateQueries({ queryKey: ["sessions"] });
+		}
+	}
 
 	// 보고 있는 대화는 본 것으로 기록한다. 응답 중에도 기록한다 — 그 시점 이후에 끝난 답은
 	// 수정 시각이 더 뒤라서, 답을 기다리다 앱을 끄면 다음에 켰을 때 점으로 보인다.
@@ -312,29 +338,68 @@ function ConversationList({ current, onOpen }: { current: string | null; onOpen:
 			<div className="px-3 pb-1 text-xs text-faint">대화</div>
 			<div className="flex flex-col gap-0.5">
 				{items.slice(0, 50).map((c) => (
-					<ConversationRow key={c.id} item={c} active={c.id === current} onOpen={onOpen} />
+					<ConversationRow
+						key={c.id}
+						item={c}
+						active={c.id === current}
+						busy={deleting === c.id}
+						onOpen={onOpen}
+						onDelete={() => void remove(c)}
+					/>
 				))}
 			</div>
 		</div>
 	);
 }
 
-function ConversationRow({ item, active, onOpen }: { item: ConversationListItem; active: boolean; onOpen: (id: string) => void }) {
+/**
+ * 대화 한 줄 + 삭제 버튼.
+ * 휴지통: 마우스가 있으면 올린 행에만, 터치 기기는 보고 있는 대화에만 (드로어는 왼쪽 스와이프로 닫혀서
+ * 스와이프 삭제는 쓰지 않는다). 터치에서 안 보이는 행은 투명이 아니라 아예 숨긴다 — 모르고 눌리지 않게.
+ */
+function ConversationRow({
+	item,
+	active,
+	busy,
+	onOpen,
+	onDelete,
+}: {
+	item: ConversationListItem;
+	active: boolean;
+	busy: boolean;
+	onOpen: (id: string) => void;
+	onDelete: () => void;
+}) {
 	const unread = !active && !item.streaming && isUnread(item.id, item.modified);
 	return (
-		<button
-			onClick={() => onOpen(item.id)}
-			className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition md:py-1.5 ${
-				active ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink active:bg-selected"
+		<div
+			className={`group flex items-center rounded-lg text-sm transition ${busy ? "opacity-50" : ""} ${
+				active ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink"
 			}`}
 		>
-			<span className={`min-w-0 flex-1 truncate ${unread ? "font-medium text-ink" : ""}`}>{item.title}</span>
-			{item.streaming ? (
-				<span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" aria-label="응답 중" title="응답 중" />
-			) : unread ? (
-				<span className="size-2 shrink-0 rounded-full bg-accent" aria-label="새 답" title="새 답" />
-			) : null}
-		</button>
+			<button
+				onClick={() => onOpen(item.id)}
+				className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg py-2.5 pl-3 text-left md:py-1.5 ${active ? "" : "active:bg-selected"}`}
+			>
+				<span className={`min-w-0 flex-1 truncate ${unread ? "font-medium text-ink" : ""}`}>{item.title}</span>
+				{item.streaming ? (
+					<span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" aria-label="응답 중" title="응답 중" />
+				) : unread ? (
+					<span className="size-2 shrink-0 rounded-full bg-accent" aria-label="새 답" title="새 답" />
+				) : null}
+			</button>
+			<button
+				onClick={onDelete}
+				disabled={busy}
+				aria-label={`"${item.title}" 삭제`}
+				title="삭제"
+				className={`mr-1 ml-0.5 flex size-9 shrink-0 items-center justify-center rounded-md text-faint transition hover:bg-hover hover:text-danger focus-visible:opacity-100 md:size-7 ${
+					active ? "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" : "opacity-0 group-hover:opacity-100 pointer-coarse:hidden"
+				}`}
+			>
+				<TrashIcon size={15} />
+			</button>
+		</div>
 	);
 }
 

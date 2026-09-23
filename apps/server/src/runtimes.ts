@@ -21,7 +21,7 @@ import { createLedgerTools, type D1Provider } from "@alphafolio/ledger/tools";
 import { createBrokerTools } from "@alphafolio/broker/tools";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
-import { ConversationPool } from "./conversations.ts";
+import { ConversationPool, SESSION_ID_RE } from "./conversations.ts";
 
 export interface RuntimeManagerOptions {
 	dataDir: string;
@@ -205,6 +205,26 @@ export class RuntimeManager {
 			messageCount: s.messageCount,
 			streaming: running.has(s.id),
 		}));
+	}
+
+	/**
+	 * 대화 삭제 — 되돌릴 수 없다. 이 사용자의 목록에 없으면 false (남의 대화도 "없음").
+	 * 응답 중이면 멈추고 닫은 뒤 파일을 지운다. 보고 있던 소켓에는 ws.ts 가 알린다 (conversation_deleted).
+	 */
+	async deleteConversation(user: string, sessionId: string): Promise<boolean> {
+		if (!SESSION_ID_RE.test(sessionId)) return false;
+		const u = await this.user(user);
+		const find = async () => (await u.agent.listSessions()).find((s) => s.id === sessionId);
+		// 이 사용자의 대화인가 — 파일이 있거나 이 사용자의 풀에 떠 있어야 한다
+		if (!u.pool.peek(sessionId) && !(await find())) return false;
+		await u.pool.remove(sessionId);
+		// 파일은 닫은 **뒤에** 찾는다. pi 는 첫 답이 끝나야 파일을 만들어서, 첫 답 도중에 지우면
+		// 멈추는 순간 기록되며 파일이 처음 생긴다 (먼저 찾으면 "파일 없음" 으로 보고 남겨 둔다).
+		const found = await find();
+		if (found) await u.agent.deleteSession(found.path);
+		for (const l of this.listeners) l(user, sessionId, { type: "conversation_deleted" });
+		console.log(`[runtime] 대화 삭제 — user=${user} session=${sessionId}`);
+		return true;
 	}
 
 	/** 대화와 무관한 정보(툴 목록·모델) — 열린 대화가 없으면 하나 만든다 (유휴 정리로 회수된다) */

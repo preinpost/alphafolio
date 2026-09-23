@@ -88,6 +88,17 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 	deps.runtimes.onEvent((user, sessionId, raw) => {
 		const e = raw as PiEvent;
 		const k = key(user, sessionId);
+		// 대화가 지워졌다 (runtimes.deleteConversation) — 보던 소켓은 새 대화로 보내고, 다른 소켓은 목록만 갱신
+		if (e.type === "conversation_deleted") {
+			filters.delete(k);
+			for (const c of clients.get(user) ?? []) {
+				if (c.sessionId !== sessionId) continue;
+				c.sessionId = null;
+				sendTo(c, { type: "session_missing", sessionId });
+			}
+			toUser(user, { type: "activity", sessionId, streaming: false });
+			return;
+		}
 		let cot = filters.get(k);
 		if (!cot) {
 			cot = new CotStreamFilter();

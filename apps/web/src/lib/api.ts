@@ -114,6 +114,7 @@ export const api = {
 
 	/** 대화 목록 (최근 순) — 응답 중인 대화 표시 포함 */
 	sessions: () => request<ConversationListItem[]>("/api/sessions"),
+	deleteSession: (id: string) => request<{ deleted: true }>(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
 	portfolio: () =>
 		request<{

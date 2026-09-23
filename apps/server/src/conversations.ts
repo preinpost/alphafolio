@@ -12,6 +12,7 @@ export interface PooledConversation {
 	readonly sessionId: string;
 	readonly isStreaming: boolean;
 	subscribe(listener: (event: unknown) => void): () => void;
+	abort(): Promise<void>;
 	dispose(): Promise<void>;
 }
 
@@ -36,6 +37,11 @@ export class ConversationPool<C extends PooledConversation> {
 	private readonly entries = new Map<string, Entry<C>>();
 	/** 같은 대화를 동시에 두 번 열지 않게 (탭 두 개가 같은 URL 로 동시에 붙는 경우) */
 	private readonly opening = new Map<string, Promise<C | null>>();
+	/**
+	 * 지운 대화 — 다시 열지 않는다. 지우는 도중 다른 탭이 같은 id 로 열면 파일이 지워지기 직전의
+	 * 대화가 되살아나 이어 쓰게 된다. 세션 id 는 재사용되지 않으므로 계속 들고 있어도 된다.
+	 */
+	private readonly removed = new Set<string>();
 
 	private readonly source: ConversationSource<C>;
 	/** 모든 대화의 이벤트 — 클라이언트가 없어도 흐른다 (활동 표시·로그용) */
@@ -58,6 +64,7 @@ export class ConversationPool<C extends PooledConversation> {
 	 */
 	async get(sessionId: string | null): Promise<C | null> {
 		if (sessionId === null) return this.register(await this.source.create());
+		if (this.removed.has(sessionId)) return null;
 
 		const existing = this.entries.get(sessionId);
 		if (existing) {
@@ -68,7 +75,15 @@ export class ConversationPool<C extends PooledConversation> {
 
 		let pending = this.opening.get(sessionId);
 		if (!pending) {
-			pending = this.source.open(sessionId).then((conv) => (conv ? this.register(conv) : null));
+			pending = this.source.open(sessionId).then((conv) => {
+				if (!conv) return null;
+				// 여는 사이에 지워졌다
+				if (this.removed.has(sessionId)) {
+					void conv.dispose();
+					return null;
+				}
+				return this.register(conv);
+			});
 			this.opening.set(sessionId, pending);
 			void pending.finally(() => this.opening.delete(sessionId)).catch(() => {});
 		}
@@ -147,6 +162,26 @@ export class ConversationPool<C extends PooledConversation> {
 			}),
 		);
 		return victims.map((e) => e.conv.sessionId);
+	}
+
+	/**
+	 * 대화를 지우기 전에 닫는다 — 응답 중이면 멈춘다. 이후 이 id 는 다시 열리지 않는다.
+	 * 파일 삭제는 호출한 쪽이 이 다음에 한다 (열린 대화가 파일을 다시 쓰지 않게 순서가 중요하다).
+	 */
+	async remove(sessionId: string): Promise<void> {
+		this.removed.add(sessionId);
+		// 여는 중이면 끝나기를 기다린다 — then 안에서 removed 를 보고 스스로 닫는다
+		await this.opening.get(sessionId)?.catch(() => null);
+		const e = this.entries.get(sessionId);
+		if (!e) return;
+		this.entries.delete(sessionId);
+		// 구독을 먼저 끊는다 — 멈추면서 나오는 이벤트(agent_end 등)가 지운 대화의 활동으로 퍼지지 않게
+		e.unsubscribe();
+		try {
+			if (e.conv.isStreaming) await e.conv.abort();
+		} finally {
+			await e.conv.dispose();
+		}
 	}
 
 	async disposeAll(): Promise<void> {

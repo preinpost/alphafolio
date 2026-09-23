@@ -29,6 +29,18 @@ export function markSeen(sessionId: string, modified: string): void {
 	}
 }
 
+/** 지운 대화의 기록을 버린다 */
+export function forgetSeen(sessionId: string): void {
+	const all = load();
+	if (!(sessionId in all)) return;
+	delete all[sessionId];
+	try {
+		localStorage.setItem(KEY, JSON.stringify(all));
+	} catch {
+		/* 무시 */
+	}
+}
+
 export function isUnread(sessionId: string, modified: string): boolean {
 	const seen = load()[sessionId];
 	return seen !== undefined && Date.parse(modified) - Date.parse(seen) > SLACK_MS;

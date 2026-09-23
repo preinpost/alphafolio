@@ -255,6 +255,25 @@ async function main() {
 	);
 	check("대화 목록 제목 = 첫 메시지", listed?.title?.startsWith("숫자 1부터 5까지") === true, listed?.title ?? "(없음)");
 
+	// 대화 삭제 — 남의 것은 못 지우고, 응답 중이어도 멈추고 지우며, 지운 뒤 되살아나지 않는다
+	console.log("\n── 대화 삭제 ─────────────────────────────────────────");
+	const del = (tk, id) => fetch(`${BASE}/api/sessions/${id}`, { method: "DELETE", headers: { authorization: `Bearer ${tk}` } });
+	const othersDelete = await del(body2.token, isolated.sessionId);
+	const stillMine = await wsOpen(token, isolated.sessionId);
+	check("남의 대화는 지울 수 없음 (404, 원래 주인은 계속 열림)", othersDelete.status === 404 && stillMine.type === "ready", `HTTP ${othersDelete.status} / ${stillMine.type}`);
+
+	const doomed = await wsStreamThenDelete(token, "1부터 200까지 숫자를 한 줄에 하나씩 써줘.", (id) => del(token, id));
+	check("응답 중인 대화 삭제 → 200", doomed.status === 200, `HTTP ${doomed.status} (삭제 시점 streaming=${doomed.wasStreaming})`);
+	check("보고 있던 소켓은 session_missing 을 받음", doomed.gotMissing, doomed.after.join(",") || "(없음)");
+	await new Promise((r) => setTimeout(r, 3000)); // 멈춘 응답이 파일을 다시 쓰는지 볼 시간
+	const afterList = await (await fetch(`${BASE}/api/sessions`, { headers: authed })).json();
+	check("지운 뒤 목록에서 사라지고 되살아나지 않음 (3초 뒤)", doomed.sessionId && !afterList.some((x) => x.id === doomed.sessionId));
+	const reopen = await wsOpen(token, doomed.sessionId);
+	check("지운 대화는 다시 열리지 않음", reopen.type === "session_missing", reopen.type);
+	const again = await del(token, doomed.sessionId);
+	const bogus = await del(token, "..%2F..%2Fetc");
+	check("다시 지우기·이상한 id → 404", again.status === 404 && bogus.status === 404, `${again.status} / ${bogus.status}`);
+
 	// 이미지 첨부 — 서버 검증 → 모델까지 실제로 가는지 (영수증 이미지의 금액을 읽게 한다)
 	// 처음엔 64px 단색 PNG 의 색을 물었는데 제공자와 무관하게 가끔 틀렸다 (작은 단색 이미지는 비전 인코더에 부적절).
 	// 실제 쓰임과 같은 영수증 모양 이미지로는 제공자를 바꿔 가며 돌려도 안정적이었다 (PLAN §26).
@@ -630,6 +649,44 @@ function wsWatch(token, sessionId = null) {
 		received,
 		close: () => ws.close(),
 	};
+}
+
+/**
+ * 새 대화에서 긴 답을 시키고, 답이 흐르기 시작하면 remove(id) 로 지운다.
+ * 삭제 뒤 이 소켓이 받은 메시지를 모은다 — session_missing 이 와야 한다.
+ */
+function wsStreamThenDelete(token, prompt, remove) {
+	return new Promise((resolve) => {
+		const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+		const out = { sessionId: null, status: 0, wasStreaming: false, gotMissing: false, after: [] };
+		let deleting = false;
+		const finish = () => {
+			clearTimeout(timer);
+			ws.close();
+			resolve(out);
+		};
+		const timer = setTimeout(finish, 90_000);
+		ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token })));
+		ws.on("message", async (raw) => {
+			const m = JSON.parse(raw.toString());
+			if (deleting) {
+				out.after.push(m.type);
+				if (m.type === "session_missing" && m.sessionId === out.sessionId) out.gotMissing = true;
+				return;
+			}
+			if (m.type === "ready") {
+				out.sessionId = m.sessionId;
+				ws.send(JSON.stringify({ type: "prompt", text: prompt }));
+				return;
+			}
+			if (m.type === "text_delta") {
+				deleting = true;
+				out.wasStreaming = true;
+				out.status = (await remove(out.sessionId)).status;
+				setTimeout(finish, 1500);
+			}
+		});
+	});
 }
 
 /** 대화 하나를 열고 첫 응답(ready 또는 session_missing)을 돌려준다. */

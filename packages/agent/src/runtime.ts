@@ -13,6 +13,7 @@
  *   - 세션 교체(newSession/switchSession) 후에는 반드시 재구독해야 한다
  *     → 우리는 교체하지 않는다. 대화마다 런타임을 따로 띄운다 (AlphaFolioConversation)
  */
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
 	type CreateAgentSessionRuntimeFactory,
@@ -121,6 +122,11 @@ export interface AlphaFolioAgent {
 	/** 저장된 대화 열기 — sessionPath 는 listSessions 가 준 경로만 넘긴다 (id 로 경로를 조립하지 않는다). */
 	open(sessionPath: string): Promise<AlphaFolioConversation>;
 	listSessions(): Promise<SessionSummary[]>;
+	/**
+	 * 저장된 대화 파일 삭제 — sessionPath 는 listSessions 가 준 경로만 넘긴다.
+	 * 그 대화가 열려 있으면 먼저 닫아야 한다 (열린 대화가 파일을 다시 만들 수 있다).
+	 */
+	deleteSession(sessionPath: string): Promise<void>;
 	/** 사용자 LLM 키 교체/제거 (null = 제거 → auth.json·env 로 되돌아간다). 열린 대화 전부에 바로 적용된다. */
 	setApiKey(providerId: string, key: string | null): Promise<void>;
 }
@@ -244,6 +250,9 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 					modified: s.modified.toISOString(),
 				}))
 				.sort((a, b) => b.modified.localeCompare(a.modified));
+		},
+		async deleteSession(sessionPath) {
+			await rm(sessionPath, { force: true });
 		},
 		async setApiKey(providerId, key) {
 			if (key) await modelRuntime.setRuntimeApiKey(providerId, key);
