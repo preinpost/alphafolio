@@ -1,12 +1,15 @@
 /**
- * WebSocket — 사용자별 에이전트 이벤트 중계.
+ * WebSocket — 대화별 에이전트 이벤트 중계.
  *
  * 인증: 쿼리스트링이 아니라 **첫 메시지로 토큰을 받는다**.
  * (URL 쿼리는 프록시·액세스 로그에 남아 토큰이 유출된다)
  * 인증 전에는 다른 명령을 받지 않고, 5초 내 인증이 없으면 연결을 끊는다.
  *
- * ⚠️ 이벤트는 **같은 사용자의 클라이언트에게만** 보낸다.
- *    (데스크탑+모바일 동시 접속은 같은 대화를 공유하고, 다른 사용자와는 완전히 분리된다)
+ * 소켓 하나는 한 번에 **대화 하나**에 붙는다 (PLAN §24).
+ *   - 대화 이벤트는 그 대화를 보고 있는 같은 사용자의 소켓에만 보낸다
+ *   - 같은 사용자의 다른 소켓에는 "어느 대화가 응답 중인지" (activity) 만 보낸다 — 사이드바 표시용
+ *   - 다른 사용자에게는 아무것도 가지 않는다
+ *   - 소켓이 끊겨도 대화는 서버에서 끝까지 돈다 (앱을 꺼도 답이 만들어진다). 다시 붙으면 ready 로 복원
  *
  * pi 원본 이벤트를 그대로 흘리지 않는다:
  *   - thinking 채널 delta는 전송하지 않고, 본문의 사고 독백도 걸러낸다 (CotStreamFilter)
@@ -14,7 +17,6 @@
  */
 import type { Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { AlphaFolioRuntime } from "@alphafolio/agent";
 import type { ClientMessage, StreamMessage } from "@alphafolio/protocol";
 import { verifyToken } from "./auth.ts";
 import type { RuntimeManager } from "./runtimes.ts";
@@ -32,13 +34,6 @@ interface WsDeps {
 	ledgerEnabled: () => boolean;
 }
 
-/** 사용자 단위 팬아웃 — 런타임 구독은 사용자당 하나만 건다. */
-interface UserChannel {
-	clients: Set<WebSocket>;
-	unsubscribe: () => void;
-	cot: CotStreamFilter;
-}
-
 /** pi 이벤트의 우리가 쓰는 부분만 좁게 기술한 형태. */
 interface PiEvent {
 	type: string;
@@ -49,69 +44,127 @@ interface PiEvent {
 	assistantMessageEvent?: { type: string; delta?: string };
 }
 
+/** 인증된 소켓 */
+interface Client {
+	ws: WebSocket;
+	user: string;
+	/** 지금 보고 있는 대화 (붙기 전·옮기는 중에는 null) */
+	sessionId: string | null;
+}
+
 export function attachWebSocket(server: Server, deps: WsDeps): void {
 	const wss = new WebSocketServer({ noServer: true });
-	const channels = new Map<string, UserChannel>();
+	/** 사용자별 인증된 소켓 */
+	const clients = new Map<string, Set<Client>>();
+	/** 대화별 사고 독백 필터 — 대화마다 스트림이 따로라 상태도 따로 둔다 */
+	const filters = new Map<string, CotStreamFilter>();
+	const key = (user: string, sessionId: string): string => `${user}\u0000${sessionId}`;
 
-	function channelFor(user: string, runtime: AlphaFolioRuntime): UserChannel {
-		const existing = channels.get(user);
-		if (existing) return existing;
+	const sendTo = (c: Client, msg: StreamMessage): void => {
+		if (c.ws.readyState === c.ws.OPEN) c.ws.send(JSON.stringify(msg));
+	};
 
-		const channel: UserChannel = {
-			clients: new Set(),
-			cot: new CotStreamFilter(),
-			unsubscribe: () => {},
+	/** 이 대화를 보고 있는 소켓들에만 */
+	const toViewers = (user: string, sessionId: string, msg: StreamMessage): void => {
+		const payload = JSON.stringify(msg);
+		for (const c of clients.get(user) ?? []) {
+			if (c.sessionId === sessionId && c.ws.readyState === c.ws.OPEN) c.ws.send(payload);
+		}
+	};
+
+	const hasViewers = (user: string, sessionId: string): boolean =>
+		[...(clients.get(user) ?? [])].some((c) => c.sessionId === sessionId);
+
+	/** 같은 사용자의 모든 소켓에 — 대화 내용 없이 상태만 */
+	const toUser = (user: string, msg: StreamMessage): void => {
+		for (const c of clients.get(user) ?? []) sendTo(c, msg);
+	};
+
+	// 대화 이벤트는 클라이언트가 없어도 온다 (백그라운드 응답). 볼 사람이 없으면 버려진다 — 결과는 세션 파일에 남는다.
+	deps.runtimes.onEvent((user, sessionId, raw) => {
+		const e = raw as PiEvent;
+		const k = key(user, sessionId);
+		let cot = filters.get(k);
+		if (!cot) {
+			cot = new CotStreamFilter();
+			filters.set(k, cot);
+		}
+		// 볼 사람이 없으면 직렬화하지 않는다 (백그라운드 응답)
+		const snapshot = (): void => {
+			if (!hasViewers(user, sessionId)) return;
+			const conv = deps.runtimes.peek(user, sessionId);
+			if (conv) toViewers(user, sessionId, { type: "message_end", messages: serializeMessages(conv.messages) });
 		};
 
-		const broadcast = (msg: StreamMessage): void => {
-			const payload = JSON.stringify(msg);
-			for (const ws of channel.clients) {
-				if (ws.readyState === ws.OPEN) ws.send(payload);
+		switch (e.type) {
+			case "agent_start":
+				cot.reset();
+				toViewers(user, sessionId, { type: "agent_start" });
+				toUser(user, { type: "activity", sessionId, streaming: true });
+				return;
+			case "message_update": {
+				const inner = e.assistantMessageEvent;
+				if (inner?.type !== "text_delta" || !inner.delta) return; // thinking 채널 비전송
+				const clean = cot.push(inner.delta);
+				if (clean) toViewers(user, sessionId, { type: "text_delta", delta: clean });
+				return;
 			}
-		};
+			case "message_end": {
+				const tail = cot.flush();
+				if (tail) toViewers(user, sessionId, { type: "text_delta", delta: tail });
+				snapshot();
+				return;
+			}
+			case "tool_execution_start":
+				toViewers(user, sessionId, {
+					type: "tool_start",
+					id: e.toolCallId ?? "",
+					name: e.toolName ?? "unknown",
+					args: e.args,
+				});
+				return;
+			case "tool_execution_end":
+				toViewers(user, sessionId, {
+					type: "tool_end",
+					id: e.toolCallId ?? "",
+					name: e.toolName ?? "unknown",
+					isError: e.isError === true,
+				});
+				return;
+			case "agent_end":
+				toViewers(user, sessionId, { type: "agent_end" });
+				snapshot();
+				toUser(user, { type: "activity", sessionId, streaming: false });
+				filters.delete(k);
+				return;
+			default:
+				return;
+		}
+	});
 
-		channel.unsubscribe = runtime.subscribe((raw) => {
-			const e = raw as PiEvent;
-			switch (e.type) {
-				case "agent_start":
-					channel.cot.reset();
-					broadcast({ type: "agent_start" });
-					return;
-				case "message_update": {
-					const inner = e.assistantMessageEvent;
-					if (inner?.type !== "text_delta" || !inner.delta) return; // thinking 채널 비전송
-					const clean = channel.cot.push(inner.delta);
-					if (clean) broadcast({ type: "text_delta", delta: clean });
-					return;
-				}
-				case "message_end": {
-					const tail = channel.cot.flush();
-					if (tail) broadcast({ type: "text_delta", delta: tail });
-					broadcast({ type: "message_end", messages: serializeMessages(runtime.messages) });
-					return;
-				}
-				case "tool_execution_start":
-					broadcast({ type: "tool_start", id: e.toolCallId ?? "", name: e.toolName ?? "unknown", args: e.args });
-					return;
-				case "tool_execution_end":
-					broadcast({
-						type: "tool_end",
-						id: e.toolCallId ?? "",
-						name: e.toolName ?? "unknown",
-						isError: e.isError === true,
-					});
-					return;
-				case "agent_end":
-					broadcast({ type: "agent_end" });
-					broadcast({ type: "message_end", messages: serializeMessages(runtime.messages) });
-					return;
-				default:
-					return;
-			}
+	/** 소켓을 대화에 붙인다 (이전 대화에서는 뗀다). 없는 대화면 session_missing. */
+	async function openConversation(c: Client, sessionId: string | null): Promise<void> {
+		if (c.sessionId) {
+			deps.runtimes.detach(c.user, c.sessionId);
+			c.sessionId = null;
+		}
+		const conv = await deps.runtimes.conversation(c.user, sessionId);
+		if (!conv) {
+			sendTo(c, { type: "session_missing", sessionId: sessionId ?? "" });
+			return;
+		}
+		// 옮기는 사이에 소켓이 닫혔으면 붙이지 않는다 (붙이면 대화가 영영 정리되지 않는다)
+		if (c.ws.readyState !== c.ws.OPEN) return;
+		c.sessionId = conv.sessionId;
+		deps.runtimes.attach(c.user, conv.sessionId);
+		sendTo(c, {
+			type: "ready",
+			sessionId: conv.sessionId,
+			model: conv.modelLabel,
+			ledgerEnabled: deps.ledgerEnabled(),
+			isStreaming: conv.isStreaming,
+			messages: serializeMessages(conv.messages),
 		});
-
-		channels.set(user, channel);
-		return channel;
 	}
 
 	server.on("upgrade", (req, socket, head) => {
@@ -124,14 +177,17 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 	});
 
 	wss.on("connection", (ws: WebSocket) => {
-		let user: string | null = null;
+		let client: Client | null = null;
+		/** 대화 열기·옮기기는 순서대로 — 빠르게 두 번 누르면 나중 것이 이겨야 한다 */
+		let queue: Promise<void> = Promise.resolve();
 
 		const send = (msg: StreamMessage): void => {
 			if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 		};
+		const fail = (err: unknown): void => send({ type: "error", message: err instanceof Error ? err.message : String(err) });
 
 		const timer = setTimeout(() => {
-			if (!user) {
+			if (!client) {
 				send({ type: "error", message: "인증 시간 초과" });
 				ws.close(4401, "unauthorized");
 			}
@@ -146,7 +202,7 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 				return;
 			}
 
-			if (!user) {
+			if (!client) {
 				if (msg.type !== "auth") {
 					send({ type: "error", message: "인증이 필요합니다" });
 					ws.close(4401, "unauthorized");
@@ -159,97 +215,79 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 					ws.close(4401, "unauthorized");
 					return;
 				}
-
-				user = name;
 				clearTimeout(timer);
-
-				void (async () => {
-					try {
-						const runtime = await deps.runtimes.get(name);
-						const channel = channelFor(name, runtime);
-						channel.clients.add(ws);
-						deps.runtimes.acquire(name);
-
-						send({
-							type: "ready",
-							sessionId: runtime.sessionId,
-							model: runtime.modelLabel,
-							ledgerEnabled: deps.ledgerEnabled(),
-							isStreaming: runtime.isStreaming,
-							messages: serializeMessages(runtime.messages),
-						});
-					} catch (err) {
-						send({ type: "error", message: err instanceof Error ? err.message : String(err) });
-						ws.close(1011, "runtime error");
-					}
-				})();
+				const c: Client = { ws, user: name, sessionId: null };
+				client = c;
+				let set = clients.get(name);
+				if (!set) clients.set(name, (set = new Set()));
+				set.add(c);
+				const wanted = typeof msg.sessionId === "string" && msg.sessionId ? msg.sessionId : null;
+				queue = queue.then(() => openConversation(c, wanted)).catch(fail);
 				return;
 			}
 
-			void handleCommand(send, msg, user, deps);
+			const c = client;
+			switch (msg.type) {
+				case "open":
+				case "new_session": {
+					const wanted = msg.type === "open" && typeof msg.sessionId === "string" && msg.sessionId ? msg.sessionId : null;
+					queue = queue.then(() => openConversation(c, wanted)).catch(fail);
+					return;
+				}
+				case "ping":
+					send({ type: "pong" });
+					return;
+				default:
+					// 대화 명령은 열기가 끝난 뒤에 — 새 대화를 열자마자 보낸 첫 메시지가 이전 대화로 가지 않게
+					queue = queue.then(() => runCommand(c, msg)).catch(fail);
+			}
 		});
 
 		ws.on("close", () => {
 			clearTimeout(timer);
-			if (!user) return;
-
-			const channel = channels.get(user);
-			if (channel) {
-				channel.clients.delete(ws);
-				// 마지막 클라이언트가 나가면 구독을 끊는다 (런타임 자체는 유휴 정리에 맡긴다)
-				if (channel.clients.size === 0) {
-					channel.unsubscribe();
-					channels.delete(user);
-				}
-			}
-			deps.runtimes.release(user);
+			const c = client;
+			if (!c) return;
+			clients.get(c.user)?.delete(c);
+			if (clients.get(c.user)?.size === 0) clients.delete(c.user);
+			// 대화는 계속 돈다 — 떼기만 한다
+			if (c.sessionId) deps.runtimes.detach(c.user, c.sessionId);
+			c.sessionId = null;
 		});
 	});
-}
 
-async function handleCommand(
-	send: (msg: StreamMessage) => void,
-	msg: ClientMessage,
-	user: string,
-	deps: WsDeps,
-): Promise<void> {
-	try {
-		const runtime = await deps.runtimes.get(user);
-		deps.runtimes.touch(user);
+	async function runCommand(c: Client, msg: ClientMessage): Promise<void> {
+		const sessionId = c.sessionId;
+		if (!sessionId) {
+			sendTo(c, { type: "error", message: "열린 대화가 없습니다" });
+			return;
+		}
+		const conv = await deps.runtimes.conversation(c.user, sessionId);
+		if (!conv) {
+			sendTo(c, { type: "session_missing", sessionId });
+			return;
+		}
+		deps.runtimes.touch(c.user, sessionId);
 
 		switch (msg.type) {
 			case "prompt":
 				if (!msg.text.trim()) return;
-				// 클라이언트의 streaming 상태는 믿지 않는다 — 같은 사용자의 다른 탭·기기에서
-				// 이미 대화가 진행 중일 수 있다. 진행 중이면 거부 대신 큐에 넣는다.
-				if (runtime.isStreaming) await runtime.followUp(msg.text);
-				else await runtime.prompt(msg.text);
+				// 응답은 기다리지 않는다 — 기다리면 이 소켓의 다음 명령(다른 대화로 옮기기 등)이 답이 끝날 때까지 막힌다.
+				// 소켓이 끊겨도 대화는 끝까지 돈다. 실패는 그때 보고 있는 사람에게 알리고 로그에 남긴다.
+				// 클라이언트의 streaming 상태는 믿지 않는다 — 다른 탭·기기에서 같은 대화가 진행 중일 수 있다.
+				void (conv.isStreaming ? conv.followUp(msg.text) : conv.prompt(msg.text)).catch((err: unknown) => {
+					console.warn(`[agent] 응답 실패 — user=${c.user} session=${sessionId}:`, err);
+					toViewers(c.user, sessionId, { type: "error", message: err instanceof Error ? err.message : String(err) });
+				});
 				return;
 			case "steer":
 				if (!msg.text.trim()) return;
-				await runtime.steer(msg.text);
+				await conv.steer(msg.text);
 				return;
 			case "abort":
-				await runtime.abort();
-				return;
-			case "new_session":
-				await runtime.newSession();
-				send({
-					type: "ready",
-					sessionId: runtime.sessionId,
-					model: runtime.modelLabel,
-					ledgerEnabled: deps.ledgerEnabled(),
-					isStreaming: false,
-					messages: [],
-				});
-				return;
-			case "ping":
-				send({ type: "pong" });
+				await conv.abort();
 				return;
 			default:
-				send({ type: "error", message: "알 수 없는 명령" });
+				sendTo(c, { type: "error", message: "알 수 없는 명령" });
 		}
-	} catch (err) {
-		send({ type: "error", message: err instanceof Error ? err.message : String(err) });
 	}
 }

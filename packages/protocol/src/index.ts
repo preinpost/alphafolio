@@ -391,11 +391,18 @@ export interface UIMessage {
 
 // ── WebSocket ───────────────────────────────────────────────────────────
 
+/**
+ * 한 소켓은 한 번에 **대화 하나**에 붙는다 (PLAN §24). prompt·steer·abort 는 그 대화에 간다.
+ * sessionId 가 null/없음이면 새 대화.
+ */
 export type ClientMessage =
-	| { type: "auth"; token: string }
+	| { type: "auth"; token: string; sessionId?: string | null }
+	/** 다른 대화로 옮기기 (사이드바 클릭·뒤로 가기). null 이면 새 대화 */
+	| { type: "open"; sessionId: string | null }
 	| { type: "prompt"; text: string }
 	| { type: "steer"; text: string }
 	| { type: "abort" }
+	/** open(null) 과 같다 — 이전 클라이언트 호환 */
 	| { type: "new_session" }
 	| { type: "ping" };
 
@@ -421,7 +428,24 @@ export type StreamMessage =
 	| { type: "agent_start" }
 	| { type: "agent_end" }
 	| { type: "error"; message: string }
+	/** 요청한 대화가 없다 (삭제됨·다른 사용자 것·저장 전에 서버 재시작) — 클라이언트는 새 대화로 */
+	| { type: "session_missing"; sessionId: string }
+	/**
+	 * 같은 사용자의 **다른 대화**가 응답을 시작·끝냄 — 사이드바의 "응답 중"·"새 답" 표시용.
+	 * 지금 보고 있지 않은 대화의 내용은 보내지 않는다.
+	 */
+	| { type: "activity"; sessionId: string; streaming: boolean }
 	| { type: "pong" };
+
+/** GET /api/sessions — 사이드바 대화 목록 (최근 순) */
+export interface ConversationListItem {
+	id: string;
+	title: string;
+	modified: string;
+	messageCount: number;
+	/** 서버에서 응답을 만들고 있는가 — 앱을 꺼도 계속 돈다 */
+	streaming: boolean;
+}
 
 // ── 가계부 REST ─────────────────────────────────────────────────────────
 

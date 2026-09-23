@@ -40,7 +40,6 @@ import { handleLedger, handleLedgerAdmin, HttpError, readJson, setLedgerConfigPr
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
 import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
-import { serializeMessages } from "./serialize.ts";
 import { authenticate, hasUser, loadUsers } from "./users.ts";
 import { attachWebSocket } from "./ws.ts";
 
@@ -484,22 +483,14 @@ async function main(): Promise<void> {
 				return;
 			}
 
+			// 대화 목록 — 사이드바. 응답 중인 대화(앱을 꺼도 도는 것) 표시 포함
 			if (path === "/api/sessions" && req.method === "GET") {
-				const runtime = await runtimes.get(user);
-				json(res, 200, await runtime.listSessions());
+				json(res, 200, await runtimes.listConversations(user));
 				return;
 			}
 
 			if (path === "/api/state") {
-				const runtime = await runtimes.get(user);
-				json(res, 200, {
-					user,
-					tools: runtime.toolNames,
-					sessionId: runtime.sessionId,
-					model: runtime.modelLabel,
-					isStreaming: runtime.isStreaming,
-					messages: serializeMessages(runtime.messages),
-				});
+				json(res, 200, { user, ...(await runtimes.describe(user)) });
 				return;
 			}
 

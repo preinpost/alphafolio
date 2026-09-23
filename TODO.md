@@ -14,6 +14,14 @@
 - [ ] `transactions.dedupe_key` 가 전역 UNIQUE — 가계부 간 충돌 가능. 임포트를 만들 때 `(ledger_id, dedupe_key)` 로
 - [ ] 구 데이터(`budgets_legacy` 1행, spike 잔여) 삭제
 
+## 대화 (PLAN §24)
+
+- [x] 서버: 대화별 세션, 백그라운드 응답, /api/sessions
+- [ ] 웹 UI 커밋 — `/c/<id>`, 사이드바 대화 목록 (App.tsx 가 다른 세션의 미커밋 변경과 섞여 있어 보류). **화면 테스트 안 함**
+- [ ] 툴 진행 문구(flavor line) 불일치 — ledger_add 에 "종목 목록을 훑어봤어요" 가 붙음
+- [ ] 대화 이름 바꾸기·삭제, 서버 재시작 시 진행 중이던 응답은 사라짐 (재개 불가)
+- [ ] 백그라운드 완료 푸시 알림 (iOS 푸시 작업 때)
+
 ## 기능 (보류)
 
 - [ ] **`monthly_report(month)`** — 스킬 툴화의 마지막 (PLAN §21)

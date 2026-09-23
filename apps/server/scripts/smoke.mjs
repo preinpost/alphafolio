@@ -130,7 +130,7 @@ async function main() {
 	const authed = { authorization: `Bearer ${token}` };
 	const state = await fetch(`${BASE}/api/state`, { headers: authed });
 	const stateBody = await state.json();
-	check("토큰으로 /api/state 접근", state.ok, `sessionId=${stateBody.sessionId?.slice(0, 8)}…`);
+	check("토큰으로 /api/state 접근", state.ok, `툴 ${stateBody.tools?.length ?? 0}개`);
 
 	console.log("\n── 가계부 REST (에이전트 우회 경로) ──────────────────");
 	let txId = null;
@@ -177,16 +177,6 @@ async function main() {
 	).json();
 	check("토큰마다 다른 사용자로 식별", me1.user === USER && me2.user === USER2, `${me1.user} / ${me2.user}`);
 
-	const state1 = await (await fetch(`${BASE}/api/state`, { headers: authed })).json();
-	const state2 = await (
-		await fetch(`${BASE}/api/state`, { headers: { authorization: `Bearer ${body2.token}` } })
-	).json();
-	check(
-		"사용자별 세션 분리",
-		state1.sessionId !== state2.sessionId,
-		`${String(state1.sessionId).slice(-8)} vs ${String(state2.sessionId).slice(-8)}`,
-	);
-
 	// 한쪽 대화가 다른 쪽으로 새지 않는지 — user2 소켓을 열어두고 user1이 대화한다
 	const eavesdrop = await wsWatch(body2.token);
 	const isolated = await wsTest(token, "짧게 인사만 해줘.");
@@ -198,6 +188,56 @@ async function main() {
 		eavesdrop.received.length === 0 ? "누출 0건" : `누출 ${eavesdrop.received.length}건: ${eavesdrop.received.join(",")}`,
 	);
 	check("격리 상태에서도 본인 응답은 수신", isolated.text.length > 0);
+
+	// 대화별 세션 (PLAN §24) — 대화 id 는 URL 에 들어간다. 남의 대화 id 로는 열 수 없어야 한다.
+	console.log("\n── 대화별 세션 · 백그라운드 응답 ─────────────────────");
+	const stolen = await wsOpen(body2.token, isolated.sessionId);
+	check(
+		"다른 사용자의 대화 id 로는 열 수 없음",
+		stolen.type === "session_missing",
+		`${stolen.type}${stolen.messages ? ` (메시지 ${stolen.messages.length}개 노출)` : ""}`,
+	);
+	const mine = await wsOpen(token, isolated.sessionId);
+	check(
+		"내 대화는 id 로 다시 열림 (이전 메시지 복원)",
+		mine.type === "ready" && mine.sessionId === isolated.sessionId && mine.messages.length >= 2,
+		`${mine.type} 메시지 ${mine.messages?.length ?? 0}개`,
+	);
+
+	// 탭 A 는 대화 X 를 보고, 탭 B 가 새 대화에서 묻는다 — A 에는 내용이 아니라 활동 표시만 가야 한다
+	const tabA = wsWatch(token, isolated.sessionId);
+	const tabB = await wsTest(token, "한 단어로만 답해: 하늘은 무슨 색?");
+	await new Promise((r) => setTimeout(r, 500));
+	tabA.close();
+	const crossTalk = tabA.received.filter((t) => t !== "activity");
+	check(
+		"다른 대화를 보는 탭에는 활동 표시만",
+		tabB.sessionId !== isolated.sessionId && crossTalk.length === 0 && tabA.received.includes("activity"),
+		`받은 것: ${tabA.received.join(",") || "(없음)"}`,
+	);
+
+	// 묻고 바로 앱을 끈다 → 서버가 끝까지 답하고 → 다시 열면 답이 있다
+	const bg = await wsFireAndClose(token, "숫자 1부터 5까지 쉼표로 이어서 한 줄로만 써줘.");
+	let listed = null;
+	for (let i = 0; i < 90 && bg.sessionId; i++) {
+		const list = await (await fetch(`${BASE}/api/sessions`, { headers: authed })).json();
+		listed = list.find((x) => x.id === bg.sessionId) ?? null;
+		if (listed && !listed.streaming && listed.messageCount >= 2) break;
+		await new Promise((r) => setTimeout(r, 1000));
+	}
+	const reopened = bg.sessionId ? await wsOpen(token, bg.sessionId) : { type: "none" };
+	const answer = (reopened.messages ?? [])
+		.filter((m) => m.role === "assistant")
+		.flatMap((m) => m.content)
+		.filter((b) => b.type === "text")
+		.map((b) => b.text)
+		.join("");
+	check(
+		"소켓을 끊어도 답이 끝까지 만들어짐 (다시 열면 보임)",
+		reopened.type === "ready" && /1.*2.*3.*4.*5/.test(answer),
+		`목록 ${listed ? `"${listed.title}" streaming=${listed.streaming}` : "없음"} / 답 "${answer.slice(0, 40)}"`,
+	);
+	check("대화 목록 제목 = 첫 메시지", listed?.title?.startsWith("숫자 1부터 5까지") === true, listed?.title ?? "(없음)");
 
 	// 가계부 분리 (PLAN §23) — 가입을 열면 모르는 사람이 같은 D1 을 쓴다. 남의 가계부에 닿으면 안 된다.
 	if (health.ledger) {
@@ -498,12 +538,12 @@ async function main() {
 
 /**
  * 대화를 보내지 않고 이벤트만 받는 감시 소켓.
- * 다른 사용자의 스트림이 새는지 확인하는 용도다.
+ * 다른 사용자·다른 대화의 스트림이 새는지 확인하는 용도다.
  */
-function wsWatch(token) {
+function wsWatch(token, sessionId = null) {
 	const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 	const received = [];
-	ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token })));
+	ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token, sessionId })));
 	ws.on("message", (raw) => {
 		const m = JSON.parse(raw.toString());
 		// ready/pong 은 자기 자신의 접속 응답이라 누출이 아니다
@@ -515,11 +555,50 @@ function wsWatch(token) {
 	};
 }
 
-/** WS로 프롬프트 한 번 왕복. { ready, text, toolCalls } 를 돌려준다. */
+/** 대화 하나를 열고 첫 응답(ready 또는 session_missing)을 돌려준다. */
+function wsOpen(token, sessionId) {
+	return new Promise((resolve) => {
+		const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+		const timer = setTimeout(() => {
+			ws.close();
+			resolve({ type: "timeout" });
+		}, 15_000);
+		ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token, sessionId })));
+		ws.on("message", (raw) => {
+			const m = JSON.parse(raw.toString());
+			if (m.type === "ready" || m.type === "session_missing" || m.type === "error") {
+				clearTimeout(timer);
+				ws.close();
+				resolve(m);
+			}
+		});
+	});
+}
+
+/** 새 대화에서 묻고 **답을 기다리지 않고** 끊는다 — 사용자가 앱을 끈 상황. { sessionId } */
+function wsFireAndClose(token, prompt) {
+	return new Promise((resolve) => {
+		const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+		ws.on("open", () => ws.send(JSON.stringify({ type: "auth", token })));
+		ws.on("message", (raw) => {
+			const m = JSON.parse(raw.toString());
+			if (m.type !== "ready") return;
+			ws.send(JSON.stringify({ type: "prompt", text: prompt }));
+			// 서버가 prompt 를 받을 시간만 주고 끊는다
+			setTimeout(() => {
+				ws.close();
+				resolve({ sessionId: m.sessionId });
+			}, 300);
+		});
+		ws.on("error", () => resolve({ sessionId: null }));
+	});
+}
+
+/** WS로 프롬프트 한 번 왕복. { ready, sessionId, text, toolCalls } 를 돌려준다. */
 function wsTest(token, prompt) {
 	return new Promise((resolve) => {
 		const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-		const out = { ready: false, text: "", toolCalls: [] };
+		const out = { ready: false, sessionId: null, text: "", toolCalls: [] };
 		let settled = false;
 
 		const finish = () => {
@@ -537,6 +616,7 @@ function wsTest(token, prompt) {
 			const msg = JSON.parse(raw.toString());
 			if (msg.type === "ready") {
 				out.ready = true;
+				out.sessionId = msg.sessionId;
 				ws.send(JSON.stringify({ type: "prompt", text: prompt }));
 				return;
 			}

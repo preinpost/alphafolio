@@ -11,6 +11,7 @@
  *   - customTools 타입은 ToolDefinition[]
  *   - agentDir 를 명시하지 않으면 사용자의 전역 확장(~/.pi/agent)이 딸려온다
  *   - 세션 교체(newSession/switchSession) 후에는 반드시 재구독해야 한다
+ *     → 우리는 교체하지 않는다. 대화마다 런타임을 따로 띄운다 (AlphaFolioConversation)
  */
 import { join } from "node:path";
 import {
@@ -61,33 +62,49 @@ export interface SessionSummary {
 	path: string;
 	id: string;
 	name?: string;
+	/** 첫 사용자 메시지 — 사이드바 제목으로 쓴다 */
+	firstMessage: string;
+	messageCount: number;
 	modified: string;
 }
 
-export interface AlphaFolioRuntime {
-	/** 현재 세션에 구독한다. 세션이 교체돼도 구독이 유지된다. */
+/**
+ * 대화 하나 — pi AgentSessionRuntime 하나에 대응한다.
+ *
+ * 대화마다 따로 띄우는 이유 (PLAN §24): 사용자당 대화를 하나만 열어두면 탭·기기·테스트가
+ * 같은 대화를 끌어다 쓴다. 대화별로 두면 한 대화가 응답하는 동안 다른 대화를 읽을 수 있고,
+ * 클라이언트가 끊겨도(앱 종료) 그 대화는 서버에서 끝까지 돈다.
+ */
+export interface AlphaFolioConversation {
 	subscribe(listener: (event: unknown) => void): () => void;
 	prompt(text: string): Promise<void>;
 	steer(text: string): Promise<void>;
 	followUp(text: string): Promise<void>;
 	abort(): Promise<void>;
-	newSession(): Promise<void>;
-	switchSession(sessionPath: string): Promise<void>;
-	listSessions(): Promise<SessionSummary[]>;
 	readonly sessionId: string;
 	readonly isStreaming: boolean;
 	readonly messages: unknown[];
 	readonly modelLabel: string;
 	/** 현재 모델에 노출된 툴 이름 — 확장 로딩 확인·진단용. */
 	readonly toolNames: string[];
-	/** 사용자 LLM 키 교체/제거 (null = 제거 → auth.json·env 로 되돌아간다). 재시작 불필요. */
-	setApiKey(providerId: string, key: string | null): Promise<void>;
 	dispose(): Promise<void>;
 }
 
-export async function createAlphaFolioRuntime(opts: RuntimeOptions): Promise<AlphaFolioRuntime> {
+/** 사용자 한 명의 에이전트 — 모델·자격증명을 공유하고, 대화를 여러 개 연다. */
+export interface AlphaFolioAgent {
+	/** 새 대화. 첫 메시지 전까지는 파일로 남지 않는다 (pi 세션은 지연 저장). */
+	create(): Promise<AlphaFolioConversation>;
+	/** 저장된 대화 열기 — sessionPath 는 listSessions 가 준 경로만 넘긴다 (id 로 경로를 조립하지 않는다). */
+	open(sessionPath: string): Promise<AlphaFolioConversation>;
+	listSessions(): Promise<SessionSummary[]>;
+	/** 사용자 LLM 키 교체/제거 (null = 제거 → auth.json·env 로 되돌아간다). 열린 대화 전부에 바로 적용된다. */
+	setApiKey(providerId: string, key: string | null): Promise<void>;
+}
+
+export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<AlphaFolioAgent> {
 	// modelsPath 를 명시하지 않으면 ModelRuntime 이 pi 기본 경로를 보므로
 	// agentDir 의 models.json(OpenRouter 라우팅 가드)이 무시된다.
+	// 대화들이 이 하나를 공유한다 — 키를 바꾸면 열린 대화 전부에 적용된다.
 	const modelRuntime = await ModelRuntime.create({
 		modelsPath: join(opts.agentDir, "models.json"),
 		...(opts.authPath ? { authPath: opts.authPath } : {}),
@@ -129,79 +146,80 @@ export async function createAlphaFolioRuntime(opts: RuntimeOptions): Promise<Alp
 		};
 	};
 
-	const runtime = await createAgentSessionRuntime(factory, {
-		cwd: opts.cwd,
-		agentDir: opts.agentDir,
-		sessionManager: SessionManager.create(opts.cwd, opts.sessionsDir),
-	});
+	let diagnosticsLogged = false;
 
-	for (const d of runtime.diagnostics) {
-		console.log(`[agent:${d.type}] ${d.message}`);
+	async function start(sessionManager: SessionManager): Promise<AlphaFolioConversation> {
+		const runtime = await createAgentSessionRuntime(factory, {
+			cwd: opts.cwd,
+			agentDir: opts.agentDir,
+			sessionManager,
+		});
+		// 확장 진단은 대화마다 같으므로 처음 한 번만 찍는다
+		if (!diagnosticsLogged) {
+			diagnosticsLogged = true;
+			for (const d of runtime.diagnostics) console.log(`[agent:${d.type}] ${d.message}`);
+		}
+
+		// 대화 안에서 세션을 바꾸지 않으므로 재구독(rebind)이 필요 없다
+		const session = runtime.session;
+		const listeners = new Set<(event: unknown) => void>();
+		const unsubscribe = session.subscribe((event: unknown) => {
+			for (const l of listeners) l(event);
+		});
+
+		return {
+			subscribe(listener) {
+				listeners.add(listener);
+				return () => listeners.delete(listener);
+			},
+			prompt: (text) => session.prompt(text),
+			steer: (text) => session.steer(text),
+			followUp: (text) => session.followUp(text),
+			abort: () => session.abort(),
+			get sessionId() {
+				return session.sessionId;
+			},
+			get isStreaming() {
+				return session.isStreaming;
+			},
+			get messages() {
+				return session.messages;
+			},
+			get modelLabel() {
+				const m = session.model;
+				return m ? `${m.provider}/${m.id}` : "(미설정)";
+			},
+			get toolNames() {
+				const tools = (session.agent as { state?: { tools?: Array<{ name?: string }> } } | undefined)?.state?.tools;
+				return Array.isArray(tools) ? tools.map((t) => String(t.name ?? "")).filter(Boolean) : [];
+			},
+			async dispose() {
+				unsubscribe();
+				listeners.clear();
+				await runtime.dispose();
+			},
+		};
 	}
 
-	// 세션이 교체돼도 구독이 유지되도록 리스너는 우리가 소유한다.
-	const listeners = new Set<(event: unknown) => void>();
-	const fanout = (event: unknown): void => {
-		for (const l of listeners) l(event);
-	};
-	let unsubscribe = runtime.session.subscribe(fanout);
-	const rebind = (): void => {
-		unsubscribe();
-		unsubscribe = runtime.session.subscribe(fanout);
-	};
-
 	return {
-		subscribe(listener) {
-			listeners.add(listener);
-			return () => listeners.delete(listener);
-		},
-		prompt: (text) => runtime.session.prompt(text),
-		steer: (text) => runtime.session.steer(text),
-		followUp: (text) => runtime.session.followUp(text),
-		abort: () => runtime.session.abort(),
-		async newSession() {
-			await runtime.newSession();
-			rebind();
-		},
-		async switchSession(sessionPath) {
-			await runtime.switchSession(sessionPath);
-			rebind();
-		},
+		create: () => start(SessionManager.create(opts.cwd, opts.sessionsDir)),
+		open: (sessionPath) => start(SessionManager.open(sessionPath, opts.sessionsDir)),
 		async listSessions() {
 			const sessions = await SessionManager.list(opts.cwd, opts.sessionsDir);
-			return sessions.map((s) => ({
-				path: s.path,
-				id: s.id,
-				name: s.name,
-				modified: s.modified.toISOString(),
-			}));
-		},
-		get sessionId() {
-			return runtime.session.sessionId;
-		},
-		get isStreaming() {
-			return runtime.session.isStreaming;
-		},
-		get messages() {
-			return runtime.session.messages;
+			return sessions
+				.map((s) => ({
+					path: s.path,
+					id: s.id,
+					name: s.name,
+					firstMessage: s.firstMessage,
+					messageCount: s.messageCount,
+					modified: s.modified.toISOString(),
+				}))
+				.sort((a, b) => b.modified.localeCompare(a.modified));
 		},
 		async setApiKey(providerId, key) {
 			if (key) await modelRuntime.setRuntimeApiKey(providerId, key);
 			else await modelRuntime.removeRuntimeApiKey(providerId);
-		},
-		get modelLabel() {
-			const m = runtime.session.model;
-			return m ? `${m.provider}/${m.id}` : "(미설정)";
-		},
-		get toolNames() {
-			const tools = (runtime.session.agent as { state?: { tools?: Array<{ name?: string }> } } | undefined)?.state
-				?.tools;
-			return Array.isArray(tools) ? tools.map((t) => String(t.name ?? "")).filter(Boolean) : [];
-		},
-		async dispose() {
-			unsubscribe();
-			listeners.clear();
-			await runtime.dispose();
 		},
 	};
 }
