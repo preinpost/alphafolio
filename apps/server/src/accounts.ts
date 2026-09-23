@@ -1,17 +1,23 @@
 /**
  * 계정 — env 슈퍼관리자 + 초대 코드로 가입한 D1 계정 (PLAN §25).
  *
- *   env 계정 (AF_USERS · AF_AUTH_USER)  슈퍼관리자. 비밀번호는 서버 env 로만 바꾼다. 앱에서 비활성화할 수 없다.
- *   D1 계정 (users 테이블)              가입한 사용자. 비밀번호 변경·모든 기기 로그아웃 가능, 관리자가 비활성화.
+ *   슈퍼관리자 (AF_ADMIN_USER · AF_ADMIN_PASSWORD)  한 명. 비밀번호는 서버 env 로만 바꾼다. 앱에서 비활성화할 수 없다.
+ *   가입 계정 (D1 users 테이블)                      비밀번호 변경·모든 기기 로그아웃 가능, 관리자가 비활성화.
  *
  * 가입은 관리자가 발급한 **1회용 초대 코드**로만 된다. 서버의 LLM 키·D1 을 쓰게 되므로 아무나 가입하면 안 된다.
  *
  * 인증 경로가 동기(모든 REST 요청·WS 명령)라서 D1 계정은 메모리에 올려두고 쓴다 (가족 규모).
  * 변경은 전부 이 클래스를 거치므로 캐시와 D1 이 어긋나지 않는다 — 컨테이너 한 개 전제.
  */
-import { createHash, randomInt } from "node:crypto";
+import { createHash, createHmac, randomInt } from "node:crypto";
 import { d1Query, ensureMigrated, ulid, type D1Config } from "@alphafolio/ledger";
-import { authenticate as authenticateEnv, hashPassword, hasUser as hasEnvUser, verifyHash, type UserDirectory } from "./users.ts";
+import { hashPassword, safeEqualStr, verifyHash } from "./users.ts";
+
+/** env 로 주는 슈퍼관리자 (평문 — users.ts 머리말 참고) */
+export interface AdminAccount {
+	name: string;
+	password: string;
+}
 
 export const NAME_RE = /^[a-z0-9_]{3,20}$/;
 export const PASSWORD_MIN = 10;
@@ -86,15 +92,23 @@ export function checkPassword(password: string): void {
 
 export class AccountStore {
 	private readonly provider: () => D1Config;
-	private readonly env: UserDirectory;
+	private readonly admin: AdminAccount;
+	/**
+	 * 관리자 토큰 버전 — 비밀번호에서 계산한다. 비밀번호를 바꾸고 재시작하면 기존 로그인이 전부 끊긴다.
+	 * 토큰 본문은 누구나 읽을 수 있으므로 **서명 키로 HMAC** 한다 (그냥 해시하면 토큰으로 비밀번호를 대입해 볼 수 있다).
+	 */
+	private readonly adminVersion: number;
 	private readonly now: () => number;
 	private readonly db = new Map<string, DbUser>();
 	private loaded = false;
 
-	constructor(provider: () => D1Config, env: UserDirectory, now: () => number = Date.now) {
+	constructor(provider: () => D1Config, admin: AdminAccount, secret: string, now: () => number = Date.now) {
 		this.provider = provider;
-		this.env = env;
+		this.admin = admin;
 		this.now = now;
+		const mac = createHmac("sha256", secret).update(`admin-token:${admin.name}:${admin.password}`).digest();
+		// 0 은 "버전 없는 옛 토큰" 과 같아지므로 피한다. 48비트 — JS 정수 안전 범위
+		this.adminVersion = mac.readUIntBE(0, 6) || 1;
 	}
 
 	private async cfg(): Promise<D1Config> {
@@ -116,39 +130,40 @@ export class AccountStore {
 	}
 
 	isAdmin(name: string): boolean {
-		return hasEnvUser(this.env, name);
+		return name === this.admin.name;
 	}
 
 	sourceOf(name: string): "env" | "db" | null {
-		if (hasEnvUser(this.env, name)) return "env";
+		if (this.isAdmin(name)) return "env";
 		return this.db.has(name) ? "db" : null;
 	}
 
 	/** 로그인 가능한 계정인가 (비활성화 제외) */
 	has(name: string): boolean {
-		if (hasEnvUser(this.env, name)) return true;
+		if (this.isAdmin(name)) return true;
 		const u = this.db.get(name);
 		return u !== undefined && u.disabled_at === null;
 	}
 
-	/** 토큰이 아직 유효한 계정·버전인가. env 계정은 버전이 늘 0 (env 로만 관리). */
+	/** 토큰이 아직 유효한 계정·버전인가. 관리자는 비밀번호에서 계산한 버전, 가입 계정은 D1 의 token_version. */
 	accepts(name: string, version: number | undefined): boolean {
 		if (!this.has(name)) return false;
 		return this.tokenVersion(name) === (version ?? 0);
 	}
 
 	tokenVersion(name: string): number {
+		if (this.isAdmin(name)) return this.adminVersion;
 		return this.db.get(name)?.token_version ?? 0;
 	}
 
 	/** 활성 계정 이름 전부 — 스냅샷 스케줄러 등 */
 	names(): string[] {
-		return [...this.env.users.map((u) => u.name), ...[...this.db.values()].filter((u) => !u.disabled_at).map((u) => u.name)];
+		return [this.admin.name, ...[...this.db.values()].filter((u) => !u.disabled_at).map((u) => u.name)];
 	}
 
 	/** 비밀번호 확인 — 성공하면 이름. 없는 계정도 같은 비용을 치른다 (타이밍으로 존재 여부가 새지 않게). */
 	authenticate(name: string, password: string): string | null {
-		if (hasEnvUser(this.env, name)) return authenticateEnv(this.env, name, password);
+		if (this.isAdmin(name)) return safeEqualStr(password, this.admin.password) ? name : null;
 		const u = this.db.get(name);
 		if (!u || u.disabled_at) {
 			hashPassword(password);
@@ -231,7 +246,7 @@ export class AccountStore {
 	/** 모든 기기 로그아웃 — 새 토큰 버전을 돌려준다 (지금 기기는 새 토큰으로 이어간다) */
 	async logoutAll(name: string): Promise<number> {
 		const u = this.db.get(name);
-		if (!u) throw new AccountError(400, "서버 설정 계정은 AF_AUTH_SECRET 을 바꿔야 모든 로그인이 끊깁니다");
+		if (!u) throw new AccountError(400, "서버 설정 계정은 AF_ADMIN_PASSWORD 를 바꾸고 재시작하면 모든 로그인이 끊깁니다");
 		return this.bump(u);
 	}
 
@@ -303,14 +318,9 @@ export class AccountStore {
 
 	listAccounts(by: string): AccountRow[] {
 		this.requireAdmin(by);
-		const env: AccountRow[] = this.env.users.map((u) => ({
-			name: u.name,
-			source: "env",
-			admin: true,
-			invitedBy: null,
-			createdAt: null,
-			disabled: false,
-		}));
+		const env: AccountRow[] = [
+			{ name: this.admin.name, source: "env", admin: true, invitedBy: null, createdAt: null, disabled: false },
+		];
 		const db: AccountRow[] = [...this.db.values()]
 			.sort((a, b) => a.created_at.localeCompare(b.created_at))
 			.map((u) => ({
@@ -331,7 +341,7 @@ export class AccountStore {
 	async resetPassword(by: string, name: string): Promise<string> {
 		this.requireAdmin(by);
 		const u = this.db.get(name);
-		if (!u) throw new AccountError(404, hasEnvUser(this.env, name) ? "서버 설정 계정은 여기서 바꿀 수 없습니다" : "없는 계정입니다");
+		if (!u) throw new AccountError(404, this.isAdmin(name) ? "서버 설정 계정은 여기서 바꿀 수 없습니다" : "없는 계정입니다");
 		const temp = generateCode().toLowerCase(); // 14자 — 최소 길이를 넘고 전달하기 쉽다
 		const hash = hashPassword(temp);
 		const version = u.token_version + 1;
@@ -348,7 +358,7 @@ export class AccountStore {
 	async setDisabled(by: string, name: string, disabled: boolean): Promise<void> {
 		this.requireAdmin(by);
 		const u = this.db.get(name);
-		if (!u) throw new AccountError(404, hasEnvUser(this.env, name) ? "서버 설정 계정은 여기서 바꿀 수 없습니다" : "없는 계정입니다");
+		if (!u) throw new AccountError(404, this.isAdmin(name) ? "서버 설정 계정은 여기서 바꿀 수 없습니다" : "없는 계정입니다");
 		const at = disabled ? new Date(this.now()).toISOString() : null;
 		const version = disabled ? u.token_version + 1 : u.token_version;
 		await d1Query(await this.cfg(), "UPDATE users SET disabled_at = ?, token_version = ? WHERE name = ?", [at, version, name]);

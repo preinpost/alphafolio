@@ -8,10 +8,10 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { migrate } from "@alphafolio/ledger";
 import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d1.ts";
-import { AccountError, AccountStore, generateCode, hashCode, normalizeCode } from "../src/accounts.ts";
-import { hashPassword, type UserDirectory } from "../src/users.ts";
+import { AccountError, AccountStore, generateCode, hashCode, normalizeCode, type AdminAccount } from "../src/accounts.ts";
 
-const ENV: UserDirectory = { users: [{ name: "boss", passwordHash: hashPassword("boss-password-1") }], legacyPlaintext: false };
+const ADMIN: AdminAccount = { name: "boss", password: "boss-password-1" };
+const SECRET = "test-secret";
 const PW = "correct-horse-1";
 
 let d1: FakeD1;
@@ -22,7 +22,7 @@ beforeEach(async () => {
 	d1 = installFakeD1();
 	await migrate(d1.cfg);
 	clock = Date.parse("2026-09-23T00:00:00Z");
-	store = new AccountStore(() => d1.cfg, ENV, () => clock);
+	store = new AccountStore(() => d1.cfg, ADMIN, SECRET, () => clock);
 	await store.load();
 });
 afterEach(() => d1.restore());
@@ -123,7 +123,7 @@ describe("가입", () => {
 	it("재시작해도(다시 load) 계정이 남는다", async () => {
 		const { code } = await store.createInvite("boss");
 		await store.signup({ code, name: "kim", password: PW });
-		const fresh = new AccountStore(() => d1.cfg, ENV);
+		const fresh = new AccountStore(() => d1.cfg, ADMIN, SECRET);
 		await fresh.load();
 		assert.equal(fresh.authenticate("kim", PW), "kim");
 	});
@@ -190,7 +190,6 @@ describe("토큰 무효화", () => {
 		await rejects(store.setDisabled("boss", "boss", true), 404);
 		await rejects(store.resetPassword("boss", "boss"), 404);
 		await rejects(store.changePassword("boss", "boss-password-1", "new-password-22"), 400);
-		assert.equal(store.accepts("boss", undefined), true, "버전 없는 옛 토큰도 env 계정은 유효");
 	});
 
 	it("일반 사용자는 남을 비활성화·재설정할 수 없다", async () => {
@@ -199,5 +198,43 @@ describe("토큰 무효화", () => {
 		await store.signup({ code, name: "lee", password: PW });
 		await rejects(store.setDisabled("kim", "lee", true), 403);
 		await rejects(store.resetPassword("kim", "lee"), 403);
+	});
+});
+
+describe("슈퍼관리자 (AF_ADMIN_USER / AF_ADMIN_PASSWORD)", () => {
+	const make = (password: string, secret = SECRET) => new AccountStore(() => d1.cfg, { name: "boss", password }, secret);
+
+	it("평문 비밀번호로 로그인한다", () => {
+		assert.equal(store.authenticate("boss", "boss-password-1"), "boss");
+		assert.equal(store.authenticate("boss", "boss-password-2"), null);
+		assert.equal(store.authenticate("boss", ""), null);
+	});
+
+	it("비밀번호를 바꾸고 재시작하면 기존 로그인이 끊긴다 (토큰 버전이 비밀번호에서 나온다)", () => {
+		const before = make("old-password-1");
+		const after = make("new-password-2");
+		const v = before.tokenVersion("boss");
+		assert.equal(before.accepts("boss", v), true);
+		assert.equal(after.accepts("boss", v), false);
+	});
+
+	it("같은 비밀번호로 재시작하면 로그인이 유지된다", () => {
+		assert.equal(make("same-password-1").tokenVersion("boss"), make("same-password-1").tokenVersion("boss"));
+	});
+
+	it("버전 없는 옛 토큰(0)은 받지 않는다 — 버전을 넣기 전의 토큰으로 계속 로그인되지 않게", () => {
+		assert.equal(store.accepts("boss", 0), false);
+		assert.equal(store.accepts("boss", undefined), false);
+		assert.notEqual(store.tokenVersion("boss"), 0);
+	});
+
+	it("버전은 서명 키로 HMAC 한다 — 키를 모르면 토큰의 버전으로 비밀번호를 대입해 볼 수 없다", () => {
+		assert.notEqual(make("p-password-1", "secret-a").tokenVersion("boss"), make("p-password-1", "secret-b").tokenVersion("boss"));
+		assert.ok(Number.isSafeInteger(store.tokenVersion("boss")));
+	});
+
+	it("관리자 ID 로는 가입할 수 없다", async () => {
+		const { code } = await store.createInvite("boss");
+		await rejects(store.signup({ code, name: "boss", password: "whatever-pass-1" }), 409);
 	});
 });

@@ -34,23 +34,23 @@ tasks:
       - echo "준비 완료. 'task dev' 로 실행하세요."
 
   env:init:
-    desc: .env 가 없으면 만들고 AF_AUTH_SECRET·비밀번호를 채운다
+    desc: .env 가 없으면 만들고 AF_AUTH_SECRET·관리자 비밀번호를 채운다
     status:
       - test -f .env
     cmds:
       - cp .env.example .env
       - |
         SECRET=$(openssl rand -hex 32)
-        PW=$(openssl rand -base64 9 | tr -d '/+=')
+        PW=$(openssl rand -base64 18 | tr -d '/+=')
         # macOS/GNU sed 차이를 피하려고 임시 파일로 치환한다
         awk -v s="$SECRET" -v p="$PW" '
           /^AF_AUTH_SECRET=$/ { print "AF_AUTH_SECRET=" s; next }
-          /^AF_AUTH_PASSWORD=$/ { print "AF_AUTH_PASSWORD=" p; next }
+          /^AF_ADMIN_PASSWORD=$/ { print "AF_ADMIN_PASSWORD=" p; next }
           { print }
         ' .env > .env.tmp && mv .env.tmp .env
         echo ""
         echo "  .env 생성됨"
-        echo "  아이디   : $(grep '^AF_AUTH_USER=' .env | cut -d= -f2-)"
+        echo "  관리자   : $(grep '^AF_ADMIN_USER=' .env | cut -d= -f2-)"
         echo "  비밀번호 : $PW"
         echo ""
         echo "  ⚠️  가계부를 쓰려면 .env 의 AF_D1_* 세 값을 채우세요."
@@ -100,8 +100,7 @@ tasks:
         done
         echo ""
         echo "  URL      http://localhost:{{.PORT}}"
-        echo "  아이디    $(grep '^AF_AUTH_USER=' .env | cut -d= -f2-)"
-        echo "  비밀번호  $(grep '^AF_AUTH_PASSWORD=' .env | cut -d= -f2-)"
+        echo "  관리자    $(grep '^AF_ADMIN_USER=' .env | cut -d= -f2-)  (비밀번호: .env 의 AF_ADMIN_PASSWORD)"
         echo ""
         echo "  로그: task logs   /   중지: task down"
 
@@ -182,11 +181,6 @@ tasks:
         echo "agent-config/web-search.json 준비 완료 (gitignore 대상 — 시크릿 포함)"
 
   # ── 도구 ────────────────────────────────────────────────────────────
-  hash:
-    desc: 'AF_USERS 용 비밀번호 해시 생성 (task hash -- ''비번1'' ''비번2'')'
-    cmds:
-      - node apps/server/scripts/hash-password.mjs {{.CLI_ARGS}}
-
   d1:doctor:
     desc: D1 자격증명 진단 (401/403 원인 좁히기)
     cmds:
@@ -200,7 +194,7 @@ tasks:
         OUT="backups/ledger-$(date +%Y%m%d-%H%M%S).json"
         TOKEN=$(curl -s -X POST http://127.0.0.1:{{.PORT}}/api/auth/login \
           -H 'content-type: application/json' \
-          -d "{\"user\":\"$AF_AUTH_USER\",\"password\":\"$AF_AUTH_PASSWORD\"}" \
+          -d "{\"user\":\"$AF_ADMIN_USER\",\"password\":\"$AF_ADMIN_PASSWORD\"}" \
           | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
         curl -s http://127.0.0.1:{{.PORT}}/api/ledger/export -H "authorization: Bearer $TOKEN" > "$OUT"
         echo "저장: $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"

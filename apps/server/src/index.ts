@@ -40,7 +40,6 @@ import { handleLedger, handleLedgerAdmin, HttpError, readJson, setLedgerConfigPr
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
 import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
-import { loadUsers } from "./users.ts";
 import { AccountError, AccountStore } from "./accounts.ts";
 import { handleAccounts } from "./accounts-api.ts";
 import { attachWebSocket } from "./ws.ts";
@@ -64,7 +63,6 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 async function main(): Promise<void> {
 	const envFile = loadDotEnv();
 	const cfg = loadConfig();
-	const users = loadUsers();
 
 	// 확장은 자기 설정을 PI_CODING_AGENT_DIR 기준으로 찾는다 (pi-web-access 의 web-search.json 등).
 	// ResourceLoader 에 넘기는 agentDir 과 별개 경로라, 여기서 맞춰주지 않으면
@@ -240,7 +238,7 @@ async function main(): Promise<void> {
 	});
 
 	// 계정 — env 계정(슈퍼관리자) + 초대 코드로 가입한 D1 계정 (PLAN §25)
-	const accounts = new AccountStore(ledgerConfig, users);
+	const accounts = new AccountStore(ledgerConfig, { name: cfg.auth.admin, password: cfg.auth.adminPassword }, cfg.auth.secret);
 	if (ledgerReady()) {
 		try {
 			await accounts.load();
@@ -574,24 +572,21 @@ async function main(): Promise<void> {
 		console.log(`  ├ env      ${envFile ?? "(없음 — process.env만 사용)"}`);
 		console.log(`  ├ model    ${cfg.agent.model ?? "(기본)"} · thinking ${cfg.agent.thinking}`);
 		console.log(
-			`  ├ users    ${users.users.map((u) => u.name).join(", ")} (관리자)` +
-				(accounts.ready ? ` + 가입 ${accounts.names().length - users.users.length}명` : " — 가입 비활성 (D1 미설정)"),
+			`  ├ users    ${cfg.auth.admin} (관리자)` +
+				(accounts.ready ? ` + 가입 ${accounts.names().length - 1}명` : " — 가입 비활성 (D1 미설정)"),
 		);
 		console.log(`  ├ auth     ${cfg.agent.authPath ?? "(env API 키 사용)"}`);
 		console.log(`  ├ agent    ${cfg.agent.agentDir}`);
 		console.log(`  ├ cors     ${cfg.corsOrigins.join(", ")}`);
-		console.log(`  ├ ledger   ${ledgerReady() ? "설정됨" : "미설정 — 앱 설정 화면에서 입력"}`);
+		console.log(`  ├ ledger   ${ledgerReady() ? "설정됨" : "미설정 — AF_D1_* 필요 (가계부·가입·개인 키 저장 비활성)"}`);
 		console.log(`  ├ sessions ${cfg.agent.sessionsDir}`);
 		console.log(`  └ web      ${existsSync(cfg.webDir) ? cfg.webDir : "(미빌드 — API만 제공)"}`);
-		if (users.generatedPassword) {
-			console.log(`\n  ⚠️  비밀번호 미설정 — 임시 비밀번호: ${users.generatedPassword}`);
-		}
-		if (users.legacyPlaintext) {
-			console.log(`  ⚠️  단일 사용자 평문 모드 — 여러 명이 쓰려면 AF_USERS 를 설정하세요`);
-			console.log(`      해시 생성: node apps/server/scripts/hash-password.mjs '비밀번호'`);
+		if (cfg.auth.generatedPassword) {
+			console.log(`\n  ⚠️  AF_ADMIN_PASSWORD 미설정 — 이번 실행의 임시 비밀번호: ${cfg.auth.adminPassword}`);
+			console.log(`      재시작하면 바뀐다. 고정하려면 AF_ADMIN_PASSWORD 를 설정하세요.`);
 		}
 		if (cfg.auth.ephemeralSecret) {
-			console.log(`  ⚠️  AF_AUTH_SECRET 미설정 — 재시작하면 기존 토큰이 무효화됩니다`);
+			console.log(`  ⚠️  AF_AUTH_SECRET 미설정 — 재시작하면 모든 로그인이 끊기고 저장된 개인 키를 읽을 수 없게 됩니다`);
 		}
 		console.log(
 			`  시도제한 ${cfg.login.maxAttempts}회/${cfg.login.windowSec}초 → ${cfg.login.lockoutSec}초 잠금` +

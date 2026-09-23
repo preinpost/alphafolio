@@ -40,7 +40,15 @@ export function loadDotEnv(): string | null {
 export interface Config {
 	host: string;
 	port: number;
-	auth: { user: string; password: string; secret: string; generatedPassword: boolean; ephemeralSecret: boolean };
+	auth: {
+		/** 슈퍼관리자 (AF_ADMIN_USER) — 초대 코드 발급·계정 관리. 다른 사용자는 가입으로 들어온다 */
+		admin: string;
+		adminPassword: string;
+		/** AF_ADMIN_PASSWORD 가 비어 임시 비밀번호를 만들었는가 (기동 로그에 찍는다) */
+		generatedPassword: boolean;
+		secret: string;
+		ephemeralSecret: boolean;
+	};
 	agent: {
 		cwd: string;
 		agentDir: string;
@@ -93,8 +101,36 @@ function resolveAuthPath(agentDir: string): string | undefined {
 	return undefined;
 }
 
+/** 슈퍼관리자 ID 규칙 — 가입 계정과 같다 (accounts.ts NAME_RE) */
+const ADMIN_NAME_RE = /^[a-z0-9_]{3,20}$/;
+
+/**
+ * 없앤 변수 — 조용히 무시하면 관리자 없이(임시 비밀번호로) 서버가 떠서 로그인이 안 되는 이유를 모르게 된다.
+ * 옛 설정이 남아 있으면 무엇으로 바꾸라는 안내와 함께 기동을 거부한다.
+ */
+const REMOVED_VARS: Record<string, string> = {
+	AF_USERS: "AF_ADMIN_USER / AF_ADMIN_PASSWORD (슈퍼관리자 한 명, 평문). 다른 사람은 초대 코드로 가입한다",
+	AF_AUTH_USER: "AF_ADMIN_USER",
+	AF_AUTH_PASSWORD: "AF_ADMIN_PASSWORD",
+};
+
+export function checkRemovedVars(env: NodeJS.ProcessEnv = process.env): void {
+	const found = Object.keys(REMOVED_VARS).filter((k) => env[k] !== undefined);
+	if (found.length === 0) return;
+	throw new Error(
+		"더 이상 쓰지 않는 환경변수가 있습니다:\n" +
+			found.map((k) => `  ${k} → ${REMOVED_VARS[k]}`).join("\n") +
+			"\n설정을 바꾼 뒤 다시 시작하세요.",
+	);
+}
+
 export function loadConfig(): Config {
-	const password = process.env.AF_AUTH_PASSWORD?.trim() ?? "";
+	checkRemovedVars();
+	const admin = process.env.AF_ADMIN_USER?.trim() || "admin";
+	if (!ADMIN_NAME_RE.test(admin)) {
+		throw new Error(`AF_ADMIN_USER="${admin}" — 영문 소문자·숫자·_ 3~20자여야 합니다`);
+	}
+	const password = process.env.AF_ADMIN_PASSWORD?.trim() ?? "";
 	const secret = process.env.AF_AUTH_SECRET?.trim() ?? "";
 
 	// 비밀번호·시크릿이 없으면 생성한다. 시크릿이 매 기동 바뀌면 기존 토큰이 무효화되므로
@@ -109,8 +145,8 @@ export function loadConfig(): Config {
 		host: process.env.AF_HOST ?? "0.0.0.0",
 		port: Number(process.env.AF_PORT ?? 8080),
 		auth: {
-			user: process.env.AF_AUTH_USER ?? "alpha",
-			password: generatedPassword ? randomBytes(9).toString("base64url") : password,
+			admin,
+			adminPassword: generatedPassword ? randomBytes(12).toString("base64url") : password,
 			secret: ephemeralSecret ? randomBytes(32).toString("hex") : secret,
 			generatedPassword,
 			ephemeralSecret,

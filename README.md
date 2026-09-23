@@ -57,15 +57,10 @@ docker compose up -d
 ```
 
 - 템플릿은 `infra/compose.example.yaml` 한 파일이다. 릴리스 이미지(GHCR)를 쓰고, 버전은 `image` 태그로 고정한다.
-- 비밀번호 해시는 `node apps/server/scripts/hash-password.mjs --name <id>` 가 compose 용(`$` → `$$`) 줄을 찍어 준다.
+- 관리자는 `AF_ADMIN_USER` / `AF_ADMIN_PASSWORD` 한 명이다. 다른 사람은 관리자가 발급한 초대 코드로 앱에서 가입한다.
 - 증권·뉴스 키는 compose 에 넣지 않는다 — 각자 앱 설정에서 입력한다 (사용자별 암호화 저장).
 - 리버스 프록시·터널 뒤에 두는 전제다 (TLS·도메인은 앞단 담당, 컨테이너는 평문 HTTP·루프백 포트).
-- **여러 명이 한 컨테이너를 공유한다.** 계정은 `AF_USERS`(scrypt 해시)로 주고,
-  사용자마다 독립 세션을 쓴다. 가계부만 가구 공유(기록자 `member` 로 구분).
-
-```bash
-node apps/server/scripts/hash-password.mjs '비밀번호'   # AF_USERS 값 생성
-```
+- **여러 명이 한 컨테이너를 공유한다.** 사용자마다 독립 세션·개인 키를 쓰고, 가계부는 초대한 멤버끼리 공유한다.
 
 ### 키 입력
 

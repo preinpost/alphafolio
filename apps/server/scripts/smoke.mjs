@@ -5,8 +5,7 @@
  * 서버를 임의 포트로 직접 띄우고 끝나면 종료시킨다 (실행 중인 서버가 있어도 충돌 없음).
  */
 import { spawn } from "node:child_process";
-import { deflateSync } from "node:zlib";
-import { hashPassword } from "../src/users.ts";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
@@ -16,7 +15,8 @@ const PORT = 8099;
 const BASE = `http://127.0.0.1:${PORT}`;
 const USER = "smoke";
 const PASSWORD = "smoke-pw-1234";
-const USER2 = "smoke2user";
+/** 두 번째 사용자 — 관리자가 발급한 초대 코드로 가입한다 (운영과 같은 경로). 끝에 D1 에서 지운다 */
+const USER2 = `smk_${Math.random().toString(36).slice(2, 8)}`;
 const PASSWORD2 = "smoke2-pw-5678";
 const SECRET = "smoke-secret-fixed";
 
@@ -34,11 +34,9 @@ const server = spawn(process.execPath, [join(ROOT, "apps/server/src/index.ts")],
 		...process.env,
 		AF_PORT: String(PORT),
 		AF_HOST: "127.0.0.1",
-		// 멀티유저 — scrypt 해시 목록
-		AF_USERS: JSON.stringify([
-			{ name: USER, passwordHash: hashPassword(PASSWORD) },
-			{ name: USER2, passwordHash: hashPassword(PASSWORD2) },
-		]),
+		// 슈퍼관리자 — .env 의 값을 덮어쓴다 (스모크 계정으로만 돈다)
+		AF_ADMIN_USER: USER,
+		AF_ADMIN_PASSWORD: PASSWORD,
 		AF_AUTH_SECRET: SECRET,
 		// env 폴백 검증용 (카탈로그에 있는 사용자 스코프 키)
 		NCP_APIGW_API_KEY_ID: "env-fallback-value-xyz",
@@ -166,6 +164,21 @@ async function main() {
 	}
 
 	console.log("\n── 멀티유저 격리 ─────────────────────────────────────");
+	// 두 번째 사용자는 초대 코드로 가입 (env 에는 관리자 한 명뿐)
+	const invite2 = await (
+		await fetch(`${BASE}/api/admin/invites`, {
+			method: "POST",
+			headers: { ...authed, "content-type": "application/json" },
+			body: JSON.stringify({ note: "[smoke]", days: 1 }),
+		})
+	).json();
+	const signup2 = await fetch(`${BASE}/api/auth/signup`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ code: invite2.code, user: USER2, password: PASSWORD2 }),
+	});
+	if (signup2.ok) smokeAccounts.push(USER2);
+	check("두번째 사용자 가입 (초대 코드)", signup2.ok, signup2.ok ? USER2 : `HTTP ${signup2.status} — D1 이 없으면 가입이 꺼진다`);
 	const login2 = await fetch(`${BASE}/api/auth/login`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
@@ -242,12 +255,15 @@ async function main() {
 	);
 	check("대화 목록 제목 = 첫 메시지", listed?.title?.startsWith("숫자 1부터 5까지") === true, listed?.title ?? "(없음)");
 
-	// 이미지 첨부 — 서버 검증 → 모델까지 실제로 가는지 (단색 PNG 의 색을 맞히게 한다)
+	// 이미지 첨부 — 서버 검증 → 모델까지 실제로 가는지 (영수증 이미지의 금액을 읽게 한다)
+	// 처음엔 64px 단색 PNG 의 색을 물었는데 제공자와 무관하게 가끔 틀렸다 (작은 단색 이미지는 비전 인코더에 부적절).
+	// 실제 쓰임과 같은 영수증 모양 이미지로는 제공자를 바꿔 가며 돌려도 안정적이었다 (PLAN §26).
 	console.log("\n── 이미지 첨부 ───────────────────────────────────────");
 	const fake = await wsTest(token, "이거 봐줘", [{ mimeType: "image/png", data: Buffer.from("%PDF-1.7 not an image").toString("base64") }]);
 	check("이미지가 아닌 첨부는 모델 호출 전에 거절", /지원하는 이미지/.test(fake.error ?? ""), fake.error ?? "(오류 없음)");
-	const red = await wsTest(token, "이 이미지는 무슨 색이야? 색 이름 한 단어로만 답해.", [{ mimeType: "image/png", data: solidPng(64, 64, [230, 20, 20]) }]);
-	check("모델이 첨부 이미지를 읽음", /빨|레드|red|적색/i.test(red.text), red.error ?? red.text.slice(0, 40));
+	const receipt = readFileSync(join(ROOT, "apps/server/scripts/fixtures/receipt.png")).toString("base64");
+	const red = await wsTest(token, "이 영수증의 합계 금액만 숫자로 답해. 기록하지는 마.", [{ mimeType: "image/png", data: receipt }]);
+	check("모델이 첨부 이미지를 읽음 (영수증 합계 12,500원)", /12[,.]?500/.test(red.text), red.error ?? red.text.slice(0, 40));
 	const redBack = red.sessionId ? await wsOpen(token, red.sessionId) : {};
 	check(
 		"첨부 이미지가 대화에 남음 (다시 열면 보임)",
@@ -614,41 +630,6 @@ function wsWatch(token, sessionId = null) {
 		received,
 		close: () => ws.close(),
 	};
-}
-
-/** 단색 PNG (base64) — 이미지 첨부 스모크용. 외부 파일 없이 만든다. */
-function solidPng(w, h, [r, g, b]) {
-	const crcTable = Array.from({ length: 256 }, (_, n) => {
-		let c = n;
-		for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-		return c >>> 0;
-	});
-	const crc = (buf) => {
-		let c = 0xffffffff;
-		for (const x of buf) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
-		return (c ^ 0xffffffff) >>> 0;
-	};
-	const chunk = (type, data) => {
-		const len = Buffer.alloc(4);
-		len.writeUInt32BE(data.length);
-		const body = Buffer.concat([Buffer.from(type), data]);
-		const sum = Buffer.alloc(4);
-		sum.writeUInt32BE(crc(body));
-		return Buffer.concat([len, body, sum]);
-	};
-	const ihdr = Buffer.alloc(13);
-	ihdr.writeUInt32BE(w, 0);
-	ihdr.writeUInt32BE(h, 4);
-	ihdr[8] = 8; // bit depth
-	ihdr[9] = 2; // RGB
-	const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: w }, () => [r, g, b]).flat())]);
-	const raw = Buffer.concat(Array.from({ length: h }, () => row));
-	return Buffer.concat([
-		Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-		chunk("IHDR", ihdr),
-		chunk("IDAT", deflateSync(raw)),
-		chunk("IEND", Buffer.alloc(0)),
-	]).toString("base64");
 }
 
 /** 대화 하나를 열고 첫 응답(ready 또는 session_missing)을 돌려준다. */

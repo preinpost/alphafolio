@@ -11,7 +11,7 @@
 # 템플릿이 바뀌면 서버의 compose.yaml 과 비교해서 반영한다:
 #   diff <(grep -v '^\s*#' compose.yaml) <(grep -v '^\s*#' <repo>/infra/compose.example.yaml)
 #
-# ⚠️ compose.yaml 안의 $ 는 변수로 해석된다. 값에 $ 가 있으면 $$ 로 적는다 (비밀번호 해시가 대표적).
+# ⚠️ compose.yaml 안의 $ 는 변수로 해석된다. 값에 $ 가 있으면 $$ 로 적는다.
 #
 # 컨테이너는 평문 HTTP 만 연다. TLS·도메인은 앞단(리버스 프록시·터널)이 맡는다.
 name: alphafolio
@@ -43,9 +43,12 @@ services:
       #   생성: openssl rand -hex 32
       AF_AUTH_SECRET: ""
 
-      # env 계정 = 슈퍼관리자 (초대 코드 발급·계정 관리). 가입한 사용자는 D1 에 저장된다.
-      #   생성: node apps/server/scripts/hash-password.mjs --name admin   ← compose 용($$) 줄을 그대로 붙인다
-      AF_USERS: '[{"name":"admin","passwordHash":"scrypt$$..."}]'
+      # 슈퍼관리자 (한 명) — 초대 코드 발급·계정 관리. 다른 사람은 앱에서 초대 코드로 가입한다.
+      # 평문이다: 이 파일에 AF_AUTH_SECRET·D1 토큰이 이미 평문으로 있어 해시로 감춰도 막아주는 게 없다.
+      # 다른 곳에서 쓰지 않는 비밀번호로. 바꾸고 재시작하면 기존 관리자 로그인이 모두 끊긴다.
+      #   생성: openssl rand -base64 18
+      AF_ADMIN_USER: admin
+      AF_ADMIN_PASSWORD: ""
 
       # ── 가계부·계정·개인 키 DB (Cloudflare D1) ──────────────────────
       AF_D1_ACCOUNT_ID: ""

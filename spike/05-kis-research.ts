@@ -20,7 +20,7 @@ import { loadEnv } from "./env.ts";
 
 loadEnv();
 
-const user = process.env.AF_AUTH_USER ?? "alpha";
+const user = process.env.AF_ADMIN_USER ?? "alpha";
 const secrets = new SecretStore(() => d1ConfigFromEnv(), process.env.AF_AUTH_SECRET ?? "", false);
 await secrets.load();
 
