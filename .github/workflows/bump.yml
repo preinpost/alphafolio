@@ -1,0 +1,87 @@
+# Bump & release — 수동 실행 (Actions → Bump & release → Run workflow)
+#
+#   patch/minor/major 선택 → main 검사 → 루트 package.json version 올림 → 커밋 + v* 태그 푸시
+#   → 이미지 빌드(1.2.3, 1.2, latest) → GitHub Release
+#
+# kis-cli 의 bump.yml 과 같은 구조. GITHUB_TOKEN 으로 푸시한 태그는 다른 워크플로를 발화하지 않으므로
+# (무한 루프 방지 규칙) ci.yml 의 태그 경로에 기대지 않고 _image.yml 을 직접 호출한다.
+# 같은 이유로 릴리스 커밋이 main 에 올라가도 ci.yml 이 다시 돌지 않는다 — latest 는 여기서 붙인다.
+
+name: Bump & release
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "올릴 자리"
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # 검사한 커밋 = 버전을 올릴 커밋. 그 사이 main 이 움직이면 bump 의 푸시가 fast-forward 가 아니라 거부된다.
+  check:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_check.yml
+    with:
+      ref: ${{ github.sha }}
+
+  bump:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # 태그 중복 확인
+
+      - id: next
+        run: |
+          set -euo pipefail
+          CURRENT=$(node -p 'require("./package.json").version')
+          NEW=$(node .github/scripts/bump-version.mjs "${{ inputs.kind }}")
+          if git rev-parse -q --verify "refs/tags/v${NEW}" >/dev/null; then
+            echo "::error::태그 v${NEW} 가 이미 있다 — package.json version(${CURRENT})이 태그보다 뒤처졌다"
+            exit 1
+          fi
+          echo "tag=v${NEW}" >> "$GITHUB_OUTPUT"
+          echo "▶ ${CURRENT} → ${NEW}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit & tag
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json
+          git commit -m "chore: release ${TAG}"
+          git tag -a "${TAG}" -m "${TAG}"
+          # 브랜치 먼저 — 거부되면(main 이 움직임) 태그도 올라가지 않는다
+          git push origin HEAD:main
+          git push origin "${TAG}"
+
+  image:
+    needs: bump
+    uses: ./.github/workflows/_image.yml
+    permissions:
+      contents: write
+      packages: write
+    with:
+      ref: ${{ needs.bump.outputs.tag }}
+      push: true
+      version: ${{ needs.bump.outputs.tag }}
+      latest: true

@@ -1,0 +1,109 @@
+# 재사용 — 컨테이너 이미지 빌드 (linux/arm64) → GHCR, 버전이 있으면 GitHub Release
+#
+# 배포 대상이 arm64 라 네이티브 arm64 러너에서 arm64 만 빌드한다
+# (구 pi-finances 는 amd64 + QEMU arm64 — 에뮬레이션 빌드는 pnpm install 이 몇 배 느리다).
+#
+# 태그 규칙
+#   version=v1.2.3  → 1.2.3, 1.2, sha-<short>
+#   latest=true     → + latest
+#   그 외           → sha-<short>
+# 라벨(org.opencontainers.image.source 등)이 GHCR 패키지를 저장소에 연결한다.
+
+name: image
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "빌드할 ref (비우면 워크플로를 발화한 커밋)"
+        type: string
+        default: ""
+      push:
+        description: "GHCR 에 푸시할지 (PR 은 false — 빌드만 해서 Dockerfile 회귀를 잡는다)"
+        type: boolean
+        default: false
+      version:
+        description: "릴리스 태그 (예: v1.2.3). 있으면 semver 이미지 태그 + GitHub Release"
+        type: string
+        default: ""
+      latest:
+        description: "latest 태그를 붙일지"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # GitHub Release
+  packages: write # GHCR 푸시
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    name: image (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        if: inputs.push
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # context: git — sha 태그·revision 라벨을 **체크아웃한 커밋** 기준으로 만든다.
+      # bump 경로에서는 워크플로를 발화한 커밋(버전 올리기 전)과 빌드하는 커밋(릴리스 커밋)이 다르다.
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          context: git
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.latest }}
+            type=sha,format=short
+
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/Dockerfile
+          platforms: linux/arm64
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: GitHub Release
+        if: inputs.push && inputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          # 태그를 다시 밀어 재실행된 경우 — 릴리스가 이미 있으면 이미지만 다시 푸시한 것으로 끝낸다
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "릴리스 $VERSION 이미 있음 — 이미지만 다시 푸시했다"
+            exit 0
+          fi
+          gh release create "$VERSION" --verify-tag --generate-notes
+          BODY=$(gh release view "$VERSION" --json body -q .body)
+          gh release edit "$VERSION" --notes "$(cat <<EOF
+          ${BODY}
+
+          ---
+          ### Docker 이미지 (linux/arm64)
+          \`\`\`
+          docker pull ${IMAGE}:${VERSION#v}
+          \`\`\`
+          digest: \`${DIGEST}\`
+          EOF
+          )"

@@ -2,18 +2,16 @@
 #
 # pi-finances 의 ci.yml · release-pi-finance-container.yml 을 이 저장소 구조에 맞춰 합쳤다.
 #
-#   check  모든 PR·푸시: typecheck → 단위 테스트 → 웹 빌드
-#   image  check 통과 후. PR 은 빌드만(Dockerfile 회귀 검출), main·v* 태그는 GHCR 푸시
+#   check  모든 PR·푸시 (_check.yml)
+#   image  check 통과 후 (_image.yml). PR 은 빌드만, main → latest, v* 태그 수동 푸시 → semver + Release
 #
-# 스모크(task smoke)는 돌리지 않는다 — 실제 D1 과 LLM 키가 있어야 하고, 공개 저장소의 CI 에
-# 운영 D1 토큰을 넣을 이유가 없다. 스모크는 로컬 `task check` 에서 돈다.
+# 버전 릴리스는 보통 Actions 의 "Bump & release"(bump.yml)로 한다. 거기서 만든 태그는 GITHUB_TOKEN
+# 제약으로 이 워크플로를 발화하지 않으므로, bump.yml 이 _check·_image 를 직접 호출한다.
+# 이 파일의 v* 경로는 태그를 손으로 밀 때를 위한 것이다.
 #
 # 구 워크플로에서 뺀 것:
-#   - npm 패키지 릴리스 후속(workflow_run) 과 containers/VERSION 자동 범프 — 이 저장소는 npm 패키지를
-#     내지 않는다. 버전은 v* 태그를 직접 밀 때만 붙는다.
-#   - tarball(workspace:*) 검사 — 배포하는 npm 패키지가 없다.
-#   - amd64 + QEMU arm64 — 배포 대상이 arm64 라 네이티브 arm64 러너에서 arm64 만 빌드한다
-#     (QEMU 에뮬레이션 빌드는 pnpm install 이 몇 배 느리다).
+#   - npm 패키지 릴리스 후속(workflow_run) 과 containers/VERSION 자동 범프 — 이 저장소는 npm 패키지를 내지 않는다
+#   - tarball(workspace:*) 검사 — 배포하는 npm 패키지가 없다
 
 name: CI
 
@@ -34,99 +32,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  IMAGE: ghcr.io/${{ github.repository }}
-
 jobs:
   check:
-    name: typecheck · test · build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-
-      # pnpm 버전은 package.json 의 packageManager 를 따른다 (Dockerfile 의 corepack 과 같은 소스)
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24 # 타입 스트리핑으로 .ts 를 직접 실행한다 (engines >=24)
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --if-present typecheck
-      - run: pnpm -r --if-present test
-      - run: pnpm --filter @alphafolio/web build
+    uses: ./.github/workflows/_check.yml
 
   image:
-    name: image (linux/arm64)
     needs: check
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    uses: ./.github/workflows/_image.yml
     permissions:
-      contents: write # v* 태그 → GitHub Release
-      packages: write # GHCR 푸시
-    env:
-      PUSH: ${{ github.event_name != 'pull_request' }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        if: env.PUSH == 'true'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # 태그 규칙
-      #   main 푸시       → latest, sha-<short>
-      #   v1.2.3 태그     → 1.2.3, 1.2, sha-<short>  (latest 는 main 이 담당)
-      #   PR · 수동 실행  → sha-<short> (PR 은 푸시하지 않는다)
-      # 라벨(org.opencontainers.image.source 등)도 여기서 만든다 — source 라벨이 GHCR 패키지를 저장소에 연결한다.
-      - id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-
-      - id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: infra/Dockerfile
-          platforms: linux/arm64
-          push: ${{ env.PUSH == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: GitHub Release (v* 태그)
-        if: github.ref_type == 'tag' && env.PUSH == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ github.ref_name }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          # 태그를 다시 밀어 재실행된 경우 — 릴리스가 이미 있으면 노트만 두고 끝낸다
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "릴리스 $VERSION 이미 있음 — 이미지만 다시 푸시했다"
-            exit 0
-          fi
-          gh release create "$VERSION" --verify-tag --generate-notes
-          BODY=$(gh release view "$VERSION" --json body -q .body)
-          gh release edit "$VERSION" --notes "$(cat <<EOF
-          ${BODY}
-
-          ---
-          ### Docker 이미지 (linux/arm64)
-          - \`${IMAGE}:${VERSION#v}\`
-          - digest: \`${DIGEST}\`
-          EOF
-          )"
+      contents: write
+      packages: write
+    with:
+      push: ${{ github.event_name != 'pull_request' }}
+      version: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      latest: ${{ github.ref == 'refs/heads/main' }}

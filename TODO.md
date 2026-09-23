@@ -29,8 +29,9 @@
 
 - [x] Docker 이미지 실제 빌드 확인 — 로컬 arm64 빌드·기동 OK (툴 22개, 확장 로드, 코딩툴 미노출, uid 1001, healthy).
       `packageManager` 가 없어 corepack 이 pnpm 12 를 받던 것을 11.0.9 로 고정
-- [x] GitHub Actions — `.github/workflows/ci.yml` (검사 → arm64 이미지 → GHCR, v* 태그면 Release)
-- [ ] GHCR 패키지 공개 여부 결정 — 첫 푸시 후 기본 비공개. 공개하지 않으면 배포 호스트에서 `docker login ghcr.io` 필요
+- [x] GitHub Actions — `ci.yml` (검사 → arm64 이미지 → GHCR) + `bump.yml` (Bump & release, semver)
+- [x] GHCR 패키지 공개 — 공개 저장소에 연결돼 public 으로 생성됨 (익명 pull 확인)
+- [ ] iOS 앱 버전(MARKETING_VERSION)을 package.json 버전과 맞출지 — TestFlight 때 결정
 - [ ] 이미지 1.16GB — `chown -R /app` 레이어가 node_modules 를 통째로 복제한다 (`COPY --chown` 으로 줄일 수 있음)
 - [ ] D1 미설정 서버에서 스냅샷 스케줄러가 기동 때마다 "실패" 로그를 찍는다 — 브로커 미설정처럼 조용히 건너뛰기
 - [ ] 컨테이너 안 pi auth 경로 확정 (`AF_PI_AUTH_PATH` / 마운트)

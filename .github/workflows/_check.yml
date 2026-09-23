@@ -1,0 +1,40 @@
+# 재사용 — typecheck · 단위 테스트 · 웹 빌드
+#
+# ci.yml(PR·푸시)과 bump.yml(릴리스 전 검사)이 같은 검사를 쓴다.
+# 스모크(task smoke)는 실제 D1 과 LLM 키가 필요해 CI 에서 돌리지 않는다 — 로컬 `task check` 전용.
+
+name: check
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "검사할 ref (비우면 워크플로를 발화한 커밋)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      # pnpm 버전은 package.json 의 packageManager 를 따른다 (Dockerfile 의 corepack 과 같은 소스)
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24 # 타입 스트리핑으로 .ts 를 직접 실행한다 (engines >=24)
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --if-present typecheck
+      - run: pnpm -r --if-present test
+      - run: pnpm --filter @alphafolio/web build
