@@ -106,6 +106,10 @@ export class LoginRateLimiter {
  *    뒤에 있을 때만(AF_TRUST_PROXY=1) 참조하고, 기본은 소켓 주소를 쓴다.
  *    프록시 뒤에서 이 설정을 끄면 모든 요청이 프록시 IP 하나로 집계되어
  *    한 사용자의 실패가 다른 사용자를 잠글 수 있다.
+ *
+ * 프록시는 XFF 에 **덧붙인다** — 클라이언트가 보낸 값이 앞에 남는다. 그래서 맨 앞이 아니라
+ * 우리 프록시가 붙인 **맨 끝**을 쓴다. Cloudflare 는 CF-Connecting-IP 를 항상 덮어쓰므로 있으면 그걸 먼저 본다.
+ * (맨 앞을 쓰면 요청마다 가짜 IP 를 넣어 IP 기준 시도 제한을 피할 수 있다)
  */
 export function clientIp(
 	headers: Record<string, string | string[] | undefined>,
@@ -113,9 +117,13 @@ export function clientIp(
 	trustProxy: boolean,
 ): string {
 	if (trustProxy) {
+		const first = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v.at(-1) : v);
+		const cf = first(headers["cf-connecting-ip"])?.trim();
+		if (cf) return cf;
+		// 헤더가 여러 줄로 오면 합친 뒤 마지막 항목
 		const xff = headers["x-forwarded-for"];
-		const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
-		if (first) return first;
+		const last = (Array.isArray(xff) ? xff.join(",") : xff)?.split(",").map((x) => x.trim()).filter(Boolean).at(-1);
+		if (last) return last;
 	}
 	return socketAddress ?? "unknown";
 }
