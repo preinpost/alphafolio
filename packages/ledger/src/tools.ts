@@ -15,11 +15,13 @@ import {
 	addTransaction,
 	budgetStatus,
 	deleteTransaction,
+	ledgerOfTransaction,
 	listTransactions,
 	setBudget,
 	summary,
 	updateTransaction,
 } from "./repo.ts";
+import { resolveLedger, type MyLedger } from "./ledgers.ts";
 import type { BudgetStatus, SummaryRow, Transaction, TxType } from "./types.ts";
 
 /**
@@ -29,10 +31,12 @@ import type { BudgetStatus, SummaryRow, Transaction, TxType } from "./types.ts";
  */
 export interface LedgerTxDetails {
 	kind: "ledger-tx";
+	ledgerName: string;
 	tx: Transaction;
 }
 export interface LedgerSummaryDetails {
 	kind: "ledger-summary";
+	ledgerName: string;
 	from: string;
 	to: string;
 	groupBy: "category" | "month" | "member";
@@ -40,6 +44,7 @@ export interface LedgerSummaryDetails {
 }
 export interface LedgerTableDetails {
 	kind: "ledger-table";
+	ledgerName: string;
 	rows: Transaction[];
 }
 export interface LedgerDeleteDetails {
@@ -49,6 +54,7 @@ export interface LedgerDeleteDetails {
 }
 export interface LedgerBudgetDetails {
 	kind: "ledger-budget";
+	ledgerName: string;
 	action: "set" | "status";
 	month: string;
 	category: string | null;
@@ -94,10 +100,22 @@ function resolveRange(params: { period?: string; from?: string; to?: string }): 
 }
 
 /**
+ * 어느 가계부에 쓸지 — 모든 툴 공통 인자.
+ * 이름만 받는다 (모델이 id 를 외우게 하지 않는다). 비우면 사용자의 기본 가계부.
+ */
+const LEDGER_PARAM = Type.Optional(
+	Type.String({
+		description:
+			"대상 가계부 이름 (예: '우리집'). 사용자가 특정 가계부를 말했을 때만 넣는다 — 비우면 기본 가계부",
+	}),
+);
+
+/**
  * 가계부 툴 생성.
  *
- * 가계부는 가구 공유(한 D1)지만 **기록자(member)는 사용자별로 고정**된다.
- * 모델이 기록자를 정하게 하지 않는다 — 인증된 사용자가 곧 기록자다.
+ * 거래·예산은 **사용자가 멤버인 가계부** 에만 읽고 쓴다 (PLAN §23 — ledgers.resolveLedger).
+ * 기록자(member)도 모델이 정하지 않는다 — 인증된 사용자가 곧 기록자다.
+ * 가계부 만들기·초대·수락·내보내기는 툴로 만들지 않는다 (앱 화면 전용 — 외부 텍스트 주입 방어).
  */
 export type D1Provider = () => D1Config;
 
@@ -110,6 +128,21 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 		const cfg = provider();
 		await ensureMigrated(cfg);
 		return cfg;
+	};
+
+	/** 설정 + 대상 가계부 (내가 멤버인 것만 고를 수 있다) */
+	const open = async (ref: string | undefined): Promise<{ cfg: D1Config; ledger: MyLedger }> => {
+		const cfg = await ready();
+		return { cfg, ledger: await resolveLedger(cfg, member, ref) };
+	};
+
+	/** 수정·삭제 — 거래 id 로 가계부를 찾되, 내가 멤버인 가계부의 거래만 */
+	const openByTx = async (id: string): Promise<{ cfg: D1Config; ledgerId: string; ledgerName: string }> => {
+		const cfg = await ready();
+		const ledgerId = await ledgerOfTransaction(cfg, member, id);
+		if (!ledgerId) throw new Error(`거래를 찾을 수 없습니다: ${id}`);
+		const ledger = await resolveLedger(cfg, member, ledgerId);
+		return { cfg, ledgerId, ledgerName: ledger.name };
 	};
 
 	const ledgerAdd = defineTool({
@@ -128,9 +161,11 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			merchant: Type.Optional(Type.String({ description: "가맹점/거래처 (예: 김밥천국)" })),
 			memo: Type.Optional(Type.String({ description: "메모" })),
 			account: Type.Optional(Type.String({ description: "결제 수단 (예: 현금, 신한카드)" })),
+			ledger: LEDGER_PARAM,
 		}),
 		execute: async (_id, params) => {
-			const tx = await addTransaction(await ready(), {
+			const { cfg, ledger } = await open(params.ledger);
+			const tx = await addTransaction(cfg, ledger.id, {
 				date: params.date,
 				amount: params.amount,
 				type: params.type as TxType,
@@ -146,10 +181,10 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 				content: [
 					{
 						type: "text" as const,
-						text: `기록 완료 — ${tx.date} ${label} ${won(params.amount)}${tx.category ? ` (${tx.category})` : ""}${tx.merchant ? ` @${tx.merchant}` : ""}`,
+						text: `[${ledger.name}] 기록 완료 — ${tx.date} ${label} ${won(params.amount)}${tx.category ? ` (${tx.category})` : ""}${tx.merchant ? ` @${tx.merchant}` : ""}`,
 					},
 				],
-				details: { kind: "ledger-tx", tx },
+				details: { kind: "ledger-tx", ledgerName: ledger.name, tx },
 			};
 		},
 	});
@@ -160,7 +195,7 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 		description:
 			"기간별 수입/지출을 집계한다. 카테고리별 또는 월별로 묶을 수 있다. " +
 			"'이번 달 얼마 썼어', '식비 얼마야' 같은 질문에는 내역을 나열하지 말고 이 툴을 쓴다. " +
-			"가계부는 가구 공유다 — 기본은 전체 합계이고, '내 지출만' 같은 요청에는 scope=mine 을 쓴다. " +
+			"가계부는 멤버끼리 공유된다 — 기본은 가계부 전체 합계이고, '내 지출만' 같은 요청에는 scope=mine 을 쓴다. " +
 			"⚠️ 날짜를 직접 계산하지 말고 period를 쓴다 (기본 this_month). " +
 			"사용자가 절대 기간을 명시했을 때만 from/to를 쓴다.",
 		parameters: Type.Object({
@@ -169,9 +204,10 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			to: Type.Optional(Type.String({ description: "종료일 YYYY-MM-DD (period 대신 쓸 때)" })),
 			scope: Type.Optional(
 				Type.Union([Type.Literal("household"), Type.Literal("mine")], {
-					description: "household=가구 전체(기본), mine=내가 기록한 것만",
+					description: "household=가계부 전체(기본), mine=내가 기록한 것만",
 				}),
 			),
+			ledger: LEDGER_PARAM,
 			groupBy: Type.Optional(
 				Type.Union([Type.Literal("category"), Type.Literal("month"), Type.Literal("member")], {
 					description: "category=카테고리별(기본), month=월별, member=사람별",
@@ -182,12 +218,13 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			const groupBy = (params.groupBy as "category" | "month" | "member" | undefined) ?? "category";
 			const { from, to } = resolveRange(params);
 			const scopedMember = params.scope === "mine" ? member : undefined;
-			const rows = await summary(await ready(), { from, to, groupBy, member: scopedMember });
-			const details: LedgerSummaryDetails = { kind: "ledger-summary", from, to, groupBy, rows };
+			const { cfg, ledger } = await open(params.ledger);
+			const rows = await summary(cfg, ledger.id, { from, to, groupBy, member: scopedMember });
+			const details: LedgerSummaryDetails = { kind: "ledger-summary", ledgerName: ledger.name, from, to, groupBy, rows };
 
 			if (rows.length === 0) {
 				return {
-					content: [{ type: "text" as const, text: `${from} ~ ${to} 기간에 기록이 없습니다.` }],
+					content: [{ type: "text" as const, text: `[${ledger.name}] ${from} ~ ${to} 기간에 기록이 없습니다.` }],
 					details,
 				};
 			}
@@ -200,7 +237,7 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 				content: [
 					{
 						type: "text" as const,
-						text: `${from} ~ ${to}\n총 지출 ${won(expense)} / 총 수입 ${won(income)} / 순증감 ${won(income - expense)}\n\n${lines.join("\n")}`,
+						text: `[${ledger.name}] ${from} ~ ${to}\n총 지출 ${won(expense)} / 총 수입 ${won(income)} / 순증감 ${won(income - expense)}\n\n${lines.join("\n")}`,
 					},
 				],
 				details,
@@ -222,15 +259,17 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			category: Type.Optional(Type.String({ description: "카테고리 필터" })),
 			scope: Type.Optional(
 				Type.Union([Type.Literal("household"), Type.Literal("mine")], {
-					description: "household=가구 전체(기본), mine=내가 기록한 것만",
+					description: "household=가계부 전체(기본), mine=내가 기록한 것만",
 				}),
 			),
+			ledger: LEDGER_PARAM,
 			type: Type.Optional(Type.Union([Type.Literal("expense"), Type.Literal("income")])),
 			limit: Type.Optional(Type.Integer({ description: "최대 건수 (기본 50, 최대 500)" })),
 		}),
 		execute: async (_id, params) => {
 			const range = resolveRange(params);
-			const rows = await listTransactions(await ready(), {
+			const { cfg, ledger } = await open(params.ledger);
+			const rows = await listTransactions(cfg, ledger.id, {
 				from: range.from,
 				to: range.to,
 				category: params.category,
@@ -250,12 +289,12 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 					{
 						type: "text" as const,
 						text:
-							`${rows.length}건 (지출 합계 ${won(expense)})` +
+							`[${ledger.name}] ${rows.length}건 (지출 합계 ${won(expense)})` +
 							(preview.length > 0 ? `\n\n${preview.join("\n")}` : "") +
 							(rows.length > preview.length ? `\n… 외 ${rows.length - preview.length}건 (화면에 표시됨)` : ""),
 					},
 				],
-				details: { kind: "ledger-table", rows },
+				details: { kind: "ledger-table", ledgerName: ledger.name, rows },
 			};
 		},
 	});
@@ -275,7 +314,8 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			account: Type.Optional(Type.String()),
 		}),
 		execute: async (_id, params) => {
-			const tx = await updateTransaction(await ready(), params.id, {
+			const { cfg, ledgerId, ledgerName } = await openByTx(params.id);
+			const tx = await updateTransaction(cfg, ledgerId, params.id, {
 				date: params.date,
 				amount: params.amount,
 				type: params.type as TxType | undefined,
@@ -288,10 +328,10 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 				content: [
 					{
 						type: "text" as const,
-						text: `수정 완료 — ${tx.date} ${tx.amount < 0 ? "지출" : "수입"} ${won(Math.abs(tx.amount))}${tx.category ? ` (${tx.category})` : ""}`,
+						text: `[${ledgerName}] 수정 완료 — ${tx.date} ${tx.amount < 0 ? "지출" : "수입"} ${won(Math.abs(tx.amount))}${tx.category ? ` (${tx.category})` : ""}`,
 					},
 				],
-				details: { kind: "ledger-tx", tx },
+				details: { kind: "ledger-tx", ledgerName, tx },
 			};
 		},
 	});
@@ -304,7 +344,10 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			id: Type.String({ description: "거래 id (ULID)" }),
 		}),
 		execute: async (_id, params) => {
-			const ok = await deleteTransaction(await ready(), params.id);
+			// 내 가계부에 없는 id 는 "없음" 으로 답한다 (남의 가계부 거래인지 흘리지 않는다)
+			const cfg = await ready();
+			const ledgerId = await ledgerOfTransaction(cfg, member, params.id);
+			const ok = ledgerId !== null && (await deleteTransaction(cfg, ledgerId, params.id));
 			return {
 				content: [{ type: "text" as const, text: ok ? `삭제됨 (${params.id})` : `해당 id가 없습니다 (${params.id})` }],
 				details: { kind: "ledger-delete", id: params.id, deleted: ok },
@@ -323,33 +366,37 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			month: Type.Optional(Type.String({ description: "대상 월 YYYY-MM. 생략하면 이번 달 (직접 계산하지 말 것)" })),
 			category: Type.Optional(Type.String({ description: "action=set일 때 필수" })),
 			limit: Type.Optional(Type.Integer({ description: "action=set일 때 필수 — 예산 한도(원)" })),
+			ledger: LEDGER_PARAM,
 		}),
 		execute: async (_id, params) => {
 			const action = params.action as "set" | "status";
 			const month = params.month ?? currentMonthKST();
+			const { cfg, ledger } = await open(params.ledger);
 
 			if (action === "set") {
 				if (!params.category || params.limit === undefined) {
 					throw new Error("예산을 설정하려면 category와 limit이 모두 필요합니다.");
 				}
-				await setBudget(await ready(), { month: month, category: params.category, limit_amt: params.limit });
+				await setBudget(cfg, ledger.id, { month: month, category: params.category, limit_amt: params.limit });
 				const details: LedgerBudgetDetails = {
 					kind: "ledger-budget",
+					ledgerName: ledger.name,
 					action,
 					month: month,
 					category: params.category,
 					limit: params.limit,
-					rows: await budgetStatus(await ready(), month),
+					rows: await budgetStatus(cfg, ledger.id, month),
 				};
 				return {
-					content: [{ type: "text" as const, text: `${month} ${params.category} 예산 ${won(params.limit)} 설정` }],
+					content: [{ type: "text" as const, text: `[${ledger.name}] ${month} ${params.category} 예산 ${won(params.limit)} 설정` }],
 					details,
 				};
 			}
 
-			const rows = await budgetStatus(await ready(), month);
+			const rows = await budgetStatus(cfg, ledger.id, month);
 			const details: LedgerBudgetDetails = {
 				kind: "ledger-budget",
+				ledgerName: ledger.name,
 				action,
 				month: month,
 				category: null,
@@ -359,7 +406,7 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 
 			if (rows.length === 0) {
 				return {
-					content: [{ type: "text" as const, text: `${month}에 설정된 예산이 없습니다.` }],
+					content: [{ type: "text" as const, text: `[${ledger.name}] ${month}에 설정된 예산이 없습니다.` }],
 					details,
 				};
 			}
@@ -367,7 +414,7 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 				(r) => `- ${r.category}: ${won(r.spent)} / ${won(r.limit_amt)} (${r.usedPct}%)${r.remaining < 0 ? " ⚠️ 초과" : ""}`,
 			);
 			return {
-				content: [{ type: "text" as const, text: `${month} 예산 현황\n${lines.join("\n")}` }],
+				content: [{ type: "text" as const, text: `[${ledger.name}] ${month} 예산 현황\n${lines.join("\n")}` }],
 				details,
 			};
 		},

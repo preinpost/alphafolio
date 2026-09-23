@@ -15,6 +15,8 @@ export interface Transaction {
 	source: "manual" | "import" | "agent";
 	/** 기록한 사람. 가계부는 공유하되 귀속은 남긴다 (null = 구 데이터). */
 	member: string | null;
+	/** 속한 가계부 (null = 가계부 분리 이전의 구 데이터 — 어디에도 보이지 않는다) */
+	ledger_id: string | null;
 	dedupe_key: string | null;
 	created_at: string; // ISO 8601
 }
@@ -40,7 +42,7 @@ export interface TxFilter {
 	from?: string; // YYYY-MM-DD
 	to?: string;
 	category?: string;
-	/** 특정 사람이 기록한 건만 (미지정 = 가구 전체) */
+	/** 특정 사람이 기록한 건만 (미지정 = 가계부 전체) */
 	member?: string;
 	type?: TxType;
 	limit?: number;

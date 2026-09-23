@@ -90,6 +90,61 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
 );
 `.trim(),
 	},
+	{
+		// 가계부 단위 분리 (PLAN §23).
+		// 이전에는 D1 하나가 곧 "가구 가계부"였다 — 가입을 열면 새 사용자가 남의 가계부를 전부 본다.
+		// 이제 거래·예산은 ledger_id 에 속하고, 조회는 항상 멤버십을 거친다.
+		// 기존 행(ledger_id NULL)은 어느 가계부에도 속하지 않아 보이지 않는다 — 옮길 때는 수동으로.
+		// budgets 는 PK 에 ledger_id 가 들어가야 해서 새로 만들고, 옛 테이블은 budgets_legacy 로 남긴다.
+		id: "0006_ledgers",
+		sql: `
+CREATE TABLE IF NOT EXISTS ledgers (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  owner      TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ledger_members (
+  ledger_id TEXT NOT NULL,
+  member    TEXT NOT NULL,
+  role      TEXT NOT NULL CHECK (role IN ('owner', 'member')),
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (ledger_id, member)
+);
+CREATE INDEX IF NOT EXISTS idx_lm_member ON ledger_members(member);
+
+CREATE TABLE IF NOT EXISTS ledger_invites (
+  id           TEXT PRIMARY KEY,
+  ledger_id    TEXT NOT NULL,
+  inviter      TEXT NOT NULL,
+  invitee      TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'declined', 'revoked', 'expired')),
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_inv_invitee ON ledger_invites(invitee, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_inv_pending ON ledger_invites(ledger_id, invitee) WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS user_prefs (
+  member            TEXT PRIMARY KEY,
+  default_ledger_id TEXT
+);
+
+ALTER TABLE transactions ADD COLUMN ledger_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, date);
+
+ALTER TABLE budgets RENAME TO budgets_legacy;
+CREATE TABLE budgets (
+  ledger_id TEXT NOT NULL,
+  month     TEXT NOT NULL,
+  category  TEXT NOT NULL,
+  limit_amt INTEGER NOT NULL,
+  PRIMARY KEY (ledger_id, month, category)
+);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

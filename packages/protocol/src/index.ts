@@ -10,6 +10,8 @@
 
 export interface LedgerTxCard {
 	kind: "ledger-tx";
+	/** 실제로 쓴·읽은 가계부 이름 (가계부 분리 이전 세션의 카드에는 없다) */
+	ledgerName?: string;
 	tx: {
 		id: string;
 		date: string;
@@ -23,6 +25,8 @@ export interface LedgerTxCard {
 
 export interface LedgerSummaryCard {
 	kind: "ledger-summary";
+	/** 실제로 쓴·읽은 가계부 이름 (가계부 분리 이전 세션의 카드에는 없다) */
+	ledgerName?: string;
 	from: string;
 	to: string;
 	groupBy: "category" | "month" | "member";
@@ -31,6 +35,8 @@ export interface LedgerSummaryCard {
 
 export interface LedgerTableCard {
 	kind: "ledger-table";
+	/** 실제로 쓴·읽은 가계부 이름 (가계부 분리 이전 세션의 카드에는 없다) */
+	ledgerName?: string;
 	rows: Array<{
 		id: string;
 		date: string;
@@ -42,6 +48,8 @@ export interface LedgerTableCard {
 
 export interface LedgerBudgetCard {
 	kind: "ledger-budget";
+	/** 실제로 쓴·읽은 가계부 이름 (가계부 분리 이전 세션의 카드에는 없다) */
+	ledgerName?: string;
 	action: "set" | "status";
 	month: string;
 	rows: Array<{ category: string; limit_amt: number; spent: number; remaining: number; usedPct: number }>;
@@ -427,7 +435,7 @@ export interface LedgerTransaction {
 	memo: string | null;
 	account: string | null;
 	source: string;
-	/** 기록한 사람 (가계부는 가구 공유) */
+	/** 기록한 사람 (가계부는 멤버끼리 공유) */
 	member: string | null;
 	created_at: string;
 }
@@ -447,4 +455,34 @@ export interface LedgerBudgetRow {
 	spent: number;
 	remaining: number;
 	usedPct: number;
+}
+
+// ── 가계부 관리 · 초대 REST (PLAN §23) ─────────────────────────────────
+
+export interface MyLedgerDto {
+	id: string;
+	name: string;
+	owner: string;
+	created_at: string;
+	role: "owner" | "member";
+	memberCount: number;
+	isDefault: boolean;
+}
+
+export interface LedgerMemberDto {
+	member: string;
+	role: "owner" | "member";
+	joined_at: string;
+}
+
+export interface LedgerInviteDto {
+	id: string;
+	ledger_id: string;
+	ledger_name: string;
+	inviter: string;
+	invitee: string;
+	status: "pending" | "accepted" | "declined" | "revoked" | "expired";
+	created_at: string;
+	expires_at: string;
+	responded_at: string | null;
 }

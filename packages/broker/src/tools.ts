@@ -9,7 +9,14 @@
  */
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { currentMonthKST, resolvePeriod, summary as ledgerSummary, type D1Config } from "@alphafolio/ledger";
+import {
+	currentMonthKST,
+	ensureMigrated,
+	resolveLedger,
+	resolvePeriod,
+	summary as ledgerSummary,
+	type D1Config,
+} from "@alphafolio/ledger";
 import { fetchMovers, type Mover, type MoverType } from "./movers.ts";
 import { NaverCredentialsMissingError, searchNews, type NaverCredentials, type NewsItem } from "./news.ts";
 import {
@@ -440,7 +447,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 		description:
 			"투자자산(증권 평가금액·예수금)과 가계부 현금흐름(수입·지출·잉여)을 한 번에 본다. " +
 			"'자산 현황', '순자산', '이번 달 여유 얼마나 되지', '적립식으로 얼마 넣을 수 있어' 같은 질문에 쓴다. " +
-			"가계부는 가구 공유이므로 현금흐름은 가구 전체 기준이다.",
+			"현금흐름은 사용자의 기본 가계부 기준이다 (공유 가계부면 멤버 전체).",
 		parameters: Type.Object({
 			period: Type.Optional(PERIOD_ENUM),
 		}),
@@ -450,7 +457,12 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			// 증권 조회가 실패해도 가계부 쪽은 보여준다 (키 미설정이 흔한 경우)
 			const [portfolio, ledgerRows] = await Promise.allSettled([
 				fetchPortfolio(deps.brokers),
-				ledgerSummary(deps.ledger(), { from, to }),
+				(async () => {
+					const cfg = deps.ledger();
+					await ensureMigrated(cfg);
+					const book = await resolveLedger(cfg, deps.member);
+					return ledgerSummary(cfg, book.id, { from, to });
+				})(),
 			]);
 
 			const p = portfolio.status === "fulfilled" ? portfolio.value : null;

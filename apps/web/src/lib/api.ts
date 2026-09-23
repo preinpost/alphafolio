@@ -3,8 +3,11 @@ import type {
 	BrokerHolding,
 	BrokerOrder,
 	LedgerBudgetRow,
+	LedgerInviteDto,
+	LedgerMemberDto,
 	LedgerSummaryRow,
 	LedgerTransaction,
+	MyLedgerDto,
 	QuoteCard,
 } from "@alphafolio/protocol";
 import { API_BASE, clearToken, getToken } from "./auth.ts";
@@ -15,6 +18,13 @@ export class ApiError extends Error {
 		super(message);
 		this.status = status;
 	}
+}
+
+/** 값이 있는 것만 쿼리스트링으로 */
+function query(params: Record<string, string | number | undefined>): string {
+	const q = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") q.set(k, String(v));
+	return q.toString();
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -105,34 +115,93 @@ export const api = {
 
 	testD1: () => request<{ ok: boolean; message: string }>("/api/secrets/test/d1", { method: "POST" }),
 
-	transactions: (params: { from?: string; to?: string; category?: string; limit?: number; scope?: "household" | "mine" }) => {
-		const q = new URLSearchParams();
-		for (const [k, v] of Object.entries(params)) if (v !== undefined) q.set(k, String(v));
-		return request<LedgerTransaction[]>(`/api/ledger/transactions?${q}`);
-	},
+	// ── 가계부 (ledgerId 를 비우면 서버가 기본 가계부를 고른다) ─────────────
+	transactions: (
+		ledgerId: string | undefined,
+		params: { from?: string; to?: string; category?: string; limit?: number; scope?: "household" | "mine" },
+	) => request<LedgerTransaction[]>(`/api/ledger/transactions?${query({ ...params, ledger: ledgerId })}`),
 
-	addTransaction: (tx: {
-		date: string;
-		amount: number;
-		type: "expense" | "income";
-		category?: string;
-		merchant?: string;
-		memo?: string;
-	}) => request<LedgerTransaction>("/api/ledger/transactions", { method: "POST", body: JSON.stringify(tx) }),
+	addTransaction: (
+		ledgerId: string | undefined,
+		tx: {
+			date: string;
+			amount: number;
+			type: "expense" | "income";
+			category?: string;
+			merchant?: string;
+			memo?: string;
+		},
+	) =>
+		request<LedgerTransaction>(`/api/ledger/transactions?${query({ ledger: ledgerId })}`, {
+			method: "POST",
+			body: JSON.stringify(tx),
+		}),
 
+	/** 거래 id 로 서버가 가계부를 찾는다 (내가 멤버인 가계부의 거래만) */
 	deleteTransaction: (id: string) =>
-		request<{ deleted: boolean }>(`/api/ledger/transactions/${id}`, { method: "DELETE" }),
+		request<{ deleted: boolean }>(`/api/ledger/transactions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
-	summary: (from: string, to: string, groupBy: "category" | "month" | "member" = "category", scope?: "household" | "mine") =>
+	summary: (
+		ledgerId: string | undefined,
+		from: string,
+		to: string,
+		groupBy: "category" | "month" | "member" = "category",
+		scope?: "household" | "mine",
+	) =>
 		request<LedgerSummaryRow[]>(
-			`/api/ledger/summary?from=${from}&to=${to}&groupBy=${groupBy}${scope === "mine" ? "&scope=mine" : ""}`,
+			`/api/ledger/summary?${query({ ledger: ledgerId, from, to, groupBy, scope: scope === "mine" ? "mine" : undefined })}`,
 		),
 
-	budgets: (month: string) => request<LedgerBudgetRow[]>(`/api/ledger/budgets?month=${month}`),
+	budgets: (ledgerId: string | undefined, month: string) =>
+		request<LedgerBudgetRow[]>(`/api/ledger/budgets?${query({ ledger: ledgerId, month })}`),
 
-	setBudget: (month: string, category: string, limit: number) =>
-		request<unknown>("/api/ledger/budgets", {
+	setBudget: (ledgerId: string | undefined, month: string, category: string, limit: number) =>
+		request<unknown>(`/api/ledger/budgets?${query({ ledger: ledgerId })}`, {
 			method: "PUT",
 			body: JSON.stringify({ month, category, limit_amt: limit }),
 		}),
+
+	exportLedger: (ledgerId: string) => request<unknown>(`/api/ledger/export?${query({ ledger: ledgerId })}`),
+
+	// ── 가계부 관리 · 초대 (앱 화면 전용 — 에이전트 툴에는 없다) ────────────
+	ledgers: () => request<{ ledgers: MyLedgerDto[]; invites: LedgerInviteDto[] }>("/api/ledgers"),
+
+	createLedger: (name: string) =>
+		request<MyLedgerDto>("/api/ledgers", { method: "POST", body: JSON.stringify({ name }) }),
+
+	renameLedger: (id: string, name: string) =>
+		request<unknown>(`/api/ledgers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+
+	deleteLedger: (id: string, confirmName: string) =>
+		request<unknown>(`/api/ledgers/${encodeURIComponent(id)}`, {
+			method: "DELETE",
+			body: JSON.stringify({ confirmName }),
+		}),
+
+	setDefaultLedger: (id: string) =>
+		request<unknown>(`/api/ledgers/${encodeURIComponent(id)}/default`, { method: "POST" }),
+
+	transferLedger: (id: string, to: string) =>
+		request<unknown>(`/api/ledgers/${encodeURIComponent(id)}/owner`, { method: "POST", body: JSON.stringify({ to }) }),
+
+	ledgerMembers: (id: string) =>
+		request<{ members: LedgerMemberDto[]; invites: LedgerInviteDto[] }>(`/api/ledgers/${encodeURIComponent(id)}/members`),
+
+	/** 소유자가 내보내기 — 본인 이름이면 나가기 */
+	removeLedgerMember: (id: string, member: string) =>
+		request<unknown>(`/api/ledgers/${encodeURIComponent(id)}/members/${encodeURIComponent(member)}`, {
+			method: "DELETE",
+		}),
+
+	inviteToLedger: (id: string, invitee: string) =>
+		request<LedgerInviteDto>(`/api/ledgers/${encodeURIComponent(id)}/invites`, {
+			method: "POST",
+			body: JSON.stringify({ invitee }),
+		}),
+
+	respondInvite: (inviteId: string, accept: boolean) =>
+		request<unknown>(`/api/invites/${encodeURIComponent(inviteId)}/${accept ? "accept" : "decline"}`, { method: "POST" }),
+
+	revokeInvite: (inviteId: string) =>
+		request<unknown>(`/api/invites/${encodeURIComponent(inviteId)}/revoke`, { method: "POST" }),
 };

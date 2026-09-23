@@ -11,7 +11,7 @@ import { copyFileSync, createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { mkdir } from "node:fs/promises";
-import { d1ConfigFromEnv, d1Ping, ensureMigrated, type D1Config } from "@alphafolio/ledger";
+import { d1ConfigFromEnv, d1Ping, ensureMigrated, LedgerAccessError, type D1Config } from "@alphafolio/ledger";
 import {
 	fetchPortfolio,
 	fetchQuote,
@@ -36,7 +36,7 @@ import { kstParts, SnapshotScheduler, SnapshotStore } from "./snapshots.ts";
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
 import { loadConfig, loadDotEnv } from "./config.ts";
 import { corsFor } from "./cors.ts";
-import { handleLedger, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
+import { handleLedger, handleLedgerAdmin, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
 import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
@@ -257,7 +257,14 @@ async function main(): Promise<void> {
 				err instanceof NoBrokerConfiguredError;
 			// 없는 종목은 잘못된 입력이다 — 500 으로 내면 서버 장애처럼 보인다
 			const notFound = err instanceof QuoteNotFoundError;
-			const status = err instanceof HttpError ? err.status : needsSetup ? 503 : notFound ? 404 : 500;
+			const status =
+				err instanceof HttpError || err instanceof LedgerAccessError
+					? err.status
+					: needsSetup
+						? 503
+						: notFound
+							? 404
+							: 500;
 			const message = err instanceof Error ? err.message : String(err);
 			if (status === 500) console.error("[server]", err);
 			if (!res.headersSent) json(res, status, { error: message });
@@ -325,7 +332,15 @@ async function main(): Promise<void> {
 				return;
 			}
 
-			if (path.startsWith("/api/ledger")) {
+			// 가계부 관리·초대 — /api/ledger 보다 먼저 (접두사가 겹친다)
+			if (path.startsWith("/api/ledgers") || path.startsWith("/api/invites")) {
+				const result = await handleLedgerAdmin(req, path, user, (name) => hasUser(users, name));
+				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
+				json(res, 200, result);
+				return;
+			}
+
+			if (path === "/api/ledger" || path.startsWith("/api/ledger/")) {
 				const result = await handleLedger(req, url, path.slice("/api/ledger".length), user);
 				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
 				json(res, 200, result);

@@ -199,6 +199,66 @@ async function main() {
 	);
 	check("격리 상태에서도 본인 응답은 수신", isolated.text.length > 0);
 
+	// 가계부 분리 (PLAN §23) — 가입을 열면 모르는 사람이 같은 D1 을 쓴다. 남의 가계부에 닿으면 안 된다.
+	if (health.ledger) {
+		console.log("\n── 가계부 분리 · 초대 ────────────────────────────────");
+		const u1 = { ...authed, "content-type": "application/json" };
+		const u2 = { authorization: `Bearer ${body2.token}`, "content-type": "application/json" };
+		const post = (h, path, body) => fetch(`${BASE}${path}`, { method: "POST", headers: h, body: JSON.stringify(body ?? {}) });
+
+		const book = await (await post(u1, "/api/ledgers", { name: "[smoke] 공유" })).json();
+		const q = `ledger=${encodeURIComponent(book.id)}`;
+		const t = await (
+			await post(u1, `/api/ledger/transactions?${q}`, {
+				date: new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10),
+				amount: 1200,
+				type: "expense",
+				merchant: "[smoke] 격리",
+			})
+		).json();
+		check("가계부 만들고 거기에 기록", Boolean(book.id) && t.amount === -1200, book.name);
+
+		const peek = await fetch(`${BASE}/api/ledger/transactions?${q}`, { headers: u2 });
+		const steal = await fetch(`${BASE}/api/ledger/transactions/${t.id}`, { method: "DELETE", headers: u2 });
+		const still = await (await fetch(`${BASE}/api/ledger/transactions?${q}`, { headers: u1 })).json();
+		check(
+			"멤버 아니면 가계부·거래 id 로 접근 불가 (404)",
+			peek.status === 404 && steal.status === 404 && still.length === 1,
+			`조회 ${peek.status} / 삭제 ${steal.status} / 남은 행 ${still.length}`,
+		);
+
+		const inv = await (await post(u1, `/api/ledgers/${book.id}/invites`, { invitee: USER2 })).json();
+		const inbox = await (await fetch(`${BASE}/api/ledgers`, { headers: u2 })).json();
+		const accepted = await post(u2, `/api/invites/${inv.id}/accept`);
+		const shared = await (await fetch(`${BASE}/api/ledger/transactions?${q}`, { headers: u2 })).json();
+		check(
+			"초대 → 앱에서 수락 → 공유",
+			inbox.invites?.some((i) => i.id === inv.id) && accepted.ok && shared.length === 1,
+			`받은 초대 ${inbox.invites?.length} / 수락 ${accepted.status} / 보이는 행 ${shared.length}`,
+		);
+
+		const memberInvite = await post(u2, `/api/ledgers/${book.id}/invites`, { invitee: USER });
+		const kicked = await fetch(`${BASE}/api/ledgers/${book.id}/members/${USER2}`, { method: "DELETE", headers: u1 });
+		const after = await fetch(`${BASE}/api/ledger/transactions?${q}`, { headers: u2 });
+		check(
+			"멤버는 초대 불가, 내보내면 접근 끊김",
+			memberInvite.status === 403 && kicked.ok && after.status === 404,
+			`초대 ${memberInvite.status} / 내보내기 ${kicked.status} / 이후 조회 ${after.status}`,
+		);
+
+		const wrong = await fetch(`${BASE}/api/ledgers/${book.id}`, {
+			method: "DELETE",
+			headers: u1,
+			body: JSON.stringify({ confirmName: "틀린 이름" }),
+		});
+		const gone = await fetch(`${BASE}/api/ledgers/${book.id}`, {
+			method: "DELETE",
+			headers: u1,
+			body: JSON.stringify({ confirmName: book.name }),
+		});
+		check("가계부 삭제는 이름 확인 필요", wrong.status === 400 && gone.ok, `틀림 ${wrong.status} / 맞음 ${gone.status}`);
+	}
+
 	console.log("\n── 시크릿 저장소 ─────────────────────────────────────");
 	const authed2 = { authorization: `Bearer ${body2.token}` };
 
@@ -404,6 +464,25 @@ async function main() {
 			await fetch(`${BASE}/api/ledger/transactions/${r.id}`, { method: "DELETE", headers: authed });
 		}
 		console.log("  🧹 테스트 행 정리 완료");
+	}
+
+	// 스모크 계정이 소유한 가계부(첫 기록 때 자동 생성된 개인 가계부 포함)를 지운다 — 실 D1 에 남지 않게.
+	// 소유자 토큰으로만 지울 수 있으므로 다른 사용자의 가계부는 건드릴 수 없다.
+	if (health.ledger) {
+		let removed = 0;
+		for (const tk of [token, body2.token]) {
+			const h = { authorization: `Bearer ${tk}`, "content-type": "application/json" };
+			const { ledgers = [] } = await (await fetch(`${BASE}/api/ledgers`, { headers: h })).json();
+			for (const l of ledgers.filter((l) => l.role === "owner")) {
+				const r = await fetch(`${BASE}/api/ledgers/${encodeURIComponent(l.id)}`, {
+					method: "DELETE",
+					headers: h,
+					body: JSON.stringify({ confirmName: l.name }),
+				});
+				if (r.ok) removed++;
+			}
+		}
+		console.log(`  🧹 스모크 가계부 ${removed}개 정리`);
 	}
 
 	console.log("\n──────────────────────────────────────────────────────");

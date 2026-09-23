@@ -3,10 +3,14 @@
  *
  * 챗은 "어제 김밥천국 8천원" 같은 입력에 강하고, 이 화면은 훑어보기·수정·예산 설정에 강하다.
  * 둘은 같은 D1을 본다.
+ *
+ * 가계부는 여러 개일 수 있다 (PLAN §23). 위쪽에서 고르고, 받은 초대도 여기서 수락한다.
+ * 초대 목록은 react-query 가 화면 복귀(visibilitychange) 때 다시 읽는다 — v1 알림은 이것뿐.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
+import { InviteInbox, LedgerSettings } from "./LedgerSettings.tsx";
 
 const won = (n: number): string => `${Math.abs(n).toLocaleString("ko-KR")}원`;
 const todayKST = (): string => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
@@ -19,37 +23,56 @@ function monthRange(month: string): { from: string; to: string } {
 
 export function LedgerPage() {
 	const [month, setMonth] = useState(() => todayKST().slice(0, 7));
-	// 가계부는 가구 공유 — 기본은 전체, 필요하면 본인 것만 본다
+	// 공유 가계부 — 기본은 전체, 필요하면 본인 것만 본다
 	const [scope, setScope] = useState<"household" | "mine">("household");
+	const [picked, setPicked] = useState<string | undefined>(undefined);
+	const [managing, setManaging] = useState(false);
 	const { from, to } = monthRange(month);
 	const qc = useQueryClient();
 
 	const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+	const books = useQuery({ queryKey: ["ledgers"], queryFn: api.ledgers });
+	const mine = books.data?.ledgers ?? [];
+	// 고른 게 없거나(처음) 더는 멤버가 아니면(나감·삭제) 기본 가계부
+	const current = mine.find((l) => l.id === picked) ?? mine.find((l) => l.isDefault) ?? mine[0];
+	const ledgerId = current?.id;
+	// 가계부가 아직 없으면 조회하지 않는다 — 첫 기록(여기 또는 챗)에서 서버가 개인 가계부를 만든다
+	const ready = books.isSuccess && ledgerId !== undefined;
+
 	const summary = useQuery({
-		queryKey: ["summary", from, to, scope],
-		queryFn: () => api.summary(from, to, "category", scope),
+		queryKey: ["summary", ledgerId, from, to, scope],
+		queryFn: () => api.summary(ledgerId, from, to, "category", scope),
+		enabled: ready,
 	});
 	const byMember = useQuery({
-		queryKey: ["summary-member", from, to],
-		queryFn: () => api.summary(from, to, "member"),
+		queryKey: ["summary-member", ledgerId, from, to],
+		queryFn: () => api.summary(ledgerId, from, to, "member"),
+		enabled: ready,
 	});
 	const transactions = useQuery({
-		queryKey: ["transactions", from, to, scope],
-		queryFn: () => api.transactions({ from, to, limit: 200, scope }),
+		queryKey: ["transactions", ledgerId, from, to, scope],
+		queryFn: () => api.transactions(ledgerId, { from, to, limit: 200, scope }),
+		enabled: ready,
 	});
 	const budgets = useQuery({
-		queryKey: ["budgets", month],
-		queryFn: () => api.budgets(month),
+		queryKey: ["budgets", ledgerId, month],
+		queryFn: () => api.budgets(ledgerId, month),
+		enabled: ready,
 	});
 
 	const invalidate = (): void => {
+		// 가계부가 없던 사용자는 첫 기록 때 개인 가계부가 생기므로 목록도 다시 읽는다
+		if (!ledgerId) void qc.invalidateQueries({ queryKey: ["ledgers"] });
 		void qc.invalidateQueries({ queryKey: ["summary"] });
 		void qc.invalidateQueries({ queryKey: ["summary-member"] });
 		void qc.invalidateQueries({ queryKey: ["transactions"] });
 		void qc.invalidateQueries({ queryKey: ["budgets"] });
 	};
 
-	const addTx = useMutation({ mutationFn: api.addTransaction, onSuccess: invalidate });
+	const addTx = useMutation({
+		mutationFn: (tx: Parameters<typeof api.addTransaction>[1]) => api.addTransaction(ledgerId, tx),
+		onSuccess: invalidate,
+	});
 	const delTx = useMutation({ mutationFn: api.deleteTransaction, onSuccess: invalidate });
 
 	const totalExpense = (summary.data ?? []).reduce((s, r) => s + r.expense, 0);
@@ -58,6 +81,51 @@ export function LedgerPage() {
 	return (
 		<div className="flex-1 overflow-y-auto">
 			<div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+				<InviteInbox invites={books.data?.invites ?? []} />
+
+				<div className="flex items-center gap-2">
+					{mine.length > 1 ? (
+						<select
+							value={current?.id ?? ""}
+							onChange={(e) => setPicked(e.target.value)}
+							className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
+						>
+							{mine.map((l) => (
+								<option key={l.id} value={l.id}>
+									{l.name}
+									{l.memberCount > 1 ? ` · ${l.memberCount}명` : ""}
+									{l.isDefault ? " · 기본" : ""}
+								</option>
+							))}
+						</select>
+					) : (
+						<div className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+							{current ? current.name : books.isLoading ? "" : "첫 기록을 하면 내 가계부가 만들어집니다"}
+							{current && current.memberCount > 1 && (
+								<span className="ml-2 text-xs text-muted">{current.memberCount}명</span>
+							)}
+						</div>
+					)}
+					{current && (
+						<button
+							onClick={() => setManaging((v) => !v)}
+							className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink active:bg-hover"
+						>
+							{managing ? "닫기" : "관리·초대"}
+						</button>
+					)}
+				</div>
+
+				{managing && current && me.data && (
+					<LedgerSettings
+						key={current.id}
+						ledger={current}
+						me={me.data.user}
+						onSelect={setPicked}
+						onClose={() => setManaging(false)}
+					/>
+				)}
+
 				<div className="flex items-center justify-between">
 					<input
 						type="month"
@@ -83,7 +151,7 @@ export function LedgerPage() {
 								scope === s ? "bg-card text-ink shadow-sm" : "text-muted"
 							}`}
 						>
-							{s === "household" ? "가구 전체" : `내 기록${me.data ? ` (${me.data.user})` : ""}`}
+							{s === "household" ? "전체" : `내 기록${me.data ? ` (${me.data.user})` : ""}`}
 						</button>
 					))}
 				</div>

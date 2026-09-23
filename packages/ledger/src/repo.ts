@@ -3,6 +3,10 @@
  * 공유하는 단일 진입점. 비즈니스 로직은 전부 여기에만 있다 (PLAN.md §3.2).
  *
  * SQL은 전부 이 파일의 리터럴이고 사용자/LLM 입력은 params로만 들어간다.
+ *
+ * **모든 함수가 ledgerId 를 받고, 모든 SQL 이 ledger_id 로 거른다** (PLAN §23).
+ * ledgerId 가 "이 사용자가 멤버인 가계부" 인지는 호출부가 ledgers.ts(resolveLedger 등)로
+ * 먼저 확인한다. 여기서 거르지 않으면 거래 id 만 알면 남의 가계부를 고칠 수 있다.
  */
 import { d1Query, type D1Config, type D1Param } from "./d1.ts";
 import { ulid } from "./ulid.ts";
@@ -39,7 +43,7 @@ function signed(amount: number, type: TxInput["type"]): number {
 
 // ── 거래 ────────────────────────────────────────────────────────────────
 
-export async function addTransaction(cfg: D1Config, input: TxInput): Promise<Transaction> {
+export async function addTransaction(cfg: D1Config, ledgerId: string, input: TxInput): Promise<Transaction> {
 	assertDate(input.date, "date");
 	assertAmount(input.amount);
 
@@ -54,16 +58,18 @@ export async function addTransaction(cfg: D1Config, input: TxInput): Promise<Tra
 		account: input.account ?? null,
 		source: input.source ?? "manual",
 		member: input.member ?? null,
+		ledger_id: ledgerId,
 		dedupe_key: input.dedupeKey ?? null,
 		created_at: new Date().toISOString(),
 	};
 
 	await d1Query(
 		cfg,
-		`INSERT INTO transactions (id, date, amount, currency, category, merchant, memo, account, source, member, dedupe_key, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO transactions (id, ledger_id, date, amount, currency, category, merchant, memo, account, source, member, dedupe_key, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		[
 			row.id,
+			ledgerId,
 			row.date,
 			row.amount,
 			row.currency,
@@ -81,9 +87,9 @@ export async function addTransaction(cfg: D1Config, input: TxInput): Promise<Tra
 	return row;
 }
 
-export async function listTransactions(cfg: D1Config, filter: TxFilter = {}): Promise<Transaction[]> {
-	const where: string[] = [];
-	const params: D1Param[] = [];
+export async function listTransactions(cfg: D1Config, ledgerId: string, filter: TxFilter = {}): Promise<Transaction[]> {
+	const where: string[] = ["ledger_id = ?"];
+	const params: D1Param[] = [ledgerId];
 
 	if (filter.from) {
 		assertDate(filter.from, "from");
@@ -112,21 +118,35 @@ export async function listTransactions(cfg: D1Config, filter: TxFilter = {}): Pr
 	params.push(limit, offset);
 
 	const sql =
-		`SELECT * FROM transactions` +
-		(where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "") +
+		`SELECT * FROM transactions WHERE ${where.join(" AND ")}` +
 		` ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`;
 
 	const r = await d1Query<Transaction>(cfg, sql, params);
 	return r.results;
 }
 
-export async function getTransaction(cfg: D1Config, id: string): Promise<Transaction | null> {
-	const r = await d1Query<Transaction>(cfg, "SELECT * FROM transactions WHERE id = ?", [id]);
+export async function getTransaction(cfg: D1Config, ledgerId: string, id: string): Promise<Transaction | null> {
+	const r = await d1Query<Transaction>(cfg, "SELECT * FROM transactions WHERE id = ? AND ledger_id = ?", [id, ledgerId]);
 	return r.results[0] ?? null;
 }
 
-export async function updateTransaction(cfg: D1Config, id: string, patch: TxPatch): Promise<Transaction> {
-	const current = await getTransaction(cfg, id);
+/**
+ * 거래 id 로 "내가 멤버인 가계부" 를 찾는다 — 수정·삭제는 목록에서 고른 id 만 들고 오므로.
+ * 멤버십 조인이라, 남의 가계부 거래면 null (존재 여부도 흘리지 않는다).
+ */
+export async function ledgerOfTransaction(cfg: D1Config, user: string, id: string): Promise<string | null> {
+	const r = await d1Query<{ ledger_id: string }>(
+		cfg,
+		`SELECT t.ledger_id FROM transactions t
+		 JOIN ledger_members m ON m.ledger_id = t.ledger_id AND m.member = ?
+		 WHERE t.id = ?`,
+		[user, id],
+	);
+	return r.results[0]?.ledger_id ?? null;
+}
+
+export async function updateTransaction(cfg: D1Config, ledgerId: string, id: string, patch: TxPatch): Promise<Transaction> {
+	const current = await getTransaction(cfg, ledgerId, id);
 	if (!current) throw new Error(`거래를 찾을 수 없습니다: ${id}`);
 
 	const sets: string[] = [];
@@ -153,16 +173,16 @@ export async function updateTransaction(cfg: D1Config, id: string, patch: TxPatc
 
 	if (sets.length === 0) return current;
 
-	params.push(id);
-	await d1Query(cfg, `UPDATE transactions SET ${sets.join(", ")} WHERE id = ?`, params);
+	params.push(id, ledgerId);
+	await d1Query(cfg, `UPDATE transactions SET ${sets.join(", ")} WHERE id = ? AND ledger_id = ?`, params);
 
-	const updated = await getTransaction(cfg, id);
+	const updated = await getTransaction(cfg, ledgerId, id);
 	if (!updated) throw new Error(`수정 후 거래를 다시 읽지 못했습니다: ${id}`);
 	return updated;
 }
 
-export async function deleteTransaction(cfg: D1Config, id: string): Promise<boolean> {
-	const r = await d1Query(cfg, "DELETE FROM transactions WHERE id = ?", [id]);
+export async function deleteTransaction(cfg: D1Config, ledgerId: string, id: string): Promise<boolean> {
+	const r = await d1Query(cfg, "DELETE FROM transactions WHERE id = ? AND ledger_id = ?", [id, ledgerId]);
 	return (r.meta.changes ?? 0) > 0;
 }
 
@@ -174,6 +194,7 @@ export async function deleteTransaction(cfg: D1Config, id: string): Promise<bool
  */
 export async function summary(
 	cfg: D1Config,
+	ledgerId: string,
 	opts: { from: string; to: string; groupBy?: "category" | "month" | "member"; member?: string },
 ): Promise<SummaryRow[]> {
 	assertDate(opts.from, "from");
@@ -186,7 +207,7 @@ export async function summary(
 				? "COALESCE(member, '(미지정)')"
 				: "COALESCE(category, '(미분류)')";
 
-	// 가계부는 공유이므로 기본은 가구 전체. member를 주면 그 사람 것만 집계한다.
+	// 기본은 가계부 전체. member를 주면 그 사람이 기록한 것만 집계한다.
 	const memberFilter = opts.member ? " AND member = ?" : "";
 
 	const r = await d1Query<SummaryRow>(
@@ -197,41 +218,42 @@ export async function summary(
 		        SUM(amount) AS net,
 		        COUNT(*) AS count
 		 FROM transactions
-		 WHERE date >= ? AND date <= ?${memberFilter}
+		 WHERE ledger_id = ? AND date >= ? AND date <= ?${memberFilter}
 		 GROUP BY key
 		 ORDER BY expense DESC`,
-		opts.member ? [opts.from, opts.to, opts.member] : [opts.from, opts.to],
+		opts.member ? [ledgerId, opts.from, opts.to, opts.member] : [ledgerId, opts.from, opts.to],
 	);
 	return r.results;
 }
 
 // ── 예산 ────────────────────────────────────────────────────────────────
 
-export async function setBudget(cfg: D1Config, budget: Budget): Promise<Budget> {
+export async function setBudget(cfg: D1Config, ledgerId: string, budget: Budget): Promise<Budget> {
 	assertMonth(budget.month, "month");
 	assertAmount(budget.limit_amt);
 	await d1Query(
 		cfg,
-		`INSERT INTO budgets (month, category, limit_amt) VALUES (?, ?, ?)
-		 ON CONFLICT(month, category) DO UPDATE SET limit_amt = excluded.limit_amt`,
-		[budget.month, budget.category, budget.limit_amt],
+		`INSERT INTO budgets (ledger_id, month, category, limit_amt) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(ledger_id, month, category) DO UPDATE SET limit_amt = excluded.limit_amt`,
+		[ledgerId, budget.month, budget.category, budget.limit_amt],
 	);
 	return budget;
 }
 
-export async function budgetStatus(cfg: D1Config, month: string): Promise<BudgetStatus[]> {
+export async function budgetStatus(cfg: D1Config, ledgerId: string, month: string): Promise<BudgetStatus[]> {
 	assertMonth(month, "month");
 	const r = await d1Query<Budget & { spent: number }>(
 		cfg,
 		`SELECT b.month, b.category, b.limit_amt,
 		        COALESCE((SELECT SUM(-t.amount) FROM transactions t
-		                  WHERE t.category = b.category
+		                  WHERE t.ledger_id = b.ledger_id
+		                    AND t.category = b.category
 		                    AND substr(t.date, 1, 7) = b.month
 		                    AND t.amount < 0), 0) AS spent
 		 FROM budgets b
-		 WHERE b.month = ?
+		 WHERE b.ledger_id = ? AND b.month = ?
 		 ORDER BY b.category`,
-		[month],
+		[ledgerId, month],
 	);
 
 	return r.results.map((row) => ({
@@ -247,8 +269,12 @@ export async function budgetStatus(cfg: D1Config, month: string): Promise<Budget
  * 전체 내보내기. D1 무료 플랜의 Time Travel 이 7일뿐이라
  * v0.1 필수 기능이다 (PLAN.md §7.3).
  */
-export async function exportAll(cfg: D1Config): Promise<{ transactions: Transaction[]; budgets: Budget[] }> {
-	const tx = await d1Query<Transaction>(cfg, "SELECT * FROM transactions ORDER BY date, id");
-	const bg = await d1Query<Budget>(cfg, "SELECT * FROM budgets ORDER BY month, category");
+export async function exportAll(cfg: D1Config, ledgerId: string): Promise<{ transactions: Transaction[]; budgets: Budget[] }> {
+	const tx = await d1Query<Transaction>(cfg, "SELECT * FROM transactions WHERE ledger_id = ? ORDER BY date, id", [ledgerId]);
+	const bg = await d1Query<Budget>(
+		cfg,
+		"SELECT month, category, limit_amt FROM budgets WHERE ledger_id = ? ORDER BY month, category",
+		[ledgerId],
+	);
 	return { transactions: tx.results, budgets: bg.results };
 }

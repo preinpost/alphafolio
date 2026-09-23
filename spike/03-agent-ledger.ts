@@ -24,7 +24,7 @@ import {
 	resolveCliModel,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { d1ConfigFromEnv, deleteTransaction, listTransactions, migrate } from "@alphafolio/ledger";
+import { d1ConfigFromEnv, deleteTransaction, listTransactions, migrate, resolveLedger } from "@alphafolio/ledger";
 import { createLedgerTools, LEDGER_TOOL_NAMES } from "@alphafolio/ledger/tools";
 import { loadEnv } from "./env.ts";
 
@@ -84,7 +84,9 @@ async function main(): Promise<void> {
 
 	// 검증
 	const yesterday = new Date(Date.now() + 9 * 60 * 60 * 1000 - 86_400_000).toISOString().slice(0, 10);
-	const written = await listTransactions(cfg, { from: yesterday, to: TODAY, limit: 20 });
+	// 툴이 쓰는 것과 같은 규칙으로 spike 사용자의 기본 가계부를 찾는다
+	const book = await resolveLedger(cfg, "spike");
+	const written = await listTransactions(cfg, book.id, { from: yesterday, to: TODAY, limit: 20 });
 	const spikeRows = written.filter((r) => r.source === "agent" && r.merchant?.includes("김밥"));
 
 	console.log(`\n\n${"─".repeat(60)}`);
@@ -98,7 +100,7 @@ async function main(): Promise<void> {
 	console.log(`     금액                : ${row ? `${Math.abs(row.amount).toLocaleString("ko-KR")}원` : "-"}`);
 
 	// 정리
-	for (const r of spikeRows) await deleteTransaction(cfg, r.id);
+	for (const r of spikeRows) await deleteTransaction(cfg, book.id, r.id);
 	console.log(`  정리                  : ✅ 테스트 행 ${spikeRows.length}건 삭제`);
 
 	session.dispose();

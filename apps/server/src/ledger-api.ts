@@ -8,12 +8,27 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
 	addTransaction,
 	budgetStatus,
+	createLedger,
+	deleteLedger,
 	deleteTransaction,
 	ensureMigrated,
 	exportAll,
+	inviteMember,
+	ledgerOfTransaction,
+	listIncomingInvites,
+	listLedgerInvites,
+	listMembers,
+	listMyLedgers,
 	listTransactions,
+	removeMember,
+	renameLedger,
+	resolveLedger,
+	respondInvite,
+	revokeInvite,
 	setBudget,
+	setDefaultLedger,
 	summary,
+	transferOwnership,
 	updateTransaction,
 	type D1Config,
 	type TxType,
@@ -75,24 +90,36 @@ async function cfg(): Promise<D1Config> {
 /**
  * 가계부 라우트. 처리했으면 결과를, 라우트가 아니면 undefined를 돌려준다.
  * 경로는 /api/ledger 이후만 본다.
+ *
+ * 대상 가계부는 `?ledger=<id>` (없으면 기본 가계부). 멤버가 아닌 가계부는 404 —
+ * resolveLedger 가 멤버십으로만 고르기 때문이다 (PLAN §23).
  */
 export async function handleLedger(
 	req: IncomingMessage,
 	url: URL,
 	rest: string,
-	/** 인증된 사용자 = 기록자. 가계부는 가구 공유지만 귀속은 남긴다. */
+	/** 인증된 사용자 = 기록자. */
 	member: string,
 ): Promise<unknown | undefined> {
 	const method = req.method ?? "GET";
 	const q = url.searchParams;
+	/** 대상 가계부 id — 내가 멤버인 것만 */
+	const ledger = async (c: D1Config): Promise<string> => (await resolveLedger(c, member, q.get("ledger"))).id;
+	/** 거래 id 로 가계부 찾기 — 남의 가계부 거래면 404 */
+	const ledgerOf = async (c: D1Config, id: string): Promise<string> => {
+		const found = await ledgerOfTransaction(c, member, id);
+		if (!found) throw new HttpError(404, `거래를 찾을 수 없습니다: ${id}`);
+		return found;
+	};
 
 	// GET /api/ledger/transactions?from&to&category&type&limit
 	if (rest === "/transactions" && method === "GET") {
-		return listTransactions((await cfg()), {
+		const c = await cfg();
+		return listTransactions(c, await ledger(c), {
 			from: q.get("from") ?? undefined,
 			to: q.get("to") ?? undefined,
 			category: q.get("category") ?? undefined,
-			// scope=mine 이면 본인 기록만, 기본은 가구 전체
+			// scope=mine 이면 본인 기록만, 기본은 가계부 전체
 			member: q.get("scope") === "mine" ? member : undefined,
 			type: (q.get("type") as TxType | null) ?? undefined,
 			limit: q.has("limit") ? num(q.get("limit"), "limit") : undefined,
@@ -103,7 +130,8 @@ export async function handleLedger(
 	// POST /api/ledger/transactions
 	if (rest === "/transactions" && method === "POST") {
 		const body = await readJson(req);
-		return addTransaction((await cfg()), {
+		const c = await cfg();
+		return addTransaction(c, await ledger(c), {
 			date: required(body.date as string, "date"),
 			amount: Number(body.amount),
 			type: (body.type as TxType) ?? "expense",
@@ -123,7 +151,8 @@ export async function handleLedger(
 
 		if (method === "PATCH") {
 			const body = await readJson(req);
-			return updateTransaction((await cfg()), id, {
+			const c = await cfg();
+			return updateTransaction(c, await ledgerOf(c, id), id, {
 				date: body.date as string | undefined,
 				amount: body.amount === undefined ? undefined : Number(body.amount),
 				type: body.type as TxType | undefined,
@@ -134,13 +163,15 @@ export async function handleLedger(
 			});
 		}
 		if (method === "DELETE") {
-			return { deleted: await deleteTransaction((await cfg()), id) };
+			const c = await cfg();
+			return { deleted: await deleteTransaction(c, await ledgerOf(c, id), id) };
 		}
 	}
 
 	// GET /api/ledger/summary?from&to&groupBy
 	if (rest === "/summary" && method === "GET") {
-		return summary((await cfg()), {
+		const c = await cfg();
+		return summary(c, await ledger(c), {
 			from: required(q.get("from"), "from"),
 			to: required(q.get("to"), "to"),
 			groupBy: (q.get("groupBy") as "category" | "month" | "member" | null) ?? "category",
@@ -150,11 +181,13 @@ export async function handleLedger(
 
 	// GET /api/ledger/budgets?month  |  PUT /api/ledger/budgets
 	if (rest === "/budgets" && method === "GET") {
-		return budgetStatus((await cfg()), required(q.get("month"), "month"));
+		const c = await cfg();
+		return budgetStatus(c, await ledger(c), required(q.get("month"), "month"));
 	}
 	if (rest === "/budgets" && method === "PUT") {
 		const body = await readJson(req);
-		return setBudget((await cfg()), {
+		const c = await cfg();
+		return setBudget(c, await ledger(c), {
 			month: required(body.month as string, "month"),
 			category: required(body.category as string, "category"),
 			limit_amt: Number(body.limit_amt ?? body.limit),
@@ -163,9 +196,94 @@ export async function handleLedger(
 
 	// GET /api/ledger/export — Time Travel이 무료 7일뿐이라 상시 제공 (PLAN.md §7.3)
 	if (rest === "/export" && method === "GET") {
-		return exportAll(await cfg());
+		const c = await cfg();
+		return exportAll(c, await ledger(c));
 	}
 
+	return undefined;
+}
+
+/**
+ * 가계부 관리 · 초대 — `/api/ledgers/*`, `/api/invites/*` (전체 경로를 받는다).
+ *
+ * **앱 화면 전용 경로다.** 에이전트 툴에는 없다 — 웹·뉴스 본문에 섞인 "○○를 초대해" 가
+ * 가계부를 넘기지 못하게 (주문 확인과 같은 이유, PLAN §18·§23).
+ */
+export async function handleLedgerAdmin(
+	req: IncomingMessage,
+	path: string,
+	user: string,
+	userExists: (name: string) => boolean,
+): Promise<unknown | undefined> {
+	const method = req.method ?? "GET";
+	const seg = path.split("/").filter(Boolean).slice(1); // ["ledgers", id, ...] | ["invites", ...]
+	const [root, id, sub, target] = seg.map((x) => decodeURIComponent(x));
+
+	if (root === "ledgers") {
+		// GET /api/ledgers — 내 가계부 목록 + 받은 초대 (앱 시작·포그라운드 복귀 때 한 번에)
+		if (!id && method === "GET") {
+			const c = await cfg();
+			const [ledgers, invites] = await Promise.all([listMyLedgers(c, user), listIncomingInvites(c, user)]);
+			return { ledgers, invites };
+		}
+		// POST /api/ledgers { name }
+		if (!id && method === "POST") {
+			const body = await readJson(req);
+			return createLedger(await cfg(), user, String(body.name ?? ""));
+		}
+		if (!id) return undefined;
+
+		// PATCH /api/ledgers/:id { name }   DELETE /api/ledgers/:id { confirmName }
+		if (!sub && method === "PATCH") {
+			const body = await readJson(req);
+			return renameLedger(await cfg(), user, id, String(body.name ?? ""));
+		}
+		if (!sub && method === "DELETE") {
+			const body = await readJson(req);
+			await deleteLedger(await cfg(), user, id, String(body.confirmName ?? ""));
+			return { deleted: true };
+		}
+		// POST /api/ledgers/:id/default
+		if (sub === "default" && method === "POST") {
+			await setDefaultLedger(await cfg(), user, id);
+			return { ok: true };
+		}
+		// POST /api/ledgers/:id/owner { to }
+		if (sub === "owner" && method === "POST") {
+			const body = await readJson(req);
+			await transferOwnership(await cfg(), user, id, String(body.to ?? ""));
+			return { ok: true };
+		}
+		// GET /api/ledgers/:id/members   DELETE /api/ledgers/:id/members/:name (내보내기 / 본인이면 나가기)
+		if (sub === "members" && !target && method === "GET") {
+			const c = await cfg();
+			const [members, invites] = await Promise.all([listMembers(c, user, id), listLedgerInvites(c, user, id)]);
+			return { members, invites };
+		}
+		if (sub === "members" && target && method === "DELETE") {
+			await removeMember(await cfg(), user, id, target);
+			return { ok: true };
+		}
+		// POST /api/ledgers/:id/invites { invitee }
+		if (sub === "invites" && method === "POST") {
+			const body = await readJson(req);
+			return inviteMember(await cfg(), user, id, String(body.invitee ?? ""), userExists);
+		}
+		return undefined;
+	}
+
+	if (root === "invites") {
+		// GET /api/invites — 받은 초대
+		if (!id && method === "GET") return listIncomingInvites(await cfg(), user);
+		// POST /api/invites/:id/accept | decline | revoke
+		if (id && method === "POST" && (sub === "accept" || sub === "decline")) {
+			return respondInvite(await cfg(), user, id, sub === "accept");
+		}
+		if (id && method === "POST" && sub === "revoke") {
+			await revokeInvite(await cfg(), user, id);
+			return { ok: true };
+		}
+	}
 	return undefined;
 }
 

@@ -13,6 +13,8 @@
  * ⚠️ 이 스파이크는 '[spike]' 메모가 붙은 테스트 행을 넣고 끝에 지운다.
  */
 import {
+	createLedger,
+	deleteLedger,
 	addTransaction,
 	budgetStatus,
 	d1ConfigFromEnv,
@@ -40,8 +42,9 @@ async function main(): Promise<void> {
 	const m = await migrate(cfg);
 	console.log(`b. 마이그레이션 ✅ 적용 ${m.applied.length}건 / 건너뜀 ${m.skipped.length}건`);
 
-	// (c)(d)
-	const inserted = await addTransaction(cfg, {
+	// (c)(d) — 스파이크 전용 가계부에 쓰고 끝나면 통째로 지운다 (예산 행이 남던 문제)
+	const book = await createLedger(cfg, "spike", "[spike] 02-d1");
+	const inserted = await addTransaction(cfg, book.id, {
 		date: TODAY,
 		amount: 8000,
 		type: "expense",
@@ -52,21 +55,22 @@ async function main(): Promise<void> {
 	});
 	console.log(`c. INSERT      ✅ id=${inserted.id} amount=${inserted.amount}`);
 
-	const rows = await listTransactions(cfg, { from: TODAY, to: TODAY, limit: 5 });
+	const rows = await listTransactions(cfg, book.id, { from: TODAY, to: TODAY, limit: 5 });
 	console.log(`   SELECT      ✅ ${rows.length}건 조회`);
 
-	const agg = await summary(cfg, { from: `${MONTH}-01`, to: `${MONTH}-31` });
+	const agg = await summary(cfg, book.id, { from: `${MONTH}-01`, to: `${MONTH}-31` });
 	console.log(`   GROUP BY    ✅ ${agg.length}개 카테고리`);
 	for (const r of agg) console.log(`                 ${r.key}: 지출 ${r.expense.toLocaleString("ko-KR")}원 (${r.count}건)`);
 
-	await setBudget(cfg, { month: MONTH, category: "식비", limit_amt: 400_000 });
-	const status = await budgetStatus(cfg, MONTH);
+	await setBudget(cfg, book.id, { month: MONTH, category: "식비", limit_amt: 400_000 });
+	const status = await budgetStatus(cfg, book.id, MONTH);
 	const food = status.find((s) => s.category === "식비");
 	console.log(`d. 예산 조인   ✅ 식비 ${food?.spent.toLocaleString("ko-KR")}원 / ${food?.limit_amt.toLocaleString("ko-KR")}원 (${food?.usedPct}%)`);
 
 	// 정리
-	const removed = await deleteTransaction(cfg, inserted.id);
-	console.log(`   정리        ${removed ? "✅" : "❌"} 테스트 행 삭제`);
+	const removed = await deleteTransaction(cfg, book.id, inserted.id);
+	await deleteLedger(cfg, "spike", book.id, book.name);
+	console.log(`   정리        ${removed ? "✅" : "❌"} 테스트 행·가계부 삭제`);
 
 	console.log("\n✅ 스파이크 2 통과 — D1 REST로 가계부 CRUD·집계가 전부 동작한다.");
 }
