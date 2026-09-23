@@ -38,7 +38,7 @@ export function hashPassword(password: string): string {
 	].join("$");
 }
 
-function verifyHash(password: string, stored: string): boolean {
+export function verifyHash(password: string, stored: string): boolean {
 	const parts = stored.split("$");
 	if (parts.length !== 6 || parts[0] !== "scrypt") return false;
 

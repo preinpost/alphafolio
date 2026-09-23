@@ -1,6 +1,9 @@
 /** REST 클라이언트 — Bearer 토큰을 붙이고 401이면 로그아웃시킨다. */
 import type {
+	AccountDto,
 	ConversationListItem,
+	MeDto,
+	SignupInviteDto,
 	BrokerHolding,
 	BrokerOrder,
 	LedgerBudgetRow,
@@ -51,6 +54,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 	return body as T;
 }
 
+/** 초대 코드로 가입 — 성공하면 바로 로그인 토큰 */
+export async function signup(code: string, user: string, password: string): Promise<string> {
+	const res = await fetch(`${API_BASE}/api/auth/signup`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ code, user, password }),
+	});
+	const body = (await res.json().catch(() => null)) as { token?: string; error?: string } | null;
+	if (!res.ok || !body?.token) throw new ApiError(res.status, body?.error ?? "가입 실패");
+	return body.token;
+}
+
 export async function login(user: string, password: string): Promise<string> {
 	const res = await fetch(`${API_BASE}/api/auth/login`, {
 		method: "POST",
@@ -75,7 +90,27 @@ export interface SecretStatus {
 export const api = {
 	health: () => request<{ ok: boolean; ledger: boolean; model: string }>("/api/health"),
 
-	me: () => request<{ user: string; groups: string[] }>("/api/me"),
+	me: () => request<MeDto>("/api/me"),
+
+	// ── 내 계정 — 토큰 버전이 바뀌어 새 토큰을 돌려준다 (이 기기만 이어서 쓴다) ──
+	changePassword: (current: string, next: string) =>
+		request<{ token: string }>("/api/me/password", { method: "POST", body: JSON.stringify({ current, next }) }),
+	logoutAll: () => request<{ token: string }>("/api/me/logout-all", { method: "POST" }),
+
+	// ── 관리자 (env 계정) ─────────────────────────────────────────────
+	invites: () => request<SignupInviteDto[]>("/api/admin/invites"),
+	createInvite: (note: string, days: number) =>
+		request<{ id: string; code: string; expiresAt: string }>("/api/admin/invites", {
+			method: "POST",
+			body: JSON.stringify({ note, days }),
+		}),
+	revokeSignupInvite: (id: string) =>
+		request<unknown>(`/api/admin/invites/${encodeURIComponent(id)}/revoke`, { method: "POST" }),
+	accounts: () => request<AccountDto[]>("/api/admin/users"),
+	setAccountDisabled: (name: string, disabled: boolean) =>
+		request<unknown>(`/api/admin/users/${encodeURIComponent(name)}/${disabled ? "disable" : "enable"}`, { method: "POST" }),
+	resetAccountPassword: (name: string) =>
+		request<{ password: string }>(`/api/admin/users/${encodeURIComponent(name)}/reset-password`, { method: "POST" }),
 
 	/** 대화 목록 (최근 순) — 응답 중인 대화 표시 포함 */
 	sessions: () => request<ConversationListItem[]>("/api/sessions"),

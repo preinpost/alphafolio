@@ -145,6 +145,35 @@ CREATE TABLE budgets (
 );
 `.trim(),
 	},
+	{
+		// 회원가입 (PLAN §25). env 계정(AF_USERS·AF_AUTH_USER)은 슈퍼관리자로 그대로 두고,
+		// 가입한 계정만 여기 저장한다. 가입은 관리자가 발급한 **1회용 초대 코드**로만 된다.
+		// 코드는 원문을 저장하지 않는다 (sha256) — 발급 화면에서 한 번만 보여준다.
+		// token_version: 비밀번호 변경·모든 기기 로그아웃·비활성화 때 올려 기존 토큰을 한 번에 끊는다.
+		id: "0007_accounts",
+		sql: `
+CREATE TABLE IF NOT EXISTS users (
+  name          TEXT PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  token_version INTEGER NOT NULL DEFAULT 0,
+  invited_by    TEXT,
+  created_at    TEXT NOT NULL,
+  disabled_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS signup_invites (
+  id          TEXT PRIMARY KEY,
+  code_hash   TEXT NOT NULL UNIQUE,
+  note        TEXT,
+  created_by  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  used_by     TEXT,
+  used_at     TEXT,
+  revoked_at  TEXT
+);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

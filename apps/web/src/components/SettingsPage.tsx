@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type SecretStatus } from "../lib/api.ts";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../lib/theme.ts";
+import { AccountSettings } from "./AccountSettings.tsx";
 
 const SOURCE_LABEL: Record<string, string> = {
 	user: "내 설정",
@@ -28,6 +29,7 @@ export function SettingsPage() {
 	const [test, setTest] = useState<{ ok: boolean; message: string } | null>(null);
 
 	const secrets = useQuery({ queryKey: ["secrets"], queryFn: api.secrets });
+	const me = useQuery({ queryKey: ["me"], queryFn: api.me });
 
 	const save = useMutation({
 		mutationFn: ({ name, value }: { name: string; value: string }) => api.setSecret(name, value),
@@ -45,6 +47,9 @@ export function SettingsPage() {
 	return (
 		<div className="flex-1 overflow-y-auto">
 			<div className="mx-auto max-w-2xl space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+				{/* ── 계정 · 관리자 ─────────────────────────────── */}
+				{me.data && <AccountSettings me={me.data} />}
+
 				{/* ── 화면 ─────────────────────────────────────── */}
 				<section>
 					<h2 className="mb-2 text-sm font-medium text-muted">화면</h2>

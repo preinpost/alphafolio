@@ -23,13 +23,13 @@ import { checkImages, MAX_WS_PAYLOAD } from "./images.ts";
 import type { RuntimeManager } from "./runtimes.ts";
 import { serializeMessages } from "./serialize.ts";
 import { CotStreamFilter } from "./thinkingText.ts";
-import { hasUser, type UserDirectory } from "./users.ts";
+import type { AccountStore } from "./accounts.ts";
 
 const AUTH_TIMEOUT_MS = 5000;
 
 interface WsDeps {
 	secret: string;
-	users: UserDirectory;
+	accounts: AccountStore;
 	runtimes: RuntimeManager;
 	/** 호출 시점 판정 — 앱에서 키를 넣으면 재시작 없이 true 가 된다 */
 	ledgerEnabled: () => boolean;
@@ -49,6 +49,8 @@ interface PiEvent {
 interface Client {
 	ws: WebSocket;
 	user: string;
+	/** 토큰 버전 — 비밀번호 변경·비활성화 뒤에는 열린 소켓도 끊는다 */
+	version: number;
 	/** 지금 보고 있는 대화 (붙기 전·옮기는 중에는 null) */
 	sessionId: string | null;
 }
@@ -210,15 +212,16 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 					ws.close(4401, "unauthorized");
 					return;
 				}
-				const name = verifyToken(msg.token, deps.secret);
-				// 토큰이 유효해도 계정이 삭제됐을 수 있으므로 현재 목록과 대조한다
-				if (!name || !hasUser(deps.users, name)) {
+				const verified = verifyToken(msg.token, deps.secret);
+				// 서명이 맞아도 계정이 비활성화됐거나 비밀번호가 바뀌었을 수 있다 (토큰 버전)
+				if (!verified || !deps.accounts.accepts(verified.user, verified.version)) {
 					send({ type: "error", message: "인증 실패" });
 					ws.close(4401, "unauthorized");
 					return;
 				}
 				clearTimeout(timer);
-				const c: Client = { ws, user: name, sessionId: null };
+				const name = verified.user;
+				const c: Client = { ws, user: name, version: verified.version, sessionId: null };
 				client = c;
 				let set = clients.get(name);
 				if (!set) clients.set(name, (set = new Set()));
@@ -229,6 +232,12 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 			}
 
 			const c = client;
+			// 연결 뒤에 비밀번호가 바뀌었거나 비활성화됐으면 이 소켓도 끊는다
+			if (!deps.accounts.accepts(c.user, c.version)) {
+				send({ type: "error", message: "다시 로그인해 주세요" });
+				ws.close(4401, "unauthorized");
+				return;
+			}
 			switch (msg.type) {
 				case "open":
 				case "new_session": {

@@ -519,3 +519,35 @@ export interface LedgerInviteDto {
 	expires_at: string;
 	responded_at: string | null;
 }
+
+// ── 계정 · 관리자 REST (PLAN §25) ──────────────────────────────────────
+
+export interface MeDto {
+	user: string;
+	groups: string[];
+	/** env 계정 = 슈퍼관리자 */
+	admin: boolean;
+	/** env = 서버 설정 계정(비밀번호를 앱에서 못 바꾼다), db = 가입 계정 */
+	source: "env" | "db" | null;
+}
+
+export interface SignupInviteDto {
+	id: string;
+	note: string | null;
+	createdBy: string;
+	createdAt: string;
+	expiresAt: string;
+	usedBy: string | null;
+	usedAt: string | null;
+	revokedAt: string | null;
+	status: "pending" | "used" | "expired" | "revoked";
+}
+
+export interface AccountDto {
+	name: string;
+	source: "env" | "db";
+	admin: boolean;
+	invitedBy: string | null;
+	createdAt: string | null;
+	disabled: boolean;
+}

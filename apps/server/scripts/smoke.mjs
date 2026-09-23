@@ -21,6 +21,8 @@ const PASSWORD2 = "smoke2-pw-5678";
 const SECRET = "smoke-secret-fixed";
 
 const results = [];
+/** 스모크가 실 D1 에 만든 가입 계정 — 끝에 지운다 (앱에는 계정 삭제 기능이 없다) */
+const smokeAccounts = [];
 const check = (name, ok, detail = "") => {
 	results.push({ name, ok, detail });
 	console.log(`  ${ok ? "✅" : "❌"} ${name}${detail ? ` — ${detail}` : ""}`);
@@ -251,6 +253,52 @@ async function main() {
 		"첨부 이미지가 대화에 남음 (다시 열면 보임)",
 		(redBack.messages ?? []).some((m) => m.role === "user" && m.content.some((b) => b.type === "image" && b.dataUrl?.startsWith("data:image/png"))),
 	);
+
+	// 회원가입 (PLAN §25) — env 계정(슈퍼관리자)이 1회용 코드를 발급하고, 그 코드로 한 명만 가입한다
+	if (health.ledger) {
+		console.log("\n── 회원가입 · 초대 코드 ──────────────────────────────");
+		const jsonPost = (h, path, body) =>
+			fetch(`${BASE}${path}`, { method: "POST", headers: { ...h, "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
+		const newName = `smk_${Math.random().toString(36).slice(2, 8)}`;
+		const newPw = "smoke-signup-pw-1";
+
+		const inv = await (await jsonPost(authed, "/api/admin/invites", { note: "[smoke]", days: 1 })).json();
+		check("관리자(env 계정)가 초대 코드 발급", /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(inv.code ?? ""), inv.code ? "XXXX-XXXX-XXXX" : JSON.stringify(inv));
+
+		const bad = await jsonPost({}, "/api/auth/signup", { code: "AAAA-BBBB-CCCC", user: newName, password: newPw });
+		const signed = await jsonPost({}, "/api/auth/signup", { code: inv.code?.toLowerCase(), user: newName, password: newPw });
+		const sBody = await signed.json();
+		const again = await jsonPost({}, "/api/auth/signup", { code: inv.code, user: `${newName}x`, password: newPw });
+		check(
+			"코드로 가입 → 바로 로그인, 같은 코드 재사용·틀린 코드는 거절",
+			bad.status === 403 && signed.ok && Boolean(sBody.token) && again.status === 403,
+			`틀림 ${bad.status} / 가입 ${signed.status} / 재사용 ${again.status}`,
+		);
+		const nu = { authorization: `Bearer ${sBody.token}` };
+		const me = await (await fetch(`${BASE}/api/me`, { headers: nu })).json();
+		const notAdmin = await fetch(`${BASE}/api/admin/invites`, { headers: nu });
+		check("가입 계정은 일반 사용자 (관리자 API 403)", me.admin === false && me.source === "db" && notAdmin.status === 403, `admin=${me.admin} / ${notAdmin.status}`);
+
+		const changed = await jsonPost(nu, "/api/me/password", { current: newPw, next: "smoke-signup-pw-2" });
+		const cBody = await changed.json();
+		const oldToken = await fetch(`${BASE}/api/me`, { headers: nu });
+		const newToken = await fetch(`${BASE}/api/me`, { headers: { authorization: `Bearer ${cBody.token}` } });
+		check(
+			"비밀번호 변경 → 이전 토큰 끊김, 새 토큰 유효",
+			changed.ok && oldToken.status === 401 && newToken.ok,
+			`변경 ${changed.status} / 이전 ${oldToken.status} / 새 ${newToken.status}`,
+		);
+
+		const disabled = await jsonPost(authed, `/api/admin/users/${newName}/disable`);
+		const afterDisable = await fetch(`${BASE}/api/me`, { headers: { authorization: `Bearer ${cBody.token}` } });
+		const loginDisabled = await jsonPost({}, "/api/auth/login", { user: newName, password: "smoke-signup-pw-2" });
+		check(
+			"비활성화 → 토큰·로그인 모두 거절",
+			disabled.ok && afterDisable.status === 401 && loginDisabled.status === 401,
+			`비활성화 ${disabled.status} / 토큰 ${afterDisable.status} / 로그인 ${loginDisabled.status}`,
+		);
+		smokeAccounts.push(newName);
+	}
 
 	// 가계부 분리 (PLAN §23) — 가입을 열면 모르는 사람이 같은 D1 을 쓴다. 남의 가계부에 닿으면 안 된다.
 	if (health.ledger) {
@@ -697,9 +745,26 @@ function wsTest(token, prompt, images) {
 	});
 }
 
+/** 스모크 가입 계정·초대 코드를 실 D1 에서 지운다. 이름이 smk_ 로 시작하는 것만. */
+async function cleanupAccounts() {
+	if (smokeAccounts.length === 0) return;
+	const { d1ConfigFromEnv, d1Query } = await import("@alphafolio/ledger");
+	const cfg = d1ConfigFromEnv();
+	for (const name of smokeAccounts.filter((n) => n.startsWith("smk_"))) {
+		await d1Query(cfg, "DELETE FROM users WHERE name = ?", [name]);
+		await d1Query(cfg, "DELETE FROM signup_invites WHERE used_by = ?", [name]);
+	}
+	// 가입에 안 쓰인 스모크 초대 코드 (틀린 코드 테스트 등)
+	await d1Query(cfg, "DELETE FROM signup_invites WHERE note = ? AND created_by IN (?, ?)", ["[smoke]", USER, USER2]);
+	console.log(`  🧹 스모크 가입 계정 ${smokeAccounts.length}개 정리`);
+}
+
 main()
 	.catch((err) => {
 		console.error("\n❌ 스모크 실패:", err.message);
 		process.exitCode = 1;
 	})
-	.finally(stop);
+	.finally(async () => {
+		await cleanupAccounts().catch((err) => console.warn("스모크 계정 정리 실패:", err.message));
+		stop();
+	});

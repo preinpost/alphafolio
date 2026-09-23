@@ -7,6 +7,10 @@
  *
  * 서버 상태를 두지 않는다 (서명 검증만) — 컨테이너 재시작에도 토큰이 살아남는다.
  * 단 AF_AUTH_SECRET 이 매 기동 생성되면 무효화되므로 배포에서는 env로 고정할 것.
+ *
+ * 토큰에 계정의 **토큰 버전(v)** 을 싣는다 (PLAN §25). 비밀번호 변경·모든 기기 로그아웃·비활성화 때
+ * 계정 버전을 올리면 그 전에 발급된 토큰이 전부 무효가 된다 (accounts.ts 의 accepts).
+ * v 가 없는 옛 토큰은 버전 0 으로 본다.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -15,19 +19,26 @@ const DEFAULT_TTL_DAYS = 30;
 interface TokenPayload {
 	u: string;
 	exp: number;
+	v?: number;
+}
+
+export interface VerifiedToken {
+	user: string;
+	version: number;
 }
 
 function sign(data: string, secret: string): string {
 	return createHmac("sha256", secret).update(data).digest("base64url");
 }
 
-export function createToken(user: string, secret: string, ttlDays = DEFAULT_TTL_DAYS): string {
-	const payload: TokenPayload = { u: user, exp: Date.now() + ttlDays * 86_400_000 };
+export function createToken(user: string, secret: string, version = 0, ttlDays = DEFAULT_TTL_DAYS): string {
+	const payload: TokenPayload = { u: user, exp: Date.now() + ttlDays * 86_400_000, ...(version ? { v: version } : {}) };
 	const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
 	return `${body}.${sign(body, secret)}`;
 }
 
-export function verifyToken(token: string | undefined, secret: string): string | null {
+/** 서명·만료만 본다. 계정이 아직 유효한지(버전·비활성화)는 AccountStore.accepts 로 따로 확인한다. */
+export function verifyToken(token: string | undefined, secret: string): VerifiedToken | null {
 	if (!token) return null;
 	const dot = token.lastIndexOf(".");
 	if (dot <= 0) return null;
@@ -41,7 +52,8 @@ export function verifyToken(token: string | undefined, secret: string): string |
 	try {
 		const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as TokenPayload;
 		if (typeof payload.exp !== "number" || payload.exp < Date.now()) return null;
-		return payload.u;
+		if (typeof payload.u !== "string") return null;
+		return { user: payload.u, version: typeof payload.v === "number" ? payload.v : 0 };
 	} catch {
 		return null;
 	}

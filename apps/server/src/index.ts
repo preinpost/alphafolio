@@ -40,7 +40,9 @@ import { handleLedger, handleLedgerAdmin, HttpError, readJson, setLedgerConfigPr
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
 import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
-import { authenticate, hasUser, loadUsers } from "./users.ts";
+import { loadUsers } from "./users.ts";
+import { AccountError, AccountStore } from "./accounts.ts";
+import { handleAccounts } from "./accounts-api.ts";
 import { attachWebSocket } from "./ws.ts";
 
 const MIME: Record<string, string> = {
@@ -236,15 +238,28 @@ async function main(): Promise<void> {
 		idleMinutes: cfg.idleMinutes,
 	});
 
+	// 계정 — env 계정(슈퍼관리자) + 초대 코드로 가입한 D1 계정 (PLAN §25)
+	const accounts = new AccountStore(ledgerConfig, users);
+	if (ledgerReady()) {
+		try {
+			await accounts.load();
+		} catch (err) {
+			console.warn("[accounts] D1 계정을 읽지 못했습니다 — env 계정만 로그인됩니다:", err instanceof Error ? err.message : err);
+		}
+	}
+	const issueToken = (name: string): string => createToken(name, cfg.auth.secret, accounts.tokenVersion(name));
+
 	// 일별 포트폴리오 스냅샷 — 과거 평가금액은 브로커가 주지 않으므로 직접 쌓는다
 	const snapshots = new SnapshotStore(ledgerConfig);
 	const snapshotScheduler = new SnapshotScheduler({
 		store: snapshots,
-		users: () => users.users.map((u) => u.name),
+		users: () => accounts.names(),
 		brokerAccess,
 	});
 
 	const loginLimiter = new LoginRateLimiter(cfg.login);
+	// 초대 코드 추측 방지 — 로그인과 따로 센다 (가입 실패가 로그인을 막지 않게)
+	const signupLimiter = new LoginRateLimiter(cfg.login);
 
 	const server = createServer((req, res) => {
 		void handleRequest(req, res).catch((err: unknown) => {
@@ -257,7 +272,7 @@ async function main(): Promise<void> {
 			// 없는 종목은 잘못된 입력이다 — 500 으로 내면 서버 장애처럼 보인다
 			const notFound = err instanceof QuoteNotFoundError;
 			const status =
-				err instanceof HttpError || err instanceof LedgerAccessError
+				err instanceof HttpError || err instanceof LedgerAccessError || err instanceof AccountError
 					? err.status
 					: needsSetup
 						? 503
@@ -310,7 +325,7 @@ async function main(): Promise<void> {
 				return;
 			}
 
-			const authedName = authenticate(users, user, String(body.password ?? ""));
+			const authedName = accounts.authenticate(user, String(body.password ?? ""));
 			if (!authedName) {
 				loginLimiter.recordFailure(keys);
 				json(res, 401, { error: "아이디 또는 비밀번호가 올바르지 않습니다" });
@@ -318,22 +333,54 @@ async function main(): Promise<void> {
 			}
 
 			loginLimiter.recordSuccess(keys);
-			json(res, 200, { token: createToken(authedName, cfg.auth.secret), user: authedName });
+			json(res, 200, { token: issueToken(authedName), user: authedName });
+			return;
+		}
+
+		// 초대 코드로 가입 → 바로 로그인 (PLAN §25)
+		if (path === "/api/auth/signup" && req.method === "POST") {
+			if (!accounts.ready) {
+				json(res, 503, { error: "지금은 가입할 수 없습니다 (서버 DB 미설정)" });
+				return;
+			}
+			const ip = clientIp(req.headers, req.socket.remoteAddress, cfg.login.trustProxy);
+			const keys = [`ip:${ip}`];
+			const verdict = signupLimiter.check(keys);
+			if (!verdict.allowed) {
+				res.setHeader("retry-after", String(verdict.retryAfterSec));
+				json(res, 429, { error: `시도가 너무 많습니다. ${verdict.retryAfterSec}초 뒤에 다시 시도하세요.` });
+				return;
+			}
+			const body = await readJson(req);
+			try {
+				const name = await accounts.signup({
+					code: String(body.code ?? ""),
+					name: String(body.user ?? ""),
+					password: String(body.password ?? ""),
+				});
+				signupLimiter.recordSuccess(keys);
+				json(res, 200, { token: issueToken(name), user: name });
+			} catch (err) {
+				// 코드가 틀린 경우만 센다 — ID 중복·비밀번호 길이 같은 입력 실수로 잠기지 않게
+				if (err instanceof AccountError && err.status === 403) signupLimiter.recordFailure(keys);
+				throw err;
+			}
 			return;
 		}
 
 		// ── 인증 필요 ─────────────────────────────────────────────
 		if (path.startsWith("/api/")) {
-			const user = verifyToken(bearerFrom(req.headers.authorization), cfg.auth.secret);
-			// 토큰이 유효해도 계정이 삭제됐을 수 있으므로 현재 목록과 대조한다
-			if (!user || !hasUser(users, user)) {
+			const verified = verifyToken(bearerFrom(req.headers.authorization), cfg.auth.secret);
+			// 서명이 맞아도 계정이 비활성화됐거나 비밀번호가 바뀌었을 수 있다 (토큰 버전)
+			const user = verified && accounts.accepts(verified.user, verified.version) ? verified.user : null;
+			if (!user) {
 				json(res, 401, { error: "인증이 필요합니다" });
 				return;
 			}
 
 			// 가계부 관리·초대 — /api/ledger 보다 먼저 (접두사가 겹친다)
 			if (path.startsWith("/api/ledgers") || path.startsWith("/api/invites")) {
-				const result = await handleLedgerAdmin(req, path, user, (name) => hasUser(users, name));
+				const result = await handleLedgerAdmin(req, path, user, (name) => accounts.has(name));
 				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
 				json(res, 200, result);
 				return;
@@ -479,7 +526,20 @@ async function main(): Promise<void> {
 			}
 
 			if (path === "/api/me") {
-				json(res, 200, { user, groups: [...new Set(SECRET_CATALOG.map((x) => x.group))] });
+				json(res, 200, {
+					user,
+					groups: [...new Set(SECRET_CATALOG.map((x) => x.group))],
+					admin: accounts.isAdmin(user),
+					/** env = 서버 설정 계정(비밀번호를 앱에서 못 바꾼다), db = 가입 계정 */
+					source: accounts.sourceOf(user),
+				});
+				return;
+			}
+
+			if (path.startsWith("/api/me/") || path.startsWith("/api/admin/")) {
+				const result = await handleAccounts(req, path, user, accounts, issueToken);
+				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
+				json(res, 200, result);
 				return;
 			}
 
@@ -503,7 +563,7 @@ async function main(): Promise<void> {
 
 	attachWebSocket(server, {
 		secret: cfg.auth.secret,
-		users,
+		accounts,
 		runtimes,
 		ledgerEnabled: ledgerReady,
 	});
@@ -512,7 +572,10 @@ async function main(): Promise<void> {
 		console.log(`\n  AlphaFolio  http://${cfg.host}:${cfg.port}`);
 		console.log(`  ├ env      ${envFile ?? "(없음 — process.env만 사용)"}`);
 		console.log(`  ├ model    ${cfg.agent.model ?? "(기본)"}`);
-		console.log(`  ├ users    ${users.users.map((u) => u.name).join(", ")}`);
+		console.log(
+			`  ├ users    ${users.users.map((u) => u.name).join(", ")} (관리자)` +
+				(accounts.ready ? ` + 가입 ${accounts.names().length - users.users.length}명` : " — 가입 비활성 (D1 미설정)"),
+		);
 		console.log(`  ├ auth     ${cfg.agent.authPath ?? "(env API 키 사용)"}`);
 		console.log(`  ├ agent    ${cfg.agent.agentDir}`);
 		console.log(`  ├ cors     ${cfg.corsOrigins.join(", ")}`);
