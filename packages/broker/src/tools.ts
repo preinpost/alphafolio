@@ -44,6 +44,19 @@ import { defaultAccountSeq, tossBuyingPower } from "./toss/api.ts";
 import { listOrders, sellableQuantity } from "./toss/orders.ts";
 import { fetchChart, fetchQuote } from "./quote.ts";
 import { fetchPortfolio, NoBrokerConfiguredError, type BrokerAccess } from "./portfolio.ts";
+import {
+	callKisApi,
+	describeKisApi,
+	DEFAULT_ROWS,
+	findKisApis,
+	isVerifiedKisApi,
+	isWriteApi,
+	MAX_PAGES,
+	MAX_ROWS,
+	renderKisResult,
+	resolveDateToken,
+	resolveKisApi,
+} from "./kis/gateway.ts";
 import type { Bar, Holding, Quote } from "./normalize.ts";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
@@ -1256,6 +1269,113 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 		},
 	});
 
+	// ── KIS 범용 조회 (PLAN §31) ─────────────────────────────
+	// 전용 툴에 없는 조회 전부 — 수급·공매도·신용·프로그램·지수·순위·ETF·채권·선물옵션 시세 등 257개
+	const kisFind = defineTool({
+		name: "kis_find",
+		label: "KIS API 찾기",
+		description:
+			"한국투자증권 조회 API 257개(카탈로그)에서 필요한 API 를 찾는다. **전용 툴(market_* · portfolio_* · stock_research)로 " +
+			"안 되는 조회**일 때만 쓴다 — 예: 외국인·기관 수급(투자자 매매동향), 공매도·신용잔고·대차, 프로그램매매, 업종 지수, " +
+			"시가총액·배당률·신고가 순위, ETF NAV, 호가, 채권·선물옵션 시세, 배당 일정, 대차대조표. " +
+			"query 로 검색하면 후보 목록, api 로 지정하면 파라미터·응답 필드 상세를 준다. 찾은 뒤 kis_call 로 호출한다.",
+		parameters: Type.Object({
+			query: Type.Optional(Type.String({ description: "찾을 내용 (예: '종목별 외국인 순매수 일별', '공매도 추이')" })),
+			api: Type.Optional(Type.String({ description: "상세를 볼 API (kis_find 결과의 key 또는 TR ID)" })),
+		}),
+		execute: async (_id, params) => {
+			const today = resolveDateToken("today");
+			if (params.api) {
+				const hit = resolveKisApi(params.api);
+				if (!hit) throw new Error(`없는 API: "${params.api}" — query 로 먼저 찾으세요.`);
+				return {
+					content: [{ type: "text" as const, text: `${describeKisApi(hit.key, hit.api)}
+
+오늘(KST) ${today} — 날짜는 "today", "today-30" 처럼 넘겨도 된다.` }],
+					details: { kind: "kis-find", count: 1 },
+				};
+			}
+			const q = params.query?.trim();
+			if (!q) throw new Error("query 또는 api 중 하나가 필요합니다.");
+			const found = findKisApis(q, 8);
+			if (found.length === 0) {
+				return {
+					content: [{ type: "text" as const, text: `"${q}" 에 맞는 KIS API 를 찾지 못했습니다. 다른 말로 찾아 보세요 (예: 투자자, 순위, 지수).` }],
+					details: { kind: "kis-find", count: 0 },
+				};
+			}
+			const lines = found.map((f) => {
+				const required = Object.entries(f.api.params)
+					.filter(([c, p]) => p[1] && c !== "CANO" && c !== "ACNT_PRDT_CD" && !/^CTX_AREA_/i.test(c))
+					.map(([c, p]) => `${c}(${p[0]})`);
+				return (
+					`- ${f.api.name} [${f.api.category}${isWriteApi(f.api) ? " · 쓰기: 실행 불가" : ""}${isVerifiedKisApi(f.key) ? " · ✓실측" : ""}] key=${f.key}` +
+					(required.length > 0 ? `
+  필수: ${required.slice(0, 8).join(", ")}` : "") +
+					(f.api.desc ? `
+  ${f.api.desc.split("\n")[0]!.slice(0, 120)}` : "")
+				);
+			});
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `${lines.join("\n")}
+
+파라미터 안내가 필요하면 kis_find { api: key } 로 상세를 본다. 오늘(KST) ${today}.`,
+					},
+				],
+				details: { kind: "kis-find", count: found.length },
+			};
+		},
+	});
+
+	const kisCall = defineTool({
+		name: "kis_call",
+		label: "KIS 조회",
+		description:
+			"kis_find 로 찾은 한국투자증권 **조회** API 를 호출한다. 응답 필드는 한글 이름(단위 포함)으로 바꿔 표로 준다 — " +
+			"숫자는 그대로 인용하고 단위([백만원] 등)를 지킨다. 계좌번호·연속조회 키는 서버가 넣으므로 넘기지 않는다. " +
+			"날짜는 YYYYMMDD 또는 'today' / 'today-30' 으로 넘긴다 (오늘 날짜를 추측하지 않는다). " +
+			"주문·정정·취소 같은 쓰기 API 는 실행되지 않는다 (주문은 order_prepare).",
+		parameters: Type.Object({
+			api: Type.String({ description: "kis_find 결과의 key 또는 TR ID" }),
+			params: Type.Optional(
+				Type.Record(Type.String(), Type.Union([Type.String(), Type.Number()]), {
+					description: "API 파라미터 — 규격 코드(예: FID_INPUT_ISCD) 또는 한글명. 계좌번호·CTX_AREA_* 는 넣지 않는다",
+				}),
+			),
+			tr_id: Type.Optional(Type.String({ description: "TR ID 가 여러 개인 API 만 — kis_find 상세의 TR 중 하나" })),
+			pages: Type.Optional(Type.Integer({ description: `연속조회 페이지 수 (기본 1, 최대 ${MAX_PAGES})` })),
+			limit: Type.Optional(Type.Integer({ description: `목록 최대 행 수 (기본 ${DEFAULT_ROWS}, 최대 ${MAX_ROWS})` })),
+			fields: Type.Optional(
+				Type.Array(Type.String(), { description: "보고 싶은 필드만 (한글명 일부 또는 코드, 예: ['일자', '외국인 순매수'])" }),
+			),
+		}),
+		execute: async (_id, params) => {
+			const kis = deps.brokers.kis;
+			if (!kis) throw new Error("KIS 조회는 한국투자증권 연결이 필요합니다. 설정 화면의 '증권 (KIS)' 에서 키를 입력하세요.");
+			const result = await callKisApi(kis(), params.api, params.params ?? {}, {
+				...(params.tr_id ? { trId: params.tr_id } : {}),
+				...(params.pages ? { pages: params.pages } : {}),
+			});
+			const out = renderKisResult(result, {
+				...(params.limit ? { limit: params.limit } : {}),
+				...(params.fields ? { fields: params.fields } : {}),
+			});
+			const head = `[KIS] ${result.api.name} · TR ${result.trId} · 오늘(KST) ${resolveDateToken("today")}`;
+			const note = out.empty && result.api.desc ? `
+
+규격 안내: ${result.api.desc.slice(0, 300)}` : "";
+			return {
+				content: [{ type: "text" as const, text: `${head}
+
+${out.text}${note}` }],
+				details: { kind: "kis-call", api: result.key, name: result.api.name, rows: out.rowCount },
+			};
+		},
+	});
+
 	return [
 		marketPrice,
 		marketTechnical,
@@ -1269,6 +1389,8 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 		financeOverview,
 		orderPrepare,
 		orderList,
+		kisFind,
+		kisCall,
 	];
 }
 
@@ -1285,6 +1407,8 @@ export const BROKER_TOOL_NAMES = [
 	"finance_overview",
 	"order_prepare",
 	"order_list",
+	"kis_find",
+	"kis_call",
 ] as const;
 
 /** 현재 월(KST) — 기본값 계산용으로 재노출 (모델이 날짜를 만들지 않게 한다). */

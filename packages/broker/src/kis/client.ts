@@ -1,13 +1,9 @@
 /**
  * KIS REST 실행기 — 자격증명 주입식.
  *
- * pi-kis 는 338개 API 스펙(apis.json, 3.3MB)을 싣고 동적으로 호출하지만,
- * 여기서는 **실제로 쓰는 API 만 타입으로 고정**한다:
- *   - 이미지에 3.3MB 스펙을 넣지 않는다
- *   - 어떤 API 를 쓰는지 코드에서 바로 보인다
- *   - LLM 이 임의 API 를 호출할 통로를 만들지 않는다 (가계부의 raw SQL 금지와 같은 원칙)
- *
- * 필요한 API 가 늘면 api.ts 에 타입드 래퍼를 추가한다.
+ * 자주 쓰는 API 는 api.ts 에 타입드 래퍼로 고정하고(전용 툴이 쓴다), 나머지 조회 API 전부는
+ * gateway.ts 가 카탈로그(catalog.json, 포털 규격에서 추린 것)로 호출한다 (PLAN §31).
+ * 범용 통로는 **GET 조회만** 연다 — 주문·정정·취소(POST)는 확인 카드 경로로만 간다.
  */
 import { getToken, invalidateToken, type TokenStore } from "./auth.ts";
 import { withRateLimit } from "./ratelimit.ts";
@@ -37,12 +33,20 @@ export interface CallOptions {
 	query: Record<string, string>;
 	/** 로그·에러 표기용 짧은 이름. */
 	label: string;
+	/** 연속조회 — 다음 페이지를 요청할 때 "N" */
+	trCont?: string;
+}
+
+/** 응답 + 연속조회 헤더 (F·M = 뒤에 더 있음, D·E = 마지막) */
+export interface KisPage {
+	json: KisResponse;
+	trCont: string;
 }
 
 /** 토큰 만료로 판단해 1회 재시도할 응답 코드. */
 const TOKEN_ERROR_CODES = new Set(["EGW00121", "EGW00123"]);
 
-async function once(ctx: KisContext, opts: CallOptions, token: string): Promise<KisResponse> {
+async function once(ctx: KisContext, opts: CallOptions, token: string): Promise<KisPage> {
 	const url = new URL(opts.path, baseUrl(ctx.creds.env));
 	for (const [k, v] of Object.entries(opts.query)) url.searchParams.set(k, v);
 
@@ -53,6 +57,7 @@ async function once(ctx: KisContext, opts: CallOptions, token: string): Promise<
 			appkey: ctx.creds.appKey,
 			appsecret: ctx.creds.appSecret,
 			tr_id: opts.trId,
+			...(opts.trCont ? { tr_cont: opts.trCont } : {}),
 			custtype: "P",
 			"content-type": "application/json; charset=utf-8",
 		},
@@ -78,7 +83,7 @@ async function once(ctx: KisContext, opts: CallOptions, token: string): Promise<
 		});
 	}
 
-	return json;
+	return { json, trCont: res.headers.get("tr_cont") ?? "" };
 }
 
 /**
@@ -86,6 +91,11 @@ async function once(ctx: KisContext, opts: CallOptions, token: string): Promise<
  * 재발급은 SMS 를 유발하므로 무한 재시도는 하지 않는다.
  */
 export async function kisGet(ctx: KisContext, opts: CallOptions): Promise<KisResponse> {
+	return (await kisGetPage(ctx, opts)).json;
+}
+
+/** kisGet + 연속조회 헤더. 범용 조회(gateway.ts)가 페이지를 이어 받을 때 쓴다. */
+export async function kisGetPage(ctx: KisContext, opts: CallOptions): Promise<KisPage> {
 	const lane = appKeyHash(ctx.creds.appKey);
 
 	return withRateLimit(lane, async () => {

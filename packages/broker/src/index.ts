@@ -11,6 +11,7 @@ export * from "./kis/types.ts";
 export * from "./kis/auth.ts";
 export * from "./kis/client.ts";
 export * from "./kis/api.ts";
+export * from "./kis/gateway.ts";
 export * from "./normalize.ts";
 export * from "./portfolio.ts";
 export * from "./toss/client.ts";
