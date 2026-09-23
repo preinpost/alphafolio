@@ -37,7 +37,7 @@ import { analyze, type IndicatorSnapshot } from "./indicators.ts";
 import type { KisContext } from "./kis/client.ts";
 import { KisCredentialsMissingError } from "./kis/types.ts";
 import { resolveName } from "./names.ts";
-import { evaluateTiming, type TimingResult } from "./timing.ts";
+import { evaluateTiming, type Horizon, type TimingInput, type TimingResult } from "./timing.ts";
 import { position52w, sectionNote, settle, skipped, type Section } from "./research.ts";
 import { marketOf, validateOrder, type OrderSide, type OrderType } from "./orders.ts";
 import { defaultAccountSeq, tossBuyingPower } from "./toss/api.ts";
@@ -137,16 +137,73 @@ export interface FinancialsDetails {
 /**
  * 타점 판정 카드. 판정은 **규칙 기반**이며 매매 권유가 아니다 — 카드에 고정 표시한다.
  */
+type TimingCardResult = Omit<TimingResult, "snapshot"> & {
+	snapshot: Pick<IndicatorSnapshot, "lastDate" | "bars" | "rsi" | "trend" | "ma20" | "support" | "resistance">;
+};
+
 export interface TimingDetails {
 	kind: "timing-card";
 	symbol: string;
 	name: string;
 	currency: "KRW" | "USD";
-	result: Omit<TimingResult, "snapshot"> & {
-		snapshot: Pick<IndicatorSnapshot, "lastDate" | "bars" | "rsi" | "trend" | "ma20" | "support" | "resistance">;
-	};
+	/** 먼저 보여줄 판정 */
+	result: TimingCardResult;
+	/** 기간을 정하지 않아 두 모드를 다 돌렸을 때 나머지 하나 (카드에서 전환) */
+	alt?: TimingCardResult;
 	/** 판정에 쓰지 못한 입력 (재무 조회 실패 등) */
 	notes: string[];
+}
+
+const HORIZON_LABEL: Record<Horizon, string> = { swing: "스윙 (몇 주)", short: "단기 1주" };
+
+/**
+ * 두 모드를 다 돌렸을 때 먼저 보여줄 쪽 — 매수가 한쪽에만 나왔으면 그쪽, 아니면 스윙.
+ * 보유 중 매도 신호는 어느 쪽이든 텍스트에 둘 다 나가므로 순서만 정한다.
+ */
+function primaryHorizon(swing: TimingResult, short: TimingResult): Horizon {
+	return short.verdict === "매수" && swing.verdict !== "매수" ? "short" : "swing";
+}
+
+function timingCardResult(result: TimingResult): TimingCardResult {
+	const { snapshot, ...rest } = result;
+	return {
+		...rest,
+		snapshot: {
+			lastDate: snapshot.lastDate,
+			bars: snapshot.bars,
+			rsi: snapshot.rsi,
+			trend: snapshot.trend,
+			ma20: snapshot.ma20,
+			support: snapshot.support,
+			resistance: snapshot.resistance,
+		},
+	};
+}
+
+/**
+ * 판정 하나를 텍스트로. 두 모드를 이어 쓸 때는 두 번째 블록에서 추세·밸류층을 뺀다
+ * (봉·재무가 같아 두 모드에서 똑같다 — 토큰만 든다).
+ */
+function timingLines(result: TimingResult, m: (v: number | null) => string, opts: { skipShared: boolean }): string[] {
+	return [
+		`[${HORIZON_LABEL[result.horizon]}] 결론: ${result.verdict} — ${result.summary}`,
+		opts.skipShared ? "(추세·밸류층은 위와 같음)" : "",
+		result.entry.type === "breakout"
+			? `진입 기준 ${m(result.entry.price)} 돌파 시 (현재가보다 높다 — 지금 이 가격으로 지정가 매수를 넣으면 현재가에 바로 체결되므로, 돌파를 확인한 뒤 주문을 준비한다). 손익비·수량은 이 진입가 기준`
+			: "",
+		...result.layers
+			.filter((l) => !opts.skipShared || (l.name !== "추세" && l.name !== "밸류"))
+			.map((l) => `[${l.name}] ${l.state}: ${l.reasons.join(" / ")}`),
+		`손절 ${m(result.stopLoss)} · 목표1 ${m(result.target1)} · 목표2 ${m(result.target2)}` +
+			(result.riskReward !== null ? ` · 손익비 1:${result.riskReward}` : ""),
+		result.sizing
+			? `권장 수량 ${result.sizing.quantity}주 — 손절 시 손실이 총자산의 ${result.sizing.riskPct}%(${m(result.sizing.riskBudgetKrw)}) 이내`
+			: "",
+		"시나리오 (조건부 대응 — 예측 아님):",
+		...result.scenarios.map(
+			(sc) => `  ${sc.id} ${sc.title}: ${sc.trigger} → ${sc.action}${sc.weightPct > 0 ? ` (${sc.weightPct}%)` : ""}`,
+		),
+	].filter(Boolean);
 }
 
 interface ResearchFinancials {
@@ -304,6 +361,51 @@ async function loadFinancials(
 	]);
 	const periods = mergeFinancials(ratiosRes, incomeRes, limit);
 	return { periods, consensus, yoy: yoyChange(periods) };
+}
+
+/**
+ * market_timing 출력 — 텍스트(모델용)와 카드(details). 순수 함수라 조회 없이 테스트한다.
+ * results 가 둘이면 먼저 보여줄 쪽을 고르고 나머지는 카드의 alt 로 보낸다.
+ */
+export function renderTiming(opts: {
+	symbol: string;
+	name: string;
+	currency: "KRW" | "USD";
+	results: TimingResult[];
+	notes: string[];
+}): { text: string; details: TimingDetails } {
+	const { symbol, name, currency, notes } = opts;
+	const swing = opts.results.find((r) => r.horizon === "swing");
+	const short = opts.results.find((r) => r.horizon === "short");
+	const first = swing && short ? primaryHorizon(swing, short) : (opts.results[0] as TimingResult).horizon;
+	const ordered = [...opts.results].sort((a, b) => (a.horizon === first ? -1 : b.horizon === first ? 1 : 0));
+	const result = ordered[0] as TimingResult;
+	const alt = ordered[1];
+
+	const details: TimingDetails = {
+		kind: "timing-card",
+		symbol,
+		name,
+		currency,
+		result: timingCardResult(result),
+		...(alt ? { alt: timingCardResult(alt) } : {}),
+		notes,
+	};
+
+	const m = (v: number | null): string => (v === null ? "—" : money(v, currency));
+	const { snapshot } = result;
+	const lines = [
+		`${name} (${symbol}) 타점 판정 ${alt ? "[스윙·단기 둘 다]" : `[${HORIZON_LABEL[result.horizon]}]`} — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
+		...ordered.flatMap((r, i) => [...(i > 0 ? [""] : []), ...timingLines(r, m, { skipShared: i > 0 })]),
+		"",
+		result.holding
+			? `보유 ${result.holding.quantity}주 · 평단 ${m(result.holding.avgPrice)} (${result.holding.pnlPct >= 0 ? "+" : ""}${result.holding.pnlPct}%) · 손익분기 ${m(result.breakeven)}`
+			: `손익분기(진입 시) ${m(result.breakeven)}`,
+		`  ※ 왕복 비용 ${result.roundTripCostPct}% 가정 (실제 수수료·세금과 다를 수 있음)`,
+		...notes.map((n) => `⚠️ ${n}`),
+		"※ 규칙 기반 판정이며 매매 권유가 아닙니다. 실적·공시·거시 이벤트는 반영되지 않았습니다.",
+	];
+	return { text: lines.join("\n"), details };
 }
 
 export function createBrokerTools(deps: BrokerToolDeps) {
@@ -753,8 +855,9 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			"조건부 시나리오 3개(트리거 가격 포함), 손절가·목표가·손익비, 손익분기, 매수 시 권장 수량(총자산 1% 리스크). " +
 			"보유 종목이면 평단을 반영해 청산 시나리오를 준다. " +
 			"'지금 사도 돼?', '타점', '손절 어디?', '팔까?', '진입 시점' 같은 **매매 판단** 요청에 쓴다. " +
-			"사용자가 **단기(1주·며칠·단타)** 를 말하면 horizon='short' — 돌파·추세 지속에서 진입, 손절 ATR×1.5, " +
-			"목표 ATR×2, 5거래일 시간 손절. 그 외에는 기본(swing, 눌림목 매수). " +
+			"기간을 정하지 않으면(horizon 생략) **스윙과 단기 1주를 둘 다** 판정해 함께 돌려준다 (추가 조회 없음). " +
+			"사용자가 **단기(1주·며칠·단타)** 만 말하면 horizon='short' — 돌파·추세 지속에서 진입, 손절 ATR×1.5, " +
+			"목표 ATR×2, 5거래일 시간 손절. **몇 주·중기**만 말하면 horizon='swing' — 20일선 위 상승 추세에서 진입, 손절 ATR×2. " +
 			"단순히 지표·추세만 물으면 market_technical 을 쓴다. " +
 			"⚠️ 판정·가격은 이 툴이 계산한다 — 직접 계산하거나 바꾸지 말고 그대로 인용한다. " +
 			"실적·공시·거시 이벤트 리스크는 이 툴이 보지 않으므로 필요하면 market_news 로 확인해 덧붙인다. " +
@@ -763,7 +866,8 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			symbol: Type.String({ description: "6자리 국내 종목코드 또는 해외 티커" }),
 			horizon: Type.Optional(
 				Type.Union([Type.Literal("swing"), Type.Literal("short")], {
-					description: "swing=몇 주 눌림목(기본), short=1주 안팎 단기 모멘텀 (사용자가 단기를 말했을 때만)",
+					description:
+						"생략하면 둘 다 판정한다 (기본). swing=몇 주 추세 추종, short=1주 안팎 단기 모멘텀 — 사용자가 기간을 말했을 때만 지정",
 				}),
 			),
 		}),
@@ -792,7 +896,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 
 			const holding = portfolio?.holdings.find((h) => h.symbol === symbol) ?? null;
 			const latest = fin?.periods[0];
-			const result = evaluateTiming({
+			const input: TimingInput = {
 				bars: chart.bars,
 				market,
 				holding: holding
@@ -807,60 +911,18 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 					: null,
 				totalAssetsKrw: portfolio ? portfolio.stockValueKrw + portfolio.cashKrw : null,
 				usdKrw: portfolio?.usdKrw ?? null,
-				horizon: params.horizon ?? "swing",
-			});
-
-			if (!result) {
-				throw new Error(`${chart.name}(${symbol}) 시세 데이터가 없어 판정할 수 없습니다.`);
-			}
-
-			const { snapshot, ...rest } = result;
-			const details: TimingDetails = {
-				kind: "timing-card",
-				symbol,
-				name: chart.name,
-				currency,
-				result: {
-					...rest,
-					snapshot: {
-						lastDate: snapshot.lastDate,
-						bars: snapshot.bars,
-						rsi: snapshot.rsi,
-						trend: snapshot.trend,
-						ma20: snapshot.ma20,
-						support: snapshot.support,
-						resistance: snapshot.resistance,
-					},
-				},
-				notes,
 			};
 
-			const m = (v: number | null): string => (v === null ? "—" : money(v, currency));
-			const lines = [
-				`${chart.name} (${symbol}) 타점 판정 [${result.horizon === "short" ? "단기 1주" : "스윙"}] — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
-				`결론: ${result.verdict} — ${result.summary}`,
-				result.entry.type === "breakout"
-					? `진입 기준 ${m(result.entry.price)} 돌파 시 (현재가보다 높다 — 지금 이 가격으로 지정가 매수를 넣으면 현재가에 바로 체결되므로, 돌파를 확인한 뒤 주문을 준비한다). 손익비·수량은 이 진입가 기준`
-					: "",
-				...result.layers.map((l) => `[${l.name}] ${l.state}: ${l.reasons.join(" / ")}`),
-				`손절 ${m(result.stopLoss)} · 목표1 ${m(result.target1)} · 목표2 ${m(result.target2)}` +
-					(result.riskReward !== null ? ` · 손익비 1:${result.riskReward}` : ""),
-				result.holding
-					? `보유 ${result.holding.quantity}주 · 평단 ${m(result.holding.avgPrice)} (${result.holding.pnlPct >= 0 ? "+" : ""}${result.holding.pnlPct}%) · 손익분기 ${m(result.breakeven)}`
-					: `손익분기(진입 시) ${m(result.breakeven)}`,
-				`  ※ 왕복 비용 ${result.roundTripCostPct}% 가정 (실제 수수료·세금과 다를 수 있음)`,
-				result.sizing
-					? `권장 수량 ${result.sizing.quantity}주 — 손절 시 손실이 총자산의 ${result.sizing.riskPct}%(${m(result.sizing.riskBudgetKrw)}) 이내`
-					: "",
-				"시나리오 (조건부 대응 — 예측 아님):",
-				...result.scenarios.map(
-					(sc) => `  ${sc.id} ${sc.title}: ${sc.trigger} → ${sc.action}${sc.weightPct > 0 ? ` (${sc.weightPct}%)` : ""}`,
-				),
-				...notes.map((n) => `⚠️ ${n}`),
-				"※ 규칙 기반 판정이며 매매 권유가 아닙니다. 실적·공시·거시 이벤트는 반영되지 않았습니다.",
-			].filter(Boolean);
-
-			return { content: [{ type: "text" as const, text: lines.join("\n") }], details };
+			// 기간을 정했으면 그 모드만, 아니면 둘 다 (같은 봉·재무로 계산만 두 번 — 조회는 늘지 않는다)
+			const horizons: Horizon[] = params.horizon ? [params.horizon] : ["swing", "short"];
+			const results = horizons
+				.map((h) => evaluateTiming({ ...input, horizon: h }))
+				.filter((r): r is TimingResult => r !== null);
+			if (results.length === 0) {
+				throw new Error(`${chart.name}(${symbol}) 시세 데이터가 없어 판정할 수 없습니다.`);
+			}
+			const { text, details } = renderTiming({ symbol, name: chart.name, currency, results, notes });
+			return { content: [{ type: "text" as const, text }], details };
 		},
 	});
 

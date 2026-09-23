@@ -13,7 +13,7 @@ import { roundToTick, tickSize, type Market } from "./orders.ts";
 export type Verdict = "매수" | "매도" | "관망";
 /**
  * 판정 기준 기간.
- *   swing  몇 주 단위 눌림목 매수 (기본) — 과열은 피하고 골든크로스·과매도 회복에서 산다
+ *   swing  몇 주 단위 — 상승 추세(20일선 위) 안에서 산다. 과열(RSI 75)은 피하고 손절 ATR×2
  *   short  1주 안팎 단기 모멘텀 — 돌파·추세 지속에서 산다. 손절은 짧고, 5거래일 시간 손절을 둔다
  */
 export type Horizon = "swing" | "short";
@@ -62,7 +62,7 @@ export interface TimingInput {
 	totalAssetsKrw?: number | null;
 	/** 해외 종목의 원화 환산용 */
 	usdKrw?: number | null;
-	/** 기본 swing. 사용자가 단기(1주·며칠)를 말했을 때만 short */
+	/** 기본 swing (툴은 기간을 말하지 않으면 둘 다 돌린다) */
 	horizon?: Horizon;
 }
 
@@ -117,21 +117,30 @@ interface Rules {
 	/** 진입 신호로 치는 상승 신호 */
 	buyTrigger: RegExp;
 	/**
-	 * 단기: 저항이 진입가에서 ATR 이내면 "먹을 폭" 이 없다 → 돌파 진입으로 바꾸고 목표는 ATR×targetAtr.
-	 * 스윙: null (목표 = 20봉 저항)
+	 * "추세 지속" — 신호가 새로 나지 않아도 추세 안에 있으면 진입 근거로 본다.
+	 *   aligned  true 면 정배열(5>20>60) 필수, false 면 추세층 우호(혼조라도 5>20·20일선 위)면 된다
+	 *   above    현재가가 이 이동평균 위여야 한다
 	 */
-	targetAtr: number | null;
+	trendFollow: { aligned: boolean; above: "ma5" | "ma20"; rsiMin: number };
+	/** 저항이 진입가에서 ATR 이내면 "먹을 폭" 이 없다 → 돌파 진입으로 바꾸고 목표는 진입가 + ATR×targetAtr */
+	targetAtr: number;
 }
 
+/**
+ * 스윙 규칙은 2026-09 실측 백테스트로 정했다 (PLAN §30, `scripts/timing-backtest.ts`).
+ * 예전 스윙(당일 골든크로스·과매도 회복만 진입, RSI 70 차단, 목표 = 20봉 저항)은 매수가 0.8% 에 그쳤고,
+ * 그 매수도 "아무 날이나 산 것" 보다 결과가 나빴다. 교차 이벤트는 드물고 시끄럽다.
+ */
 const RULES: Record<Horizon, Rules> = {
 	swing: {
 		stopAtr: 2,
-		rsiBlock: 70,
-		bollingerBlock: 100,
-		rsiCaution: null,
-		bollingerCaution: null,
-		buyTrigger: /골든크로스|과매도 회복/,
-		targetAtr: null,
+		rsiBlock: 75,
+		bollingerBlock: 105,
+		rsiCaution: 70,
+		bollingerCaution: 100,
+		buyTrigger: /골든크로스|과매도 회복|추세 지속/,
+		trendFollow: { aligned: false, above: "ma20", rsiMin: 45 },
+		targetAtr: 3,
 	},
 	short: {
 		stopAtr: 1.5,
@@ -140,6 +149,7 @@ const RULES: Record<Horizon, Rules> = {
 		rsiCaution: 70,
 		bollingerCaution: 100,
 		buyTrigger: /골든크로스|과매도 회복|저항 돌파|RSI 50 회복|추세 지속/,
+		trendFollow: { aligned: true, above: "ma5", rsiMin: 50 },
 		targetAtr: 2,
 	},
 };
@@ -216,7 +226,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	if (snap.bollingerPct !== null && snap.bollingerPct >= R.bollingerBlock) {
 		bear.push(`볼린저 상단 돌파 (밴드 내 ${snap.bollingerPct}%)`);
 	}
-	// 단기: 과열 문턱(RSI 70·볼린저 상단)은 모멘텀의 일부라 막지 않고 경고로만 — 비중을 절반으로 줄인다
+	// 과열 문턱(RSI 70·볼린저 상단)은 모멘텀의 일부라 막지 않고 경고로만 — 비중을 절반으로 줄인다
 	const caution: string[] = [];
 	if (R.rsiCaution !== null && rsiNow !== null && rsiNow >= R.rsiCaution && rsiNow < R.rsiBlock) {
 		caution.push(`RSI ${rsiNow} 과열권`);
@@ -229,17 +239,18 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	) {
 		caution.push(`볼린저 상단 부근 (밴드 내 ${snap.bollingerPct}%)`);
 	}
-	// 단기: 정배열이 이어지는 중이면 신호가 "새로" 나지 않아도 진입 근거로 본다 (추세 추종)
+	// 추세가 이어지는 중이면 신호가 "새로" 나지 않아도 진입 근거로 본다 (추세 추종)
+	const tf = R.trendFollow;
+	const aboveMa = tf.above === "ma5" ? snap.ma5 : snap.ma20;
 	if (
-		horizon === "short" &&
-		snap.trend === "정배열" &&
-		snap.ma5 !== null &&
-		price >= snap.ma5 &&
+		(tf.aligned ? snap.trend === "정배열" : trendState === "우호") &&
+		aboveMa !== null &&
+		price >= aboveMa &&
 		rsiNow !== null &&
-		rsiNow >= 50 &&
+		rsiNow >= tf.rsiMin &&
 		rsiNow < R.rsiBlock
 	) {
-		bull.push(`추세 지속 (정배열·5일선 위·RSI ${rsiNow})`);
+		bull.push(`추세 지속 (${tf.aligned ? "정배열·" : ""}${tf.above === "ma5" ? "5" : "20"}일선 위·RSI ${rsiNow})`);
 	}
 
 	const momentumState: LayerState =
@@ -279,10 +290,9 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 
 	// ── 리스크층: 진입·손절·목표 ────────────────────────────
 	const atr = snap.atr;
-	// 단기: 저항이 ATR 이내 위에 있으면 지금 사도 먹을 폭이 없다 → 저항 돌파를 진입 조건으로 (돌파 뒤 ATR×2 목표)
+	// 저항이 ATR 이내 위에 있으면 지금 사도 먹을 폭이 없다 → 저항 돌파를 진입 조건으로 (돌파 뒤 ATR×targetAtr 목표)
 	let entry: TimingResult["entry"] = { price, type: "now" };
 	if (
-		R.targetAtr !== null &&
 		atr !== null &&
 		snap.resistance !== null &&
 		snap.resistance > price &&
@@ -305,19 +315,19 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	const aboveOr = (v: number | null): number | null => (v !== null && v > base ? v : null);
 	let target2: number | null = null;
 	let target1: number | null = null;
-	if (R.targetAtr !== null && atr !== null) {
-		// 단기: 저항까지 ATR 이상 여유가 있으면 저항, 아니면(돌파 진입·이미 돌파) 진입가 + ATR×2
+	if (atr !== null) {
+		// 저항까지 ATR 이상 여유가 있으면 저항, 아니면(돌파 진입·이미 돌파) 진입가 + ATR×targetAtr
 		target1 =
 			snap.resistance !== null && snap.resistance - base >= atr
 				? aboveOr(roundToTick(market, snap.resistance))
 				: aboveOr(roundToTick(market, base + atr * R.targetAtr));
-	} else {
-		target1 = snap.resistance !== null && snap.resistance > base ? aboveOr(roundToTick(market, snap.resistance)) : null;
-		if (target1 === null && atr !== null) target1 = aboveOr(roundToTick(market, base + atr * R.stopAtr));
+	} else if (snap.resistance !== null && snap.resistance > base) {
+		target1 = aboveOr(roundToTick(market, snap.resistance));
 	}
 	if (atr !== null && target1 !== null) {
-		const cand = Math.max(snap.bollingerUpper ?? 0, base + atr * 3);
-		target2 = cand > target1 ? roundToTick(market, cand) : roundToTick(market, target1 + atr);
+		// 목표1 이 ATR×targetAtr 이면 목표2 는 그보다 ATR 하나 더 — 둘이 같은 가격이 되지 않게
+		const cand = roundToTick(market, Math.max(snap.bollingerUpper ?? 0, base + atr * (R.targetAtr + 1)));
+		target2 = cand > target1 ? cand : roundToTick(market, target1 + atr);
 	}
 
 	const riskReward =
@@ -361,12 +371,10 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	} else if (buySetup && !poorRiskReward) {
 		verdict = "매수";
 		summary =
-			horizon === "short"
-				? `단기 매수 — ${triggers}` +
-					(entry.type === "breakout" ? ` · ${f(entry.price)} 돌파 확인 후 진입 (돌파 전 선매수 금지)` : "") +
-					(caution.length > 0 ? ` · 과열 주의로 비중 절반` : "") +
-					` · ${SHORT_TIME_STOP_DAYS}거래일 내 목표 미도달 시 청산`
-				: `추세 우호 + ${triggers}`;
+			(horizon === "short" ? `단기 매수 — ${triggers}` : `추세 우호 + ${triggers}`) +
+			(entry.type === "breakout" ? ` · ${f(entry.price)} 돌파 확인 후 진입 (돌파 전 선매수 금지)` : "") +
+			(caution.length > 0 ? ` · 과열 주의로 비중 절반` : "") +
+			(horizon === "short" ? ` · ${SHORT_TIME_STOP_DAYS}거래일 내 목표 미도달 시 청산` : "");
 	} else {
 		verdict = "관망";
 		if (buySetup && poorRiskReward) {
@@ -387,7 +395,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 			summary =
 				horizon === "short"
 					? "추세는 우호적이나 단기 진입 신호(돌파·추세 지속·골든크로스)가 없다"
-					: "추세는 우호적이나 진입 신호(골든크로스·과매도 회복)가 없다";
+					: "추세는 우호적이나 진입 신호가 없다 (20일선 아래이거나 RSI 45 미만)";
 		} else if (valueState === "비우호" && hasBuyTrigger) {
 			summary = "기술적 신호는 있으나 펀더멘털이 비우호적";
 		} else if (trendState === "비우호") {
@@ -447,6 +455,45 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 				title: "손절·시간 손절",
 				trigger:
 					(stopLoss !== null ? `${f(stopLoss)} 이탈` : "지지 이탈") + ` 또는 ${SHORT_TIME_STOP_DAYS}거래일 내 목표 미도달`,
+				triggerPrice: stopLoss,
+				action: "전량 청산",
+				weightPct: 100,
+			},
+		];
+	} else if (verdict === "매수") {
+		// 스윙 매수: 진입(지금 또는 돌파) → 20일선 되돌림 추가 → 손절. 과열 주의면 비중 절반
+		const half = caution.length > 0 ? 0.5 : 1;
+		const dip = pullback !== null && pullback < base ? pullback : null;
+		scenarios = [
+			entry.type === "breakout"
+				? {
+						id: "S1",
+						title: "돌파 진입",
+						trigger: `${f(entry.price)} 돌파 + 거래량 동반 (돌파 전에 미리 사지 않는다)`,
+						triggerPrice: entry.price,
+						action: "1차 분할 진입",
+						weightPct: 50 * half,
+					}
+				: {
+						id: "S1",
+						title: "현재가 분할 진입",
+						trigger: `현재가 ${f(price)} 부근`,
+						triggerPrice: roundToTick(market, price),
+						action: "1차 분할 진입",
+						weightPct: 50 * half,
+					},
+			{
+				id: "S2",
+				title: "되돌림 추가",
+				trigger: dip !== null ? `${f(dip)} 까지 되돌린 뒤 지지 확인` : "20일선 되돌림 후 지지 확인",
+				triggerPrice: dip,
+				action: "2차 분할 진입",
+				weightPct: 50 * half,
+			},
+			{
+				id: "S3",
+				title: "손절",
+				trigger: stopLoss !== null ? `${f(stopLoss)} 이탈` : "지지 이탈 또는 데드크로스",
 				triggerPrice: stopLoss,
 				action: "전량 청산",
 				weightPct: 100,

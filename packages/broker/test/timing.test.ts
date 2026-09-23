@@ -98,6 +98,12 @@ describe("불변식 (합성 시계열 전수)", () => {
 		}
 	});
 
+	it("2차 목표가는 1차보다 높다 (두 모드 모두)", () => {
+		for (const { label, r } of [...results, ...all("KR", "short")]) {
+			if (r.target1 !== null && r.target2 !== null) assert.ok(r.target2 > r.target1, `${label}/${r.horizon}: 목표2 ${r.target2} ≤ 목표1 ${r.target1}`);
+		}
+	});
+
 	it("1차 목표가는 현재가보다 높다", () => {
 		for (const { label, r } of results) {
 			if (r.target1 !== null) assert.ok(r.target1 > r.price, `${label}: 목표 ${r.target1} ≤ 현재가 ${r.price}`);
@@ -117,16 +123,16 @@ describe("불변식 (합성 시계열 전수)", () => {
 		for (const { r } of results) assert.deepEqual(r.scenarios.map((s) => s.id), ["S1", "S2", "S3"]);
 	});
 
-	it("포지션 크기는 매수 판정에서만, 손절 시 손실이 총자산 1% 이내", () => {
+	it("포지션 크기는 매수 판정에서만, 진입가에서 손절까지 잃어도 한도(1%, 과열 주의 0.5%) 이내", () => {
 		for (const { label, r } of results) {
 			if (r.verdict !== "매수") {
 				assert.equal(r.sizing, null, `${label}: 매수가 아닌데 수량 제안`);
 				continue;
 			}
 			if (!r.sizing || r.stopLoss === null) continue;
-			const loss = r.sizing.quantity * (r.price - r.stopLoss);
+			const loss = r.sizing.quantity * (r.entry.price - r.stopLoss);
 			assert.ok(loss <= r.sizing.riskBudgetKrw, `${label}: 손실 ${loss} > 한도 ${r.sizing.riskBudgetKrw}`);
-			assert.equal(r.sizing.riskBudgetKrw, 1_000_000);
+			assert.equal(r.sizing.riskBudgetKrw, r.sizing.riskPct === 0.5 ? 500_000 : 1_000_000, label);
 		}
 	});
 });
@@ -217,20 +223,21 @@ describe("단기 모드 (horizon=short)", () => {
 
 	it("기본값은 스윙이다 — horizon 을 안 주면 결과가 swing 과 같다", () => {
 		for (const { r } of swing) assert.equal(r.horizon, "swing");
-		assert.ok(swing.every((x) => x.r.entry.type === "now" && x.r.entry.price === x.r.price), "스윙은 늘 현재가 진입");
 	});
 
-	it("스윙보다 매수가 많다 — 강세 종목을 전부 관망으로 돌리지 않는다", () => {
-		const n = (xs: typeof swing) => xs.filter((x) => x.r.verdict === "매수").length;
-		assert.ok(n(short) > n(swing) * 3, `단기 ${n(short)} / 스윙 ${n(swing)}`);
+	it("두 모드 모두 강세 국면을 전부 관망으로 돌리지 않는다", () => {
+		const n = (xs: typeof swing) => xs.filter((x) => x.r.verdict === "매수" && !x.held).length;
+		const fresh = swing.filter((x) => !x.held).length;
+		assert.ok(n(swing) >= fresh * 0.03, `스윙 매수 ${n(swing)} / ${fresh}`);
+		assert.ok(n(short) >= fresh * 0.03, `단기 매수 ${n(short)} / ${fresh}`);
 	});
 
-	it("스윙에서 과열로 막힌 상승 추세(RSI 70~80)가 단기에서는 비중 절반 매수로 열린다", () => {
+	it("스윙에서 과열로 막힌 상승 추세(RSI 75~80)가 단기에서는 비중 절반 매수로 열린다", () => {
 		// 하락→반등 시계열에는 "정배열 + RSI 70~80" 국면이 거의 없어 꾸준한 상승 + 흔들림으로 따로 만든다
 		const opened: Array<{ label: string; r: TimingResult }> = [];
-		for (const slope of [20, 30, 40, 60]) {
-			for (const amp of [40, 80, 120]) {
-				for (const period of [5, 7, 9]) {
+		for (const slope of [20, 30, 40, 50, 60, 80]) {
+			for (const amp of [40, 60, 80, 100, 120, 160]) {
+				for (const period of [5, 6, 7, 8, 9, 11]) {
 					const closes = Array.from({ length: 90 }, (_, i) => Math.round(10_000 + i * slope + (((i * 37) % period) - (period >> 1)) * amp));
 					const input = { bars: barsOf(closes), market: "KR" as const, totalAssetsKrw: 100_000_000 };
 					const sw = evaluateTiming(input);
@@ -244,6 +251,7 @@ describe("단기 모드 (horizon=short)", () => {
 		assert.ok(opened.length >= 3, `과열 완화가 거의 작동하지 않는다 (${opened.length}건)`);
 		for (const { label, r } of opened) {
 			assert.ok((r.snapshot.rsi ?? 0) >= 70 && (r.snapshot.rsi ?? 100) < 80, `${label}: RSI ${r.snapshot.rsi}`);
+			assert.ok((r.snapshot.rsi ?? 0) >= 75 || (r.snapshot.bollingerPct ?? 0) >= 105, `${label}: 스윙에서 막힐 과열이 아니다`);
 			assert.ok(layer(r, "모멘텀")?.reasons.some((x) => x.startsWith("⚠")), `${label}: 과열 경고가 없다`);
 			assert.equal(r.sizing?.riskPct, 0.5, `${label}: 과열 주의인데 비중이 절반이 아니다`);
 		}
@@ -332,6 +340,58 @@ describe("단기 모드 (horizon=short)", () => {
 			for (const v of [entry, r.stopLoss, ...r.scenarios.map((x) => x.triggerPrice)]) {
 				if (v !== null) assert.ok(isOnTick("US", v), `${label}: ${v}`);
 			}
+		}
+	});
+});
+
+/**
+ * 스윙 — 2026-09 백테스트로 바꾼 규칙 (PLAN §30). 교차 이벤트만 기다리던 규칙은 매수가 0.8% 에 그쳤다.
+ * 느슨해졌어도 지킬 선: 20일선 아래·RSI 75 이상·하락 신호에서는 사지 않고, 손익비 1 미만은 관망.
+ */
+describe("스윙 모드", () => {
+	const swing = all("KR");
+	const buys = swing.filter((x) => x.r.verdict === "매수");
+
+	it("추세 지속(20일선 위·RSI 45 이상)만으로도 매수가 나온다", () => {
+		assert.ok(buys.some((x) => /추세 지속/.test(x.r.summary)), "추세 지속 매수가 한 번도 없다");
+	});
+
+	it("매수면 현재가가 20일선 위이거나 교차·과매도 회복 신호가 있다, RSI 75 미만", () => {
+		for (const { label, r } of buys) {
+			const ma20 = r.snapshot.ma20;
+			assert.ok(/골든크로스|과매도 회복/.test(r.summary) || (ma20 !== null && r.price >= ma20), `${label}: 20일선 아래 추세 매수`);
+			assert.ok((r.snapshot.rsi ?? 0) < 75, `${label}: RSI ${r.snapshot.rsi}`);
+		}
+	});
+
+	it("RSI 70~75 과열권은 막지 않고 비중을 절반으로", () => {
+		for (const { label, r } of buys) {
+			const rsiNow = r.snapshot.rsi ?? 0;
+			if (rsiNow >= 70) assert.equal(r.sizing?.riskPct, 0.5, `${label}: RSI ${rsiNow} 인데 비중 절반이 아니다`);
+		}
+	});
+
+	it("돌파 진입이면 진입가 > 현재가, S1 트리거가 진입가, 요약에 '돌파 확인 후'", () => {
+		for (const { label, r } of buys.filter((x) => x.r.entry.type === "breakout")) {
+			assert.ok(r.entry.price > r.price, label);
+			assert.equal(r.scenarios[0]?.triggerPrice, r.entry.price, label);
+			assert.match(r.summary, /돌파 확인 후 진입/, label);
+		}
+	});
+
+	it("매수 시나리오: S1 진입 · S2 되돌림 추가(진입가 아래) · S3 손절(= 손절가)", () => {
+		for (const { label, r } of buys) {
+			assert.equal(r.scenarios[2]?.triggerPrice, r.stopLoss, `${label}: S3 가 손절가가 아니다`);
+			const dip = r.scenarios[1]?.triggerPrice;
+			if (dip !== null && dip !== undefined) assert.ok(dip < r.entry.price, `${label}: 되돌림 ${dip} ≥ 진입 ${r.entry.price}`);
+		}
+	});
+
+	it("손절 < 진입가 < 목표1 (진입가 기준 손익비 1 이상)", () => {
+		for (const { label, r } of buys) {
+			assert.ok(r.stopLoss !== null && r.target1 !== null, label);
+			assert.ok((r.stopLoss as number) < r.entry.price && r.entry.price < (r.target1 as number), label);
+			assert.ok((r.riskReward ?? 0) >= 1, `${label}: 손익비 ${r.riskReward}`);
 		}
 	});
 });

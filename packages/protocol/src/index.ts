@@ -127,35 +127,40 @@ export interface TimingCard {
 	symbol: string;
 	name: string;
 	currency: "KRW" | "USD";
-	result: {
-		/** 없으면 swing (단기 모드 이전에 저장된 대화) */
-		horizon?: "swing" | "short";
-		verdict: "매수" | "매도" | "관망";
-		summary: string;
-		layers: Array<{ name: string; state: "우호" | "비우호" | "중립"; reasons: string[] }>;
-		scenarios: Array<{
-			id: string;
-			title: string;
-			trigger: string;
-			triggerPrice: number | null;
-			action: string;
-			weightPct: number;
-		}>;
-		price: number;
-		/** 진입 기준가 — breakout 이면 현재가보다 높다 (돌파 확인 후 진입). 없으면 현재가 */
-		entry?: { price: number; type: "now" | "breakout" };
-		stopLoss: number | null;
-		target1: number | null;
-		target2: number | null;
-		riskReward: number | null;
-		breakeven: number;
-		roundTripCostPct: number;
-		sizing: { riskPct: number; riskBudgetKrw: number; quantity: number } | null;
-		holding: { quantity: number; avgPrice: number; pnlPct: number } | null;
-		snapshot: { lastDate: string; bars: number; rsi: number | null; trend: string };
-	};
+	/** 먼저 보여줄 판정 */
+	result: TimingCardResult;
+	/** 기간을 정하지 않아 스윙·단기를 둘 다 돌렸을 때 나머지 하나 — 카드에서 전환한다 (없으면 한 모드만) */
+	alt?: TimingCardResult;
 	notes: string[];
 }
+
+export type TimingCardResult = {
+	/** 없으면 swing (단기 모드 이전에 저장된 대화) */
+	horizon?: "swing" | "short";
+	verdict: "매수" | "매도" | "관망";
+	summary: string;
+	layers: Array<{ name: string; state: "우호" | "비우호" | "중립"; reasons: string[] }>;
+	scenarios: Array<{
+		id: string;
+		title: string;
+		trigger: string;
+		triggerPrice: number | null;
+		action: string;
+		weightPct: number;
+	}>;
+	price: number;
+	/** 진입 기준가 — breakout 이면 현재가보다 높다 (돌파 확인 후 진입). 없으면 현재가 */
+	entry?: { price: number; type: "now" | "breakout" };
+	stopLoss: number | null;
+	target1: number | null;
+	target2: number | null;
+	riskReward: number | null;
+	breakeven: number;
+	roundTripCostPct: number;
+	sizing: { riskPct: number; riskBudgetKrw: number; quantity: number } | null;
+	holding: { quantity: number; avgPrice: number; pnlPct: number } | null;
+	snapshot: { lastDate: string; bars: number; rsi: number | null; trend: string };
+};
 
 /** 리서치 섹션 — 성공 / 조회 실패 / 해당 없음을 구분한다. */
 export type ResearchSection<T> =

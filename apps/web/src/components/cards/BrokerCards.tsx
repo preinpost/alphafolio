@@ -5,6 +5,7 @@
  * 읽는 용도가 아니라 **추세를 한눈에 보는** 용도라서 이 정도면 충분하고,
  * 번들도 늘지 않는다 (필요해지면 그때 캔들 라이브러리를 붙인다).
  */
+import { useState } from "react";
 import type {
 	FinancialsCard,
 	HoldingsCard,
@@ -17,6 +18,7 @@ import type {
 	ResearchSection,
 	TechnicalCard,
 	TimingCard,
+	TimingCardResult,
 } from "@alphafolio/protocol";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
@@ -230,8 +232,15 @@ const VERDICT_CLASS: Record<string, string> = {
 
 const LAYER_DOT: Record<string, string> = { 우호: "bg-up", 비우호: "bg-down", 중립: "bg-faint" };
 
+const VERDICT_TEXT: Record<string, string> = { 매수: "text-up", 매도: "text-down", 관망: "text-muted" };
+
+const HORIZON_NAME = { swing: "스윙", short: "단기 1주" } as const;
+
 export function TimingCardView({ card }: { card: TimingCard }) {
-	const r = card.result;
+	// 스윙·단기를 둘 다 돌린 카드면 전환 버튼을 둔다 (먼저 보여줄 쪽은 서버가 정했다)
+	const options: TimingCardResult[] = card.alt ? [card.result, card.alt] : [card.result];
+	const [picked, setPicked] = useState(0);
+	const r = options[picked] ?? card.result;
 	const cur = card.currency;
 	const m = (v: number | null): string => (v === null ? "—" : money(v, cur));
 
@@ -245,7 +254,7 @@ export function TimingCardView({ card }: { card: TimingCard }) {
 					</div>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
-					{r.horizon === "short" && (
+					{options.length === 1 && r.horizon === "short" && (
 						<span className="rounded-md bg-selected px-1.5 py-0.5 text-[11px] text-muted">단기 1주</span>
 					)}
 					<span className={`rounded-lg border px-2.5 py-1 text-sm font-semibold ${VERDICT_CLASS[r.verdict]}`}>
@@ -253,6 +262,22 @@ export function TimingCardView({ card }: { card: TimingCard }) {
 					</span>
 				</div>
 			</div>
+			{options.length > 1 && (
+				<div className="mt-3 inline-flex rounded-lg border border-line p-0.5 text-xs" role="tablist">
+					{options.map((o, i) => (
+						<button
+							key={o.horizon ?? "swing"}
+							type="button"
+							role="tab"
+							aria-selected={i === picked}
+							onClick={() => setPicked(i)}
+							className={`rounded-md px-2.5 py-1 ${i === picked ? "bg-selected text-ink" : "text-muted"}`}
+						>
+							{HORIZON_NAME[o.horizon ?? "swing"]} · <span className={VERDICT_TEXT[o.verdict]}>{o.verdict}</span>
+						</button>
+					))}
+				</div>
+			)}
 			<p className="mt-2 text-xs text-ink">{r.summary}</p>
 			{r.entry?.type === "breakout" && (
 				<p className="mt-1 text-xs text-muted">
