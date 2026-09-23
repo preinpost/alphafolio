@@ -105,3 +105,7 @@ node spike/00-d1-doctor.ts   # D1 자격증명 진단 (401/403 원인 좁히기)
 - **브로커 키 이름은 변경 금지** (`KIS_APP_KEY`, `TOSS_CLIENT_ID` 등) — 기존 pi-* 패키지가
   이 이름을 하드코딩으로 읽는다
 - 모바일(Capacitor) 번들에는 어떤 시크릿도 들어가지 않는다. 앱이 아는 것은 API 기준 URL뿐이다
+
+## 라이선스
+
+[MIT](LICENSE)
