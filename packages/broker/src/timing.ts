@@ -11,6 +11,12 @@ import { analyze, rsi, type Bar, type IndicatorSnapshot } from "./indicators.ts"
 import { roundToTick, tickSize, type Market } from "./orders.ts";
 
 export type Verdict = "매수" | "매도" | "관망";
+/**
+ * 판정 기준 기간.
+ *   swing  몇 주 단위 눌림목 매수 (기본) — 과열은 피하고 골든크로스·과매도 회복에서 산다
+ *   short  1주 안팎 단기 모멘텀 — 돌파·추세 지속에서 산다. 손절은 짧고, 5거래일 시간 손절을 둔다
+ */
+export type Horizon = "swing" | "short";
 export type LayerState = "우호" | "비우호" | "중립";
 
 export interface Layer {
@@ -56,15 +62,24 @@ export interface TimingInput {
 	totalAssetsKrw?: number | null;
 	/** 해외 종목의 원화 환산용 */
 	usdKrw?: number | null;
+	/** 기본 swing. 사용자가 단기(1주·며칠)를 말했을 때만 short */
+	horizon?: Horizon;
 }
 
 export interface TimingResult {
+	horizon: Horizon;
 	verdict: Verdict;
 	/** 결론을 한 줄로 (근거 요약) */
 	summary: string;
 	layers: Layer[];
 	scenarios: Scenario[];
 	price: number;
+	/**
+	 * 진입 기준가 — 손익비·수량은 이 가격 기준이다.
+	 * breakout 이면 현재가보다 **높다**: 돌파를 확인한 뒤에 사야 하며, 지금 이 가격으로 지정가 매수를 넣으면
+	 * 현재가에 바로 체결된다 (지정가가 매도호가보다 높으므로).
+	 */
+	entry: { price: number; type: "now" | "breakout" };
 	stopLoss: number | null;
 	target1: number | null;
 	target2: number | null;
@@ -87,10 +102,50 @@ export interface TimingResult {
  */
 export const ROUND_TRIP_COST_PCT: Record<Market, number> = { KR: 0.2, US: 0.2 };
 
-/** 손절: 지지선이 ATR×2 이내면 지지선 한 틱 아래, 아니면 현재가 − ATR×2 */
-const STOP_ATR_MULT = 2;
-/** 포지션 크기: 손절 시 총자산의 1% 만 잃도록 */
+/** 포지션 크기: 손절 시 총자산의 1% 만 잃도록 (단기 과열 주의 구간은 절반) */
 const RISK_PCT = 1;
+
+interface Rules {
+	/** 손절: 지지선이 진입가 − ATR×stopAtr 이내면 지지선 한 틱 아래, 아니면 진입가 − ATR×stopAtr */
+	stopAtr: number;
+	/** 이 이상이면 하락 신호(진입 차단) */
+	rsiBlock: number;
+	bollingerBlock: number;
+	/** 이 이상이면 경고만 — 진입은 되고 비중을 절반으로 (단기 전용) */
+	rsiCaution: number | null;
+	bollingerCaution: number | null;
+	/** 진입 신호로 치는 상승 신호 */
+	buyTrigger: RegExp;
+	/**
+	 * 단기: 저항이 진입가에서 ATR 이내면 "먹을 폭" 이 없다 → 돌파 진입으로 바꾸고 목표는 ATR×targetAtr.
+	 * 스윙: null (목표 = 20봉 저항)
+	 */
+	targetAtr: number | null;
+}
+
+const RULES: Record<Horizon, Rules> = {
+	swing: {
+		stopAtr: 2,
+		rsiBlock: 70,
+		bollingerBlock: 100,
+		rsiCaution: null,
+		bollingerCaution: null,
+		buyTrigger: /골든크로스|과매도 회복/,
+		targetAtr: null,
+	},
+	short: {
+		stopAtr: 1.5,
+		rsiBlock: 80,
+		bollingerBlock: 110,
+		rsiCaution: 70,
+		bollingerCaution: 100,
+		buyTrigger: /골든크로스|과매도 회복|저항 돌파|RSI 50 회복|추세 지속/,
+		targetAtr: 2,
+	},
+};
+
+/** 단기 시간 손절 — 이 기간 안에 목표에 못 가면 청산한다 (1주 매매가 몇 주짜리 보유로 번지지 않게) */
+export const SHORT_TIME_STOP_DAYS = 5;
 
 function fmt(v: number, market: Market): string {
 	return market === "KR"
@@ -117,6 +172,8 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	if (!snap) return null;
 
 	const { market } = input;
+	const horizon: Horizon = input.horizon ?? "swing";
+	const R = RULES[horizon];
 	const price = snap.price;
 	const f = (v: number): string => fmt(v, market);
 
@@ -155,15 +212,44 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		if (rsiPrev < 30 && rsiNow >= 30) bull.push(`RSI 과매도 회복 (${rsiPrev.toFixed(1)} → ${rsiNow})`);
 		if (rsiPrev < 50 && rsiNow >= 50) bull.push(`RSI 50 회복 (${rsiNow})`);
 	}
-	if (rsiNow !== null && rsiNow >= 70) bear.push(`RSI ${rsiNow} 과매수`);
-	if (snap.bollingerPct !== null && snap.bollingerPct >= 100) bear.push(`볼린저 상단 돌파 (밴드 내 ${snap.bollingerPct}%)`);
+	if (rsiNow !== null && rsiNow >= R.rsiBlock) bear.push(`RSI ${rsiNow} 과매수`);
+	if (snap.bollingerPct !== null && snap.bollingerPct >= R.bollingerBlock) {
+		bear.push(`볼린저 상단 돌파 (밴드 내 ${snap.bollingerPct}%)`);
+	}
+	// 단기: 과열 문턱(RSI 70·볼린저 상단)은 모멘텀의 일부라 막지 않고 경고로만 — 비중을 절반으로 줄인다
+	const caution: string[] = [];
+	if (R.rsiCaution !== null && rsiNow !== null && rsiNow >= R.rsiCaution && rsiNow < R.rsiBlock) {
+		caution.push(`RSI ${rsiNow} 과열권`);
+	}
+	if (
+		R.bollingerCaution !== null &&
+		snap.bollingerPct !== null &&
+		snap.bollingerPct >= R.bollingerCaution &&
+		snap.bollingerPct < R.bollingerBlock
+	) {
+		caution.push(`볼린저 상단 부근 (밴드 내 ${snap.bollingerPct}%)`);
+	}
+	// 단기: 정배열이 이어지는 중이면 신호가 "새로" 나지 않아도 진입 근거로 본다 (추세 추종)
+	if (
+		horizon === "short" &&
+		snap.trend === "정배열" &&
+		snap.ma5 !== null &&
+		price >= snap.ma5 &&
+		rsiNow !== null &&
+		rsiNow >= 50 &&
+		rsiNow < R.rsiBlock
+	) {
+		bull.push(`추세 지속 (정배열·5일선 위·RSI ${rsiNow})`);
+	}
 
 	const momentumState: LayerState =
 		bull.length > 0 && bear.length === 0 ? "우호" : bear.length > 0 && bull.length === 0 ? "비우호" : "중립";
-	const momentumReasons =
-		bull.length + bear.length === 0
+	const momentumReasons = [
+		...(bull.length + bear.length === 0
 			? [`특이 신호 없음 (RSI ${rsiNow ?? "—"})`]
-			: [...bull.map((b) => `▲ ${b}`), ...bear.map((b) => `▼ ${b}`)];
+			: [...bull.map((b) => `▲ ${b}`), ...bear.map((b) => `▼ ${b}`)]),
+		...caution.map((c) => `⚠ ${c} — 비중 절반`),
+	];
 
 	// ── 밸류층 (국내·데이터 있을 때만) ──────────────────────
 	let valueState: LayerState = "중립";
@@ -191,36 +277,58 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		if (valueReasons.length === 0) valueReasons.push("판단할 재무 지표 없음");
 	}
 
-	// ── 리스크층: 손절·목표 ─────────────────────────────────
+	// ── 리스크층: 진입·손절·목표 ────────────────────────────
 	const atr = snap.atr;
+	// 단기: 저항이 ATR 이내 위에 있으면 지금 사도 먹을 폭이 없다 → 저항 돌파를 진입 조건으로 (돌파 뒤 ATR×2 목표)
+	let entry: TimingResult["entry"] = { price, type: "now" };
+	if (
+		R.targetAtr !== null &&
+		atr !== null &&
+		snap.resistance !== null &&
+		snap.resistance > price &&
+		snap.resistance - price < atr
+	) {
+		entry = { price: tickAbove(market, snap.resistance), type: "breakout" };
+	}
+	const base = entry.price;
+
 	let stopLoss: number | null = null;
 	if (atr !== null) {
-		const atrStop = price - atr * STOP_ATR_MULT;
+		const atrStop = base - atr * R.stopAtr;
 		const support = snap.support;
-		const raw = support !== null && support < price && support >= atrStop ? tickBelow(market, support) : atrStop;
+		const raw = support !== null && support < base && support >= atrStop ? tickBelow(market, support) : atrStop;
 		stopLoss = raw > 0 ? roundToTick(market, raw) : null;
 	}
 
 	// 목표가는 호가단위로 **내림**하는데, 저항선이 현재가 바로 위면 내림 결과가 현재가와
 	// 같아진다 (손익비 0, "목표 도달"이 이미 충족된 시나리오). 그럴 땐 ATR 기준으로 넘긴다.
-	const aboveOr = (v: number | null): number | null => (v !== null && v > price ? v : null);
+	const aboveOr = (v: number | null): number | null => (v !== null && v > base ? v : null);
 	let target2: number | null = null;
-	let target1 =
-		snap.resistance !== null && snap.resistance > price ? aboveOr(roundToTick(market, snap.resistance)) : null;
-	if (target1 === null && atr !== null) target1 = aboveOr(roundToTick(market, price + atr * STOP_ATR_MULT));
+	let target1: number | null = null;
+	if (R.targetAtr !== null && atr !== null) {
+		// 단기: 저항까지 ATR 이상 여유가 있으면 저항, 아니면(돌파 진입·이미 돌파) 진입가 + ATR×2
+		target1 =
+			snap.resistance !== null && snap.resistance - base >= atr
+				? aboveOr(roundToTick(market, snap.resistance))
+				: aboveOr(roundToTick(market, base + atr * R.targetAtr));
+	} else {
+		target1 = snap.resistance !== null && snap.resistance > base ? aboveOr(roundToTick(market, snap.resistance)) : null;
+		if (target1 === null && atr !== null) target1 = aboveOr(roundToTick(market, base + atr * R.stopAtr));
+	}
 	if (atr !== null && target1 !== null) {
-		const cand = Math.max(snap.bollingerUpper ?? 0, price + atr * 3);
+		const cand = Math.max(snap.bollingerUpper ?? 0, base + atr * 3);
 		target2 = cand > target1 ? roundToTick(market, cand) : roundToTick(market, target1 + atr);
 	}
 
 	const riskReward =
-		stopLoss !== null && target1 !== null && price > stopLoss
-			? Math.round(((target1 - price) / (price - stopLoss)) * 100) / 100
+		stopLoss !== null && target1 !== null && base > stopLoss
+			? Math.round(((target1 - base) / (base - stopLoss)) * 100) / 100
 			: null;
 
 	const riskReasons: string[] = [];
 	if (atr !== null) riskReasons.push(`ATR ${f(atr)} (가격의 ${snap.atrPct}%)`);
-	if (stopLoss !== null) riskReasons.push(`손절 ${f(stopLoss)} (${(((stopLoss - price) / price) * 100).toFixed(1)}%)`);
+	if (entry.type === "breakout") riskReasons.push(`저항 ${f(snap.resistance as number)} 이 ATR 이내 — ${f(base)} 돌파 시 진입 기준`);
+	if (stopLoss !== null) riskReasons.push(`손절 ${f(stopLoss)} (${(((stopLoss - base) / base) * 100).toFixed(1)}%)`);
 	if (riskReward !== null) riskReasons.push(`손익비 1 : ${riskReward}`);
 	const riskState: LayerState = riskReward === null ? "중립" : riskReward >= 1.5 ? "우호" : riskReward < 1 ? "비우호" : "중립";
 	if (riskReward !== null && riskReward < 1) riskReasons.push("목표까지 여유보다 손절 폭이 크다");
@@ -234,7 +342,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 
 	// ── 결론 (구 스킬 §4 결론 규칙) ────────────────────────
 	const held = input.holding && input.holding.quantity > 0 ? input.holding : null;
-	const hasBuyTrigger = bull.some((b) => /골든크로스|과매도 회복/.test(b));
+	const hasBuyTrigger = bull.some((b) => R.buyTrigger.test(b));
 	const sellTrigger = bear.length > 0;
 
 	// 진입 셋업: 추세 우호 + 진입 트리거 + 하락 신호 없음 + 밸류 비우호 아님
@@ -243,7 +351,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	// (저항이 바로 위라 먹을 폭보다 손절 폭이 크다). 판정은 관망으로 내리되 시나리오는 매수용을
 	// 그대로 줘서 "되돌림에서 사라 / 돌파를 확인하라"는 실제로 쓸모 있는 답을 준다.
 	const poorRiskReward = riskReward !== null && riskReward < 1;
-	const triggers = bull.filter((b) => /골든크로스|과매도 회복/.test(b)).join(", ");
+	const triggers = bull.filter((b) => R.buyTrigger.test(b)).join(", ");
 
 	let verdict: Verdict;
 	let summary: string;
@@ -252,7 +360,13 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		summary = `보유 중 매도 신호: ${bear.join(", ")}`;
 	} else if (buySetup && !poorRiskReward) {
 		verdict = "매수";
-		summary = `추세 우호 + ${triggers}`;
+		summary =
+			horizon === "short"
+				? `단기 매수 — ${triggers}` +
+					(entry.type === "breakout" ? ` · ${f(entry.price)} 돌파 확인 후 진입 (돌파 전 선매수 금지)` : "") +
+					(caution.length > 0 ? ` · 과열 주의로 비중 절반` : "") +
+					` · ${SHORT_TIME_STOP_DAYS}거래일 내 목표 미도달 시 청산`
+				: `추세 우호 + ${triggers}`;
 	} else {
 		verdict = "관망";
 		if (buySetup && poorRiskReward) {
@@ -270,7 +384,10 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		} else if (sellTrigger) {
 			summary = `과열·약세 신호(${bear.join(", ")}) — 신규 진입 부적합`;
 		} else if (trendState === "우호" && !hasBuyTrigger) {
-			summary = "추세는 우호적이나 진입 신호(골든크로스·과매도 회복)가 없다";
+			summary =
+				horizon === "short"
+					? "추세는 우호적이나 단기 진입 신호(돌파·추세 지속·골든크로스)가 없다"
+					: "추세는 우호적이나 진입 신호(골든크로스·과매도 회복)가 없다";
 		} else if (valueState === "비우호" && hasBuyTrigger) {
 			summary = "기술적 신호는 있으나 펀더멘털이 비우호적";
 		} else if (trendState === "비우호") {
@@ -294,8 +411,49 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 				: null;
 
 	let scenarios: Scenario[];
-	// 손익비 때문에 관망으로 내린 경우도 매수용 시나리오를 준다
-	if (verdict === "매수" || (verdict === "관망" && buySetup && !held)) {
+	const buyScenarios = verdict === "매수" || (verdict === "관망" && buySetup && !held);
+	if (horizon === "short" && buyScenarios) {
+		// 단기: 진입(지금 또는 돌파) → 눌림 추가 → 손절·시간 손절. 과열 주의면 비중 절반
+		const half = caution.length > 0 ? 0.5 : 1;
+		const dip = snap.ma5 !== null && snap.ma5 < base ? roundToTick(market, snap.ma5) : pullback;
+		scenarios = [
+			entry.type === "breakout"
+				? {
+						id: "S1",
+						title: "돌파 진입",
+						trigger: `${f(entry.price)} 돌파 + 거래량 동반 (돌파 전에 미리 사지 않는다)`,
+						triggerPrice: entry.price,
+						action: "1차 진입",
+						weightPct: 60 * half,
+					}
+				: {
+						id: "S1",
+						title: "현재가 진입",
+						trigger: `현재가 ${f(price)} 부근`,
+						triggerPrice: roundToTick(market, price),
+						action: "1차 진입",
+						weightPct: 60 * half,
+					},
+			{
+				id: "S2",
+				title: "눌림 추가",
+				trigger: dip !== null ? `${f(dip)} 까지 눌린 뒤 반등` : "5일선 눌림 후 반등",
+				triggerPrice: dip,
+				action: "2차 진입",
+				weightPct: 40 * half,
+			},
+			{
+				id: "S3",
+				title: "손절·시간 손절",
+				trigger:
+					(stopLoss !== null ? `${f(stopLoss)} 이탈` : "지지 이탈") + ` 또는 ${SHORT_TIME_STOP_DAYS}거래일 내 목표 미도달`,
+				triggerPrice: stopLoss,
+				action: "전량 청산",
+				weightPct: 100,
+			},
+		];
+	} else if (buyScenarios) {
+		// 손익비 때문에 관망으로 내린 경우도 매수용 시나리오를 준다
 		scenarios = [
 			{
 				id: "S1",
@@ -385,21 +543,24 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	const breakeven = market === "US" ? Math.round(breakevenRaw * 100) / 100 : Math.ceil(breakevenRaw);
 
 	let sizing: TimingResult["sizing"] = null;
-	if (verdict === "매수" && input.totalAssetsKrw && input.totalAssetsKrw > 0 && stopLoss !== null && price > stopLoss) {
+	if (verdict === "매수" && input.totalAssetsKrw && input.totalAssetsKrw > 0 && stopLoss !== null && base > stopLoss) {
 		const fx = market === "US" ? (input.usdKrw ?? 0) : 1;
-		const perShareKrw = (price - stopLoss) * fx;
+		const perShareKrw = (base - stopLoss) * fx;
 		if (perShareKrw > 0) {
-			const riskBudgetKrw = Math.round(input.totalAssetsKrw * (RISK_PCT / 100));
-			sizing = { riskPct: RISK_PCT, riskBudgetKrw, quantity: Math.floor(riskBudgetKrw / perShareKrw) };
+			const riskPct = caution.length > 0 ? RISK_PCT / 2 : RISK_PCT;
+			const riskBudgetKrw = Math.round(input.totalAssetsKrw * (riskPct / 100));
+			sizing = { riskPct, riskBudgetKrw, quantity: Math.floor(riskBudgetKrw / perShareKrw) };
 		}
 	}
 
 	return {
+		horizon,
 		verdict,
 		summary,
 		layers,
 		scenarios,
 		price,
+		entry,
 		stopLoss,
 		target1,
 		target2,

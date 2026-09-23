@@ -8,8 +8,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Bar } from "../src/indicators.ts";
-import { isOnTick, type Market } from "../src/orders.ts";
-import { evaluateTiming, type TimingResult } from "../src/timing.ts";
+import { isOnTick, tickSize, type Market } from "../src/orders.ts";
+import { evaluateTiming, SHORT_TIME_STOP_DAYS, type Horizon, type TimingResult } from "../src/timing.ts";
 
 function barsOf(closes: number[]): Bar[] {
 	return closes.map((c, i) => ({
@@ -37,7 +37,7 @@ function* scenarios(): Generator<{ label: string; closes: number[] }> {
 	}
 }
 
-function all(market: Market = "KR"): Array<{ label: string; r: TimingResult; held: boolean }> {
+function all(market: Market = "KR", horizon?: Horizon): Array<{ label: string; r: TimingResult; held: boolean }> {
 	const out: Array<{ label: string; r: TimingResult; held: boolean }> = [];
 	for (const s of scenarios()) {
 		for (const held of [false, true]) {
@@ -46,6 +46,7 @@ function all(market: Market = "KR"): Array<{ label: string; r: TimingResult; hel
 				market,
 				holding: held ? { quantity: 10, avgPrice: s.closes[0] as number } : null,
 				totalAssetsKrw: 100_000_000,
+				...(horizon ? { horizon } : {}),
 			});
 			if (r) out.push({ label: `${s.label}/${held ? "보유" : "미보유"}`, r, held });
 		}
@@ -201,5 +202,136 @@ describe("대표 사례", () => {
 
 	it("빈 데이터면 null", () => {
 		assert.equal(evaluateTiming({ bars: [], market: "KR" }), null);
+	});
+});
+
+/**
+ * 단기(1주) 모드 — 스윙보다 느슨하지만 지켜야 할 선은 같다:
+ * 손익비 1 미만은 진입하지 않고, 극단 과열(RSI 80)·하락 신호에서는 사지 않으며, 손실은 한도 안.
+ * 새로 생긴 위험: 돌파 진입가는 현재가보다 높다 → 지정가로 미리 넣으면 즉시 체결된다. 그래서 진입가를 따로 둔다.
+ */
+describe("단기 모드 (horizon=short)", () => {
+	const swing = all("KR");
+	const short = all("KR", "short");
+	const layer = (r: TimingResult, n: string) => r.layers.find((l) => l.name === n);
+
+	it("기본값은 스윙이다 — horizon 을 안 주면 결과가 swing 과 같다", () => {
+		for (const { r } of swing) assert.equal(r.horizon, "swing");
+		assert.ok(swing.every((x) => x.r.entry.type === "now" && x.r.entry.price === x.r.price), "스윙은 늘 현재가 진입");
+	});
+
+	it("스윙보다 매수가 많다 — 강세 종목을 전부 관망으로 돌리지 않는다", () => {
+		const n = (xs: typeof swing) => xs.filter((x) => x.r.verdict === "매수").length;
+		assert.ok(n(short) > n(swing) * 3, `단기 ${n(short)} / 스윙 ${n(swing)}`);
+	});
+
+	it("스윙에서 과열로 막힌 상승 추세(RSI 70~80)가 단기에서는 비중 절반 매수로 열린다", () => {
+		// 하락→반등 시계열에는 "정배열 + RSI 70~80" 국면이 거의 없어 꾸준한 상승 + 흔들림으로 따로 만든다
+		const opened: Array<{ label: string; r: TimingResult }> = [];
+		for (const slope of [20, 30, 40, 60]) {
+			for (const amp of [40, 80, 120]) {
+				for (const period of [5, 7, 9]) {
+					const closes = Array.from({ length: 90 }, (_, i) => Math.round(10_000 + i * slope + (((i * 37) % period) - (period >> 1)) * amp));
+					const input = { bars: barsOf(closes), market: "KR" as const, totalAssetsKrw: 100_000_000 };
+					const sw = evaluateTiming(input);
+					const sh = evaluateTiming({ ...input, horizon: "short" });
+					if (sw?.verdict === "관망" && /과매수/.test(sw.summary) && sh?.verdict === "매수") {
+						opened.push({ label: `slope${slope}/amp${amp}/p${period}`, r: sh });
+					}
+				}
+			}
+		}
+		assert.ok(opened.length >= 3, `과열 완화가 거의 작동하지 않는다 (${opened.length}건)`);
+		for (const { label, r } of opened) {
+			assert.ok((r.snapshot.rsi ?? 0) >= 70 && (r.snapshot.rsi ?? 100) < 80, `${label}: RSI ${r.snapshot.rsi}`);
+			assert.ok(layer(r, "모멘텀")?.reasons.some((x) => x.startsWith("⚠")), `${label}: 과열 경고가 없다`);
+			assert.equal(r.sizing?.riskPct, 0.5, `${label}: 과열 주의인데 비중이 절반이 아니다`);
+		}
+	});
+
+	it("매수면 추세 우호 · 하락 신호 없음 · 손익비 1 이상 (진입가 기준)", () => {
+		for (const { label, r } of short.filter((x) => x.r.verdict === "매수")) {
+			assert.equal(layer(r, "추세")?.state, "우호", label);
+			assert.ok(!layer(r, "모멘텀")?.reasons.some((x) => x.startsWith("▼")), `${label}: 하락 신호가 있는데 매수`);
+			assert.ok(r.riskReward !== null && r.riskReward >= 1, `${label}: 손익비 1:${r.riskReward}`);
+			assert.ok(r.stopLoss !== null && r.target1 !== null);
+			const rr = ((r.target1 as number) - r.entry.price) / (r.entry.price - (r.stopLoss as number));
+			assert.ok(Math.abs(rr - (r.riskReward as number)) < 0.01, `${label}: 손익비가 진입가 기준이 아니다`);
+		}
+	});
+
+	it("RSI 80 이상 극단 과열에서는 사지 않는다", () => {
+		for (const { label, r } of short) {
+			if (r.snapshot.rsi !== null && r.snapshot.rsi >= 80) assert.notEqual(r.verdict, "매수", `${label}: RSI ${r.snapshot.rsi}`);
+		}
+	});
+
+	it("돌파 진입이면 진입가 > 현재가, 요약에 '돌파 확인 후' 와 '선매수 금지' 가 있다", () => {
+		const bo = short.filter((x) => x.r.verdict === "매수" && x.r.entry.type === "breakout");
+		assert.ok(bo.length > 0);
+		for (const { label, r } of bo) {
+			assert.ok(r.entry.price > r.price, `${label}: 돌파 진입가 ${r.entry.price} ≤ 현재가 ${r.price}`);
+			assert.match(r.summary, /돌파 확인 후 진입/, label);
+			assert.match(r.summary, /선매수 금지/, label);
+			assert.equal(r.scenarios[0]?.triggerPrice, r.entry.price, `${label}: S1 트리거가 진입가가 아니다`);
+		}
+	});
+
+	it("손절 < 진입가 < 목표1, 가격은 전부 호가단위", () => {
+		for (const { label, r } of short) {
+			// "지금 진입" 의 진입가는 현재가 그 자체라 주문 가격이 아니다 — 주문에 쓰는 건 돌파 진입가와 S1 트리거
+			if (r.entry.type === "breakout") assert.ok(isOnTick("KR", r.entry.price), `${label}: 진입가 ${r.entry.price}`);
+			if (r.stopLoss !== null) {
+				assert.ok(r.stopLoss < r.entry.price, `${label}: 손절 ${r.stopLoss} ≥ 진입 ${r.entry.price}`);
+				assert.ok(isOnTick("KR", r.stopLoss), label);
+			}
+			if (r.target1 !== null) assert.ok(r.target1 > r.entry.price, `${label}: 목표 ${r.target1} ≤ 진입 ${r.entry.price}`);
+			for (const sc of r.scenarios) if (sc.triggerPrice !== null) assert.ok(isOnTick("KR", sc.triggerPrice), `${label} ${sc.id}`);
+		}
+	});
+
+	it("손절 폭은 스윙보다 짧다 (ATR×1.5 이내)", () => {
+		for (const { label, r } of short) {
+			const atr = r.snapshot.atr;
+			if (r.stopLoss === null || atr === null) continue;
+			// 손절가를 호가단위로 내리므로 한 틱까지 더 벌어질 수 있다
+			assert.ok(r.entry.price - r.stopLoss <= atr * 1.5 + tickSize("KR", r.stopLoss), `${label}: 손절 폭 ${r.entry.price - r.stopLoss} > ATR×1.5 ${atr * 1.5}`);
+		}
+	});
+
+	it("매수 시나리오의 S3 는 손절 + 5거래일 시간 손절", () => {
+		for (const { label, r } of short.filter((x) => x.r.verdict === "매수")) {
+			assert.match(r.scenarios[2]?.trigger ?? "", new RegExp(`${SHORT_TIME_STOP_DAYS}거래일`), label);
+			assert.equal(r.scenarios[2]?.weightPct, 100, label);
+		}
+	});
+
+	it("포지션 크기: 진입가에서 손절까지 잃어도 한도(1%, 과열 주의 0.5%) 이내", () => {
+		for (const { label, r } of short) {
+			if (r.verdict !== "매수") {
+				assert.equal(r.sizing, null, label);
+				continue;
+			}
+			if (!r.sizing || r.stopLoss === null) continue;
+			const loss = r.sizing.quantity * (r.entry.price - r.stopLoss);
+			assert.ok(loss <= r.sizing.riskBudgetKrw, `${label}: 손실 ${loss} > 한도 ${r.sizing.riskBudgetKrw}`);
+			assert.equal(r.sizing.riskBudgetKrw, r.sizing.riskPct === 0.5 ? 500_000 : 1_000_000, label);
+		}
+	});
+
+	it("매도는 보유 중일 때만, 시나리오는 늘 세 개", () => {
+		for (const { label, r, held } of short) {
+			if (r.verdict === "매도") assert.ok(held, label);
+			assert.deepEqual(r.scenarios.map((x) => x.id), ["S1", "S2", "S3"], label);
+		}
+	});
+
+	it("해외 종목도 0.01 단위로 진입·손절·트리거를 낸다", () => {
+		for (const { label, r } of all("US", "short")) {
+			const entry = r.entry.type === "breakout" ? r.entry.price : null;
+			for (const v of [entry, r.stopLoss, ...r.scenarios.map((x) => x.triggerPrice)]) {
+				if (v !== null) assert.ok(isOnTick("US", v), `${label}: ${v}`);
+			}
+		}
 	});
 });

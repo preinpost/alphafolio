@@ -239,11 +239,21 @@ export function TimingCardView({ card }: { card: TimingCard }) {
 						{card.symbol} · 일봉 {r.snapshot.bars}개 · {r.snapshot.lastDate} · {m(r.price)}
 					</div>
 				</div>
-				<span className={`shrink-0 rounded-lg border px-2.5 py-1 text-sm font-semibold ${VERDICT_CLASS[r.verdict]}`}>
-					{r.verdict}
-				</span>
+				<div className="flex shrink-0 items-center gap-1.5">
+					{r.horizon === "short" && (
+						<span className="rounded-md bg-selected px-1.5 py-0.5 text-[11px] text-muted">단기 1주</span>
+					)}
+					<span className={`rounded-lg border px-2.5 py-1 text-sm font-semibold ${VERDICT_CLASS[r.verdict]}`}>
+						{r.verdict}
+					</span>
+				</div>
 			</div>
 			<p className="mt-2 text-xs text-ink">{r.summary}</p>
+			{r.entry?.type === "breakout" && (
+				<p className="mt-1 text-xs text-muted">
+					진입 기준 <span className="text-ink">{m(r.entry.price)}</span> 돌파 시 · 손익비·수량은 이 가격 기준
+				</p>
+			)}
 
 			<div className="mt-3 space-y-1.5 border-t border-line pt-3">
 				{r.layers.map((l) => (

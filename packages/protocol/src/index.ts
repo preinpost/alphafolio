@@ -128,6 +128,8 @@ export interface TimingCard {
 	name: string;
 	currency: "KRW" | "USD";
 	result: {
+		/** 없으면 swing (단기 모드 이전에 저장된 대화) */
+		horizon?: "swing" | "short";
 		verdict: "매수" | "매도" | "관망";
 		summary: string;
 		layers: Array<{ name: string; state: "우호" | "비우호" | "중립"; reasons: string[] }>;
@@ -140,6 +142,8 @@ export interface TimingCard {
 			weightPct: number;
 		}>;
 		price: number;
+		/** 진입 기준가 — breakout 이면 현재가보다 높다 (돌파 확인 후 진입). 없으면 현재가 */
+		entry?: { price: number; type: "now" | "breakout" };
 		stopLoss: number | null;
 		target1: number | null;
 		target2: number | null;

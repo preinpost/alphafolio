@@ -726,12 +726,19 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			"조건부 시나리오 3개(트리거 가격 포함), 손절가·목표가·손익비, 손익분기, 매수 시 권장 수량(총자산 1% 리스크). " +
 			"보유 종목이면 평단을 반영해 청산 시나리오를 준다. " +
 			"'지금 사도 돼?', '타점', '손절 어디?', '팔까?', '진입 시점' 같은 **매매 판단** 요청에 쓴다. " +
+			"사용자가 **단기(1주·며칠·단타)** 를 말하면 horizon='short' — 돌파·추세 지속에서 진입, 손절 ATR×1.5, " +
+			"목표 ATR×2, 5거래일 시간 손절. 그 외에는 기본(swing, 눌림목 매수). " +
 			"단순히 지표·추세만 물으면 market_technical 을 쓴다. " +
 			"⚠️ 판정·가격은 이 툴이 계산한다 — 직접 계산하거나 바꾸지 말고 그대로 인용한다. " +
 			"실적·공시·거시 이벤트 리스크는 이 툴이 보지 않으므로 필요하면 market_news 로 확인해 덧붙인다. " +
 			"결과는 매매 권유가 아니라 규칙 기반 판정임을 밝힌다.",
 		parameters: Type.Object({
 			symbol: Type.String({ description: "6자리 국내 종목코드 또는 해외 티커" }),
+			horizon: Type.Optional(
+				Type.Union([Type.Literal("swing"), Type.Literal("short")], {
+					description: "swing=몇 주 눌림목(기본), short=1주 안팎 단기 모멘텀 (사용자가 단기를 말했을 때만)",
+				}),
+			),
 		}),
 		execute: async (_id, params) => {
 			const notes: string[] = [];
@@ -773,6 +780,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 					: null,
 				totalAssetsKrw: portfolio ? portfolio.stockValueKrw + portfolio.cashKrw : null,
 				usdKrw: portfolio?.usdKrw ?? null,
+				horizon: params.horizon ?? "swing",
 			});
 
 			if (!result) {
@@ -802,8 +810,11 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 
 			const m = (v: number | null): string => (v === null ? "—" : money(v, currency));
 			const lines = [
-				`${chart.name} (${symbol}) 타점 판정 — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
+				`${chart.name} (${symbol}) 타점 판정 [${result.horizon === "short" ? "단기 1주" : "스윙"}] — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
 				`결론: ${result.verdict} — ${result.summary}`,
+				result.entry.type === "breakout"
+					? `진입 기준 ${m(result.entry.price)} 돌파 시 (현재가보다 높다 — 지금 이 가격으로 지정가 매수를 넣으면 현재가에 바로 체결되므로, 돌파를 확인한 뒤 주문을 준비한다). 손익비·수량은 이 진입가 기준`
+					: "",
 				...result.layers.map((l) => `[${l.name}] ${l.state}: ${l.reasons.join(" / ")}`),
 				`손절 ${m(result.stopLoss)} · 목표1 ${m(result.target1)} · 목표2 ${m(result.target2)}` +
 					(result.riskReward !== null ? ` · 손익비 1:${result.riskReward}` : ""),
