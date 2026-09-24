@@ -8,7 +8,9 @@
     ".": "./src/index.ts",
     "./tools": "./src/tools.ts",
     "./order-tools": "./src/order-tools.ts",
-    "./data-tools": "./src/data-tools.ts"
+    "./data-tools": "./src/data-tools.ts",
+    "./stream-tools": "./src/stream-tools.ts",
+    "./derivatives-tools": "./src/derivatives/tool.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

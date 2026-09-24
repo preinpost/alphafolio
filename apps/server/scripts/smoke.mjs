@@ -478,6 +478,16 @@ async function main() {
 		"finance_overview",
 		"order_prepare",
 		"order_list",
+		"order_change",
+		"order_conditional",
+		"binance_order",
+		"kis_find",
+		"kis_call",
+		"toss_query",
+		"data_find",
+		"data_call",
+		"kis_stream",
+		"derivatives_greeks",
 	];
 	const missingTools = need.filter((t) => !stateTools.includes(t));
 	check("우리 툴 전부 노출", missingTools.length === 0, missingTools.join(", ") || `${stateTools.length}개`);

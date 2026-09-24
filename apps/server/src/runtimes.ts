@@ -21,6 +21,8 @@ import { createLedgerTools, type D1Provider } from "@alphafolio/ledger/tools";
 import { createBrokerTools } from "@alphafolio/broker/tools";
 import { createOrderTools } from "@alphafolio/broker/order-tools";
 import { createDataTools } from "@alphafolio/broker/data-tools";
+import { createStreamTools } from "@alphafolio/broker/stream-tools";
+import { createDerivativesTools } from "@alphafolio/broker/derivatives-tools";
 import type { DataCreds } from "@alphafolio/broker";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
@@ -148,6 +150,9 @@ export class RuntimeManager {
 				...createOrderTools({ brokers: this.opts.brokerAccess(user), prepareOrder: this.opts.prepareOrder(user) }),
 				// 해외·코인 데이터 — 조회만
 				...createDataTools({ creds: () => this.opts.dataCreds(user) }),
+				// KIS 실시간 시세 요약 · 옵션 그릭스 계산 — 조회·계산만
+				...createStreamTools({ brokers: this.opts.brokerAccess(user) }),
+				...createDerivativesTools({ brokers: this.opts.brokerAccess(user) }),
 			],
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});
