@@ -10,6 +10,7 @@
  */
 import { describeAction, type OrderAction } from "./actions.ts";
 import { kisChangeOrder, kisPlaceOrder } from "./kis/orders.ts";
+import { executeBinance } from "./binance/trade.ts";
 import type { BrokerAccess } from "./portfolio.ts";
 import { defaultAccountSeq } from "./toss/api.ts";
 import {
@@ -43,6 +44,12 @@ function sane(a: OrderAction): void {
 	if (a.kind === "place" || a.kind === "modify") {
 		pos(a.quantity, "수량");
 		pos(a.price, "가격");
+	}
+	if (a.kind === "binance-place" || a.kind === "binance-replace" || a.kind === "binance-oco" || a.kind === "binance-oto") {
+		// 문자열 10진수 — 양수인지만 (단위 보정은 준비 단계에서 끝났다)
+		for (const [what, v] of Object.entries(a)) {
+			if (/quantity|Qty|price|Price/.test(what) && typeof v === "string" && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
+		}
 	}
 	if (a.kind === "conditional-create" || a.kind === "conditional-modify") {
 		pos(a.quantity, "수량");
@@ -101,6 +108,13 @@ export async function executeOrderAction(action: OrderAction, nonce: string, acc
 			await cancelConditionalOrder(ctx, await defaultAccountSeq(ctx), action.conditionalOrderId);
 			return { message: "조건주문이 취소되었습니다", conditionalOrderId: action.conditionalOrderId };
 		}
+		case "binance-place":
+		case "binance-cancel":
+		case "binance-replace":
+		case "binance-oco":
+		case "binance-oto":
+		case "binance-cancel-all":
+			return executeBinance(action, nonce, need(access.binance, "Binance"));
 	}
 }
 

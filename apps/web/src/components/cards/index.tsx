@@ -18,7 +18,7 @@ import {
 	TimingCardView,
 	ResearchCardView,
 } from "./BrokerCards.tsx";
-import { ConditionalOrderCardView, OrderChangeCardView, OrderListCardView, OrderPreviewCardView } from "./OrderCards.tsx";
+import { BinanceOrderCardView, ConditionalOrderCardView, OrderChangeCardView, OrderListCardView, OrderPreviewCardView } from "./OrderCards.tsx";
 
 export function CardView({ card }: { card: UICard }) {
 	switch (card.kind) {
@@ -48,6 +48,8 @@ export function CardView({ card }: { card: UICard }) {
 			return <OrderChangeCardView card={card} />;
 		case "conditional-order-card":
 			return <ConditionalOrderCardView card={card} />;
+		case "binance-order-card":
+			return <BinanceOrderCardView card={card} />;
 		case "overview-card":
 			return <OverviewCardView card={card} />;
 		default:

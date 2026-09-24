@@ -58,3 +58,29 @@ export interface ConditionalOrderCard {
 	warnings: string[];
 	errors: string[];
 }
+
+/** Binance 현물 확인 카드 (PLAN §36) — 값은 문자열 10진수 (거래소 단위로 보정됨) */
+export interface BinanceOrderCard {
+	kind: "binance-order-card";
+	ok: boolean;
+	token: string | null;
+	expiresAt: number | null;
+	action: "place" | "cancel" | "replace" | "oco" | "oto" | "cancel_all";
+	symbol: string;
+	base: string;
+	quote: string;
+	side: "BUY" | "SELL" | null;
+	type: string | null;
+	quantity: string | null;
+	quoteQuantity: string | null;
+	price: string | null;
+	estimatedQuote: string | null;
+	lastPrice: string | null;
+	balance: { asset: string; free: string } | null;
+	minNotional: string | null;
+	original: { orderId: number; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string } | null;
+	lines: Array<{ label: string; text: string; pct: number | null }>;
+	orders: Array<{ orderId: number; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string }>;
+	warnings: string[];
+	errors: string[];
+}

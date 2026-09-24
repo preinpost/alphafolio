@@ -108,13 +108,94 @@ export interface ConditionalCancelAction {
 	conditionalOrderId: string;
 }
 
+// ── Binance 현물 (PLAN §36) — 값은 전부 문자열 10진수 (부동소수점 오차 없이, binance/decimal.ts) ──
+
+interface BinanceBase {
+	broker: "binance";
+	/** 예: BTCUSDT */
+	symbol: string;
+	/** 예: BTC */
+	base: string;
+	/** 예: USDT */
+	quote: string;
+}
+
+export interface BinancePlaceAction extends BinanceBase {
+	kind: "binance-place";
+	side: OrderSide;
+	type: OrderType;
+	/** 기준 자산 수량 (거래소 stepSize 로 내림한 값). 시장가 매수를 금액으로 하면 없다 */
+	quantity?: string;
+	/** 시장가 매수 금액 (호가 자산, 예: USDT) */
+	quoteOrderQty?: string;
+	/** 지정가 (tickSize 로 내림) */
+	price?: string;
+	/** 표시용 예상 주문금액 (호가 자산) */
+	estimatedQuote: string;
+}
+
+/** 원주문 — 서버가 Binance 미체결 조회로 채운다 */
+export interface BinanceOriginal {
+	orderId: number;
+	side: OrderSide;
+	type: string;
+	price: string;
+	origQty: string;
+	executedQty: string;
+}
+
+export interface BinanceCancelAction extends BinanceBase {
+	kind: "binance-cancel";
+	original: BinanceOriginal;
+}
+
+export interface BinanceReplaceAction extends BinanceBase {
+	kind: "binance-replace";
+	original: BinanceOriginal;
+	/** 새 수량·가격 (지정가) */
+	quantity: string;
+	price: string;
+}
+
+/** 익절(위: LIMIT_MAKER) + 손절(아래: STOP_LOSS_LIMIT) 매도 OCO */
+export interface BinanceOcoAction extends BinanceBase {
+	kind: "binance-oco";
+	quantity: string;
+	takeProfitPrice: string;
+	stopPrice: string;
+	stopLimitPrice: string;
+}
+
+/** 지정가 매수가 체결되면 지정가 매도가 걸린다 */
+export interface BinanceOtoAction extends BinanceBase {
+	kind: "binance-oto";
+	quantity: string;
+	buyPrice: string;
+	sellPrice: string;
+}
+
+export interface BinanceCancelAllAction extends BinanceBase {
+	kind: "binance-cancel-all";
+	/** 준비 시점의 미체결 건수 (표시용) */
+	count: number;
+}
+
+export type BinanceAction =
+	| BinancePlaceAction
+	| BinanceCancelAction
+	| BinanceReplaceAction
+	| BinanceOcoAction
+	| BinanceOtoAction
+	| BinanceCancelAllAction;
+
 export type OrderAction =
 	| PlaceAction
 	| ModifyAction
 	| CancelAction
 	| ConditionalCreateAction
 	| ConditionalModifyAction
-	| ConditionalCancelAction;
+	| ConditionalCancelAction
+	| BinanceAction;
 
 /** 로그 한 줄 — 금액·계좌 없이 무엇을 하는지만 */
 export function describeAction(a: OrderAction): string {
@@ -131,5 +212,17 @@ export function describeAction(a: OrderAction): string {
 			return `toss 조건주문 수정 ${a.conditionalOrderId.slice(0, 12)}`;
 		case "conditional-cancel":
 			return `toss 조건주문 취소 ${a.conditionalOrderId.slice(0, 12)}`;
+		case "binance-place":
+			return `binance 주문 ${a.symbol} ${a.side} ${a.type} ${a.quantity ?? `${a.quoteOrderQty} ${a.quote}`}`;
+		case "binance-cancel":
+			return `binance 취소 ${a.symbol} #${a.original.orderId}`;
+		case "binance-replace":
+			return `binance 재주문 ${a.symbol} #${a.original.orderId} → ${a.quantity}@${a.price}`;
+		case "binance-oco":
+			return `binance OCO ${a.symbol} ${a.quantity}`;
+		case "binance-oto":
+			return `binance OTO ${a.symbol} ${a.quantity}`;
+		case "binance-cancel-all":
+			return `binance 전체 취소 ${a.symbol} (${a.count}건)`;
 	}
 }

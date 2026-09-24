@@ -1302,3 +1302,23 @@ CoinGecko `coingecko-api-oas` demo, Binance `binance-api-swagger` spot YAML).
   14번 재현 안 됨). 그런데 서버가 재시도 예정 종료(`agent_end.willRetry`)도 "답 끝" 으로 보내 화면이 끝났다가 다시 이어졌고,
   실패한 시도가 대화 기록에 오류 말풍선으로 남았다 → 재시도 예정이면 끝 신호를 보내지 않고, 재시도로 이어진 빈 실패는 기록에서 숨긴다.
 - 다음: 4차(b) Binance 현물 거래 — 주문·취소·OCO 만 확인 카드로, 출금·이체·마진·전환 등 자금 이동 58개 + 그 외 sapi 쓰기는 영구 차단.
+
+## 36. 모든 API 를 툴로 — 4차(b): Binance 현물 거래 (2026-09-24)
+
+원칙 그대로: 에이전트는 **준비만**(`binance_order`), 실행은 사람이 확인 카드에서 [확인].
+
+- 허용하는 쓰기는 6개뿐: `POST /api/v3/order` · `DELETE /api/v3/order` · `POST /api/v3/order/cancelReplace` ·
+  `POST /api/v3/orderList/oco` · `POST /api/v3/orderList/oto` · `DELETE /api/v3/openOrders`.
+  출금·이체·마진·전환·예치·하위 계정 등 **자금 이동 API 는 코드에 없다** (범용 `data_call` 도 쓰기를 전부 거절). 설정 화면에 "출금 권한 없이 발급".
+- **10진 계산 모듈** `binance/decimal.ts` — 수량·가격을 BigInt 로 계산한다. `Number` 로는 0.3 을 0.1 단위로 내리면 0.2,
+  0.3 − 0.1 = 0.19999… 라 한 단위가 깎인다 (미국 호가 1센트 버그와 같은 종류, §29). 실제로 재주문의 남은 수량을
+  `Number` 로 빼던 첫 구현을 테스트가 잡았다.
+- 거래소 규칙(`exchangeInfo`, 10분 캐시): 가격 단위·범위, 수량 단위·최소/최대(시장가는 MARKET_LOT_SIZE), 최소 주문금액(NOTIONAL),
+  종목 상태·지원 주문 유형. 단위에 안 맞으면 내림 보정하고 카드에 알린다. 현재가와 50% 이상 벌어지면 자릿수 오타로 거절, 잔고 부족 거절.
+- OCO(익절·손절 매도): 위 `LIMIT_MAKER` + 아래 `STOP_LOSS_LIMIT`, 익절가 > 현재가 > 손절 스톱가. OTO: 지정가 매수 → 체결 후 지정가 매도.
+  재주문: `cancelReplaceMode=STOP_ON_FAILURE` (원주문 취소가 실패하면 새 주문을 내지 않는다). 원주문은 서버가 미체결 조회로 찾는다.
+- 멱등성: nonce 를 `newClientOrderId`/`listClientOrderId` 로. 자동 재시도 없음. 오류 메시지에서 키를 지운다.
+- 실행기(`execute.ts`)에 Binance 분기 — `BrokerAccess.binance` 가 없으면 다른 곳으로 보내지 않고 멈춘다.
+- 카드 1종(동작별 모양): 신규(주문금액·잔고·최소 주문)·재주문(before → after)·OCO/OTO(현재가 대비 %)·취소·전체 취소.
+- 실측(준비·검증만): BTC·ETH·SOL·DOGE 실제 규칙으로 단위 보정·OCO 검증 확인. 실주문은 내지 않았다 (사용자 확인 필요).
+- 테스트 24개 (뮤테이션 12/12).

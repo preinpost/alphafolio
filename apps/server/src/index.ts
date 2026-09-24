@@ -185,6 +185,12 @@ async function main(): Promise<void> {
 	const brokerAccess = (user: string): BrokerAccess => ({
 		kis: () => kisContext(user),
 		toss: () => tossContext(user),
+		// Binance 거래 — 키가 없으면 throw (= 미연결). 시세·조회는 data_call 이 키 없이도 한다
+		binance: () => {
+			const b = dataCreds(user).binance;
+			if (!b) throw new Error("Binance 키가 없습니다 — 설정 → 코인 (Binance)");
+			return b;
+		},
 	});
 
 	/** 네이버 뉴스 자격증명 — 다른 키와 마찬가지로 사용자별이다. */

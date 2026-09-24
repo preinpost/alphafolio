@@ -8,8 +8,8 @@
 
 // ── 카드 (툴 결과 details) ──────────────────────────────────────────────
 
-import type { ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
-export type { ConditionalLegView, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
+import type { BinanceOrderCard, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
+export type { BinanceOrderCard, ConditionalLegView, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
 
 export interface LedgerTxCard {
 	kind: "ledger-tx";
@@ -385,6 +385,7 @@ export type UICard =
 	| OrderListCard
 	| OrderChangeCard
 	| ConditionalOrderCard
+	| BinanceOrderCard
 	| OverviewCard;
 
 // ── 메시지 ──────────────────────────────────────────────────────────────

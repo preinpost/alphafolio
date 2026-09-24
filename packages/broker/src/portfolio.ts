@@ -27,6 +27,8 @@ import type { TossContext } from "./toss/client.ts";
 export interface BrokerAccess {
 	kis?: () => KisContext;
 	toss?: () => TossContext;
+	/** Binance 현물 — 거래(binance_order)에만 쓴다. 키가 없으면 만들 때 throw */
+	binance?: () => { key: string; secret: string; testnet?: boolean };
 }
 
 export class NoBrokerConfiguredError extends Error {

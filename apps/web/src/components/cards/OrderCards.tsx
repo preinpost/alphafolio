@@ -6,7 +6,7 @@
  *    (외부 웹·뉴스 본문에 심긴 지시문이 주문으로 이어지지 않게 하는 장치)
  */
 import { useEffect, useState } from "react";
-import type { ConditionalOrderCard, OrderChangeCard, OrderListCard, OrderPreviewCard } from "@alphafolio/protocol";
+import type { BinanceOrderCard, ConditionalOrderCard, OrderChangeCard, OrderListCard, OrderPreviewCard } from "@alphafolio/protocol";
 import { api } from "../../lib/api.ts";
 
 function money(value: number, currency: "KRW" | "USD"): string {
@@ -17,10 +17,10 @@ function money(value: number, currency: "KRW" | "USD"): string {
 
 type Phase = "idle" | "sending" | "done" | "failed" | "expired";
 
-const BROKER_LABEL = { toss: "토스", kis: "한국투자" } as const;
+const BROKER_LABEL = { toss: "토스", kis: "한국투자", binance: "Binance" } as const;
 
 /** 어느 증권사로 나가는지 — 카드마다 눈에 띄게 (토스로 준비한 주문과 KIS 주문이 섞이지 않게) */
-function BrokerBadge({ broker }: { broker: "toss" | "kis" }) {
+function BrokerBadge({ broker }: { broker: "toss" | "kis" | "binance" }) {
 	return <span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">{BROKER_LABEL[broker]}</span>;
 }
 
@@ -250,6 +250,93 @@ export function ConditionalOrderCardView({ card }: { card: ConditionalOrderCard 
 				{card.currentPrice ? ` · 현재가 ${money(card.currentPrice, card.currency)}` : ""}
 				{card.action === "modify" ? " · 수정하면 조건주문 번호가 바뀝니다" : ""}
 				{card.action === "cancel" ? " · 이 조건주문을 취소합니다" : ""}
+			</div>
+			<Warnings items={card.warnings} />
+			<ConfirmBar c={c} verb={verb} />
+		</div>
+	);
+}
+
+/** 끝자리 0 떼기 — Binance 는 "0.00100000" 처럼 준다 (값은 그대로, 표시만) */
+const tz = (v: string): string => (v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v);
+
+/** Binance 현물 — 신규·취소·재주문·OCO·OTO·전체 취소 (값은 거래소 단위로 보정된 문자열) */
+export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
+	const c = useConfirm(card.token, card.expiresAt, card.ok);
+	const pair = `${card.base}/${card.quote}`;
+	const verb = { place: "주문", cancel: "취소", replace: "재주문", oco: "등록", oto: "등록", cancel_all: "취소" }[card.action];
+	if (!card.ok) return <Problems title={`Binance ${verb}을 준비하지 못했습니다 — ${pair}`} errors={card.errors} />;
+	const sideLabel = card.side === "BUY" ? "매수" : card.side === "SELL" ? "매도" : "";
+	const sideClass = card.side === "BUY" ? "text-up" : "text-down";
+	const danger = card.action === "cancel" || card.action === "cancel_all";
+
+	return (
+		<div className={`mt-2 rounded-xl border-2 bg-inset p-4 ${danger ? "border-danger/50" : "border-accent/60"}`}>
+			<div className="flex items-center justify-between gap-3">
+				<span className="truncate text-sm font-semibold text-ink">
+					{pair}{" "}
+					{card.action === "replace" && card.side ? <span className={sideClass}>{sideLabel} </span> : null}
+					{card.action === "oco" ? <span className="text-xs font-normal text-muted">익절·손절 (OCO)</span> : null}
+					{card.action === "oto" ? <span className="text-xs font-normal text-muted">매수 후 매도 (OTO)</span> : null}
+				</span>
+				<BrokerBadge broker="binance" />
+			</div>
+
+			{card.action === "place" && (
+				<div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3">
+					<span className={`text-sm ${sideClass}`}>
+						{sideLabel}{" "}
+						{card.quantity ? `${card.quantity} ${card.base}` : `${card.quoteQuantity} ${card.quote} 어치`} ·{" "}
+						{card.type === "LIMIT" ? `지정가 ${card.price} ${card.quote}` : "시장가"}
+					</span>
+					{card.estimatedQuote && (
+						<span className="text-sm text-ink">
+							주문금액 <b>{card.estimatedQuote}</b> {card.quote}
+						</span>
+					)}
+				</div>
+			)}
+			{card.action === "cancel" && card.original && (
+				<div className="mt-2 text-sm text-ink">
+					<span className={card.original.side === "BUY" ? "text-up" : "text-down"}>{card.original.side === "BUY" ? "매수" : "매도"}</span>{" "}
+					{tz(card.original.origQty)} {card.base} @ {tz(card.original.price)} {card.quote} 주문을 <b>취소</b>합니다
+				</div>
+			)}
+			{card.action === "cancel_all" && (
+				<div className="mt-2 text-sm text-ink">
+					미체결 <b>{card.orders.length}건</b>을 모두 취소합니다
+					<ul className="mt-1 space-y-0.5 text-xs text-muted">
+						{card.orders.slice(0, 5).map((o) => (
+							<li key={o.orderId}>
+								· {o.side === "BUY" ? "매수" : "매도"} {tz(o.origQty)} {card.base} @ {tz(o.price)} {card.quote}
+							</li>
+						))}
+						{card.orders.length > 5 && <li>· 외 {card.orders.length - 5}건</li>}
+					</ul>
+				</div>
+			)}
+			{card.lines.length > 0 && (
+				<div className="mt-2 space-y-1">
+					{card.action === "oco" || card.action === "oto" ? (
+						<div className="text-sm text-ink">
+							수량 {card.quantity} {card.base}
+						</div>
+					) : null}
+					{card.lines.map((l) => (
+						// 가격은 자르지 않는다 — 좁으면 줄을 바꾼다
+						<div key={l.label} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+							<span className="shrink-0 text-faint">{l.label}</span>
+							<span className="text-ink">{l.text}</span>
+							{l.pct !== null && <span className="ml-auto text-[11px] text-faint">현재가 대비 {l.pct >= 0 ? "+" : ""}{l.pct}%</span>}
+						</div>
+					))}
+				</div>
+			)}
+			<div className="mt-2 text-[11px] text-faint">
+				{card.lastPrice ? `현재가 ${card.lastPrice} ${card.quote}` : ""}
+				{card.balance ? ` · 잔고 ${card.balance.asset} ${card.balance.free}` : ""}
+				{card.minNotional ? ` · 최소 주문 ${card.minNotional} ${card.quote}` : ""}
+				{card.original ? ` · 원주문 #${card.original.orderId}` : ""}
 			</div>
 			<Warnings items={card.warnings} />
 			<ConfirmBar c={c} verb={verb} />

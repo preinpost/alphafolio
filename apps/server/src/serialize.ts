@@ -39,6 +39,7 @@ const CARD_KINDS = new Set([
 	"order-list-card",
 	"order-change-card",
 	"conditional-order-card",
+	"binance-order-card",
 	"overview-card",
 ]);
 
