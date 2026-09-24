@@ -1,0 +1,19 @@
+{
+  "name": "@alphafolio/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "원격 MCP 서버 브릿지 — Streamable HTTP 클라이언트 + OAuth(디스커버리·DCR·PKCE·갱신) + 읽기 전용 게이트웨이 툴(mcp_call). 외부 의존성 없음.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tools": "./src/tools.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

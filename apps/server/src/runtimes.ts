@@ -23,6 +23,8 @@ import { createOrderTools } from "@alphafolio/broker/order-tools";
 import { createDataTools } from "@alphafolio/broker/data-tools";
 import { createStreamTools } from "@alphafolio/broker/stream-tools";
 import { createDerivativesTools } from "@alphafolio/broker/derivatives-tools";
+import { createMcpTools } from "@alphafolio/mcp/tools";
+import type { FetchLike, McpServerHandle } from "@alphafolio/mcp";
 import type { DataCreds } from "@alphafolio/broker";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
@@ -53,6 +55,10 @@ export interface RuntimeManagerOptions {
 	 * /api/orders/execute 를 호출해야 한다.
 	 */
 	prepareOrder: (user: string) => NonNullable<Parameters<typeof createBrokerTools>[0]["prepareOrder"]>;
+	/** 사용자가 연결한 원격 MCP 서버 — mcp_call 이 호출마다 읽는다 (설정에서 추가하면 재시작 없이) */
+	mcpServers: (user: string) => McpServerHandle[];
+	/** MCP 요청용 fetch (SSRF 방어) */
+	mcpFetch: FetchLike;
 	/** 사용자가 직접 저장한 LLM 키 (providerId → key). env 값은 넣지 않는다 — pi 가 알아서 읽는다. */
 	llmKeys: (user: string) => Record<string, string>;
 	/** 유휴 대화 정리 기준(분). 0이면 정리하지 않는다. 응답 중인 대화는 기준과 무관하게 남는다. */
@@ -153,6 +159,8 @@ export class RuntimeManager {
 				// KIS 실시간 시세 요약 · 옵션 그릭스 계산 — 조회·계산만
 				...createStreamTools({ brokers: this.opts.brokerAccess(user) }),
 				...createDerivativesTools({ brokers: this.opts.brokerAccess(user) }),
+				// 외부 MCP (TradingView 등) — 읽기 전용 게이트웨이 하나 (PLAN §38)
+				...createMcpTools({ servers: () => this.opts.mcpServers(user), fetch: this.opts.mcpFetch }),
 			],
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});

@@ -20,6 +20,7 @@ COPY packages/protocol/package.json packages/protocol/
 COPY packages/ledger/package.json packages/ledger/
 COPY packages/agent/package.json packages/agent/
 COPY packages/broker/package.json packages/broker/
+COPY packages/mcp/package.json packages/mcp/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 
@@ -43,6 +44,7 @@ COPY packages/protocol/package.json packages/protocol/
 COPY packages/ledger/package.json packages/ledger/
 COPY packages/agent/package.json packages/agent/
 COPY packages/broker/package.json packages/broker/
+COPY packages/mcp/package.json packages/mcp/
 COPY apps/server/package.json apps/server/
 
 # 런타임 의존성만 (웹 빌드 도구 제외)

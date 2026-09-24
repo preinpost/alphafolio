@@ -98,7 +98,7 @@ describe("마이그레이션", () => {
 					"INSERT INTO budgets (month, category, limit_amt) VALUES ('2026-09', '식비', 300000);",
 			);
 			const r = await migrate(old.cfg);
-			assert.deepEqual(r.applied, ["0006_ledgers", "0007_accounts"]);
+			assert.deepEqual(r.applied, ["0006_ledgers", "0007_accounts", "0008_mcp_servers"]);
 
 			const mine = await createLedger(old.cfg, "ms", "새 가계부");
 			assert.equal((await listTransactions(old.cfg, mine.id)).length, 0);

@@ -2,7 +2,7 @@
  * 설정 — 탭으로 묶는다.
  *
  *   계정    내 계정 (비밀번호·모든 기기 로그아웃)
- *   연결    증권(KIS·토스)·뉴스 키
+ *   연결    증권(KIS·토스)·뉴스 키 + 원격 MCP 서버 (TradingView 등)
  *   AI 모델 LLM 키 (비우면 서버 기본 계정)
  *   화면    테마
  *   관리자  초대 코드·계정 관리·서버 DB 상태 — env 계정(슈퍼관리자)에게만 보인다
@@ -19,6 +19,7 @@ import { useState, type ReactNode } from "react";
 import { api, type SecretStatus } from "../lib/api.ts";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../lib/theme.ts";
 import { AdminPanel, MyAccount } from "./AccountSettings.tsx";
+import { McpSettings } from "./McpSettings.tsx";
 
 const SOURCE_LABEL: Record<string, string> = {
 	user: "내 설정",
@@ -164,6 +165,7 @@ export function SettingsPage() {
 						{storageWarnings}
 						{keyGroups("connect")}
 						<p className="text-xs text-faint">{keyNote}</p>
+						<McpSettings />
 					</Tabs.Panel>
 
 					<Tabs.Panel value="ai" className="space-y-6 outline-none">

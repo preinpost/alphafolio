@@ -46,6 +46,10 @@ import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./se
 import { AccountError, AccountStore } from "./accounts.ts";
 import { handleAccounts } from "./accounts-api.ts";
 import { attachWebSocket } from "./ws.ts";
+import { createSafeFetch } from "@alphafolio/mcp";
+import { McpStore } from "./mcp-store.ts";
+import { CALLBACK_PATH, McpAuthManager } from "./mcp-auth.ts";
+import { handleMcp, handleMcpCallback, mcpHandles, type McpApiDeps } from "./mcp-api.ts";
 
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -107,6 +111,17 @@ async function main(): Promise<void> {
 	// 사용자별 시크릿 — 같은 D1의 user_secrets 테이블에 암호화 보관
 	const secrets = new SecretStore(ledgerConfig, cfg.auth.secret, cfg.auth.ephemeralSecret);
 
+	// 사용자별 원격 MCP 서버 (PLAN §38) — 사용자 입력 URL 로 서버가 요청하므로 SSRF 방어 fetch 만 쓴다
+	const mcpPolicy = { allowPrivate: cfg.mcpAllowPrivate };
+	const mcpFetch = createSafeFetch(mcpPolicy);
+	const mcpStore = new McpStore(ledgerConfig, cfg.auth.secret, mcpPolicy);
+	const mcpDeps: McpApiDeps = {
+		store: mcpStore,
+		auth: new McpAuthManager({ store: mcpStore, publicUrl: cfg.publicUrl, fetch: mcpFetch, policy: mcpPolicy }),
+		fetch: mcpFetch,
+		publicUrl: cfg.publicUrl,
+	};
+
 	setLedgerConfigProvider(ledgerConfig);
 
 	/** D1 설정이 갖춰져 있는지. */
@@ -126,6 +141,7 @@ async function main(): Promise<void> {
 			const m = await ensureMigrated(ledgerConfig());
 			if (m.applied.length > 0) console.log(`[ledger] 마이그레이션 적용: ${m.applied.join(", ")}`);
 			await secrets.load();
+			await mcpStore.load();
 		} catch (err) {
 			console.warn("[secrets] 초기 적재 실패 — 설정 화면에서 D1 연결을 확인하세요:", err);
 		}
@@ -255,6 +271,8 @@ async function main(): Promise<void> {
 		dataCreds,
 		prepareOrder,
 		llmKeys,
+		mcpServers: (user) => mcpHandles(mcpDeps, user),
+		mcpFetch,
 		idleMinutes: cfg.idleMinutes,
 	});
 
@@ -388,6 +406,12 @@ async function main(): Promise<void> {
 			return;
 		}
 
+		// MCP OAuth 콜백 — 인가 서버가 브라우저를 돌려보낸다 (Bearer 없음). 1회용 state 가 사용자를 가리킨다
+		if (path === CALLBACK_PATH && req.method === "GET") {
+			await handleMcpCallback(url, res, mcpDeps);
+			return;
+		}
+
 		// ── 인증 필요 ─────────────────────────────────────────────
 		if (path.startsWith("/api/")) {
 			const verified = verifyToken(bearerFrom(req.headers.authorization), cfg.auth.secret);
@@ -461,6 +485,14 @@ async function main(): Promise<void> {
 				} catch (err) {
 					json(res, 200, { ok: false, message: err instanceof Error ? err.message : String(err) });
 				}
+				return;
+			}
+
+			// ── MCP 서버 (설정 화면 전용 — 에이전트 툴 없음) ─────────
+			if (path.startsWith("/api/mcp/")) {
+				const result = await handleMcp(req, path, user, mcpDeps);
+				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
+				json(res, 200, result);
 				return;
 			}
 
@@ -599,6 +631,10 @@ async function main(): Promise<void> {
 		console.log(`  ├ cors     ${cfg.corsOrigins.join(", ")}`);
 		console.log(`  ├ ledger   ${ledgerReady() ? "설정됨" : "미설정 — AF_D1_* 필요 (가계부·가입·개인 키 저장 비활성)"}`);
 		console.log(`  ├ sessions ${cfg.agent.sessionsDir}`);
+		console.log(
+			`  ├ mcp      ${cfg.publicUrl ? `OAuth 콜백 ${cfg.publicUrl}${CALLBACK_PATH}` : "AF_PUBLIC_URL 미설정 — OAuth 연결 비활성 (헤더 인증 서버만)"}` +
+				(cfg.mcpAllowPrivate ? " · ⚠️ 사설 주소 허용(개발용)" : ""),
+		);
 		console.log(`  └ web      ${existsSync(cfg.webDir) ? cfg.webDir : "(미빌드 — API만 제공)"}`);
 		if (cfg.auth.generatedPassword) {
 			console.log(`\n  ⚠️  AF_ADMIN_PASSWORD 미설정 — 이번 실행의 임시 비밀번호: ${cfg.auth.adminPassword}`);

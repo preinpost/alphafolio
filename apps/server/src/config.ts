@@ -67,6 +67,13 @@ export interface Config {
 	dataDir: string;
 	/** iOS 앱(Capacitor) 등 크로스 오리진 클라이언트 허용 목록 (cors.ts) */
 	corsOrigins: string[];
+	/**
+	 * AF_PUBLIC_URL — 사람이 브라우저로 여는 공개 주소 (OAuth redirect_uri 의 기준).
+	 * 리버스 프록시 뒤라 Host 헤더로 추측하지 않는다. 없으면 MCP OAuth 연결만 막힌다.
+	 */
+	publicUrl: string | undefined;
+	/** AF_MCP_ALLOW_PRIVATE=1 — MCP 서버 주소에 http·사설 IP 허용 (개발 전용. 공유 서버에서 켜면 SSRF) */
+	mcpAllowPrivate: boolean;
 }
 
 /**
@@ -124,6 +131,21 @@ export function checkRemovedVars(env: NodeJS.ProcessEnv = process.env): void {
 	);
 }
 
+/** 끝의 / 를 떼고 http(s) origin(+경로)만. 잘못된 값은 기동 거부 — OAuth 가 조용히 엉뚱한 주소로 돌아오지 않게 */
+export function parsePublicUrl(raw: string | undefined): string | undefined {
+	const v = raw?.trim();
+	if (!v) return undefined;
+	let url: URL;
+	try {
+		url = new URL(v);
+	} catch {
+		throw new Error(`AF_PUBLIC_URL="${v}" — URL 형식이 아닙니다 (예: https://alphafolio.example.com)`);
+	}
+	if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error(`AF_PUBLIC_URL 은 http(s) 여야 합니다: ${v}`);
+	if (url.search || url.hash) throw new Error(`AF_PUBLIC_URL 에 쿼리·해시를 넣지 않습니다: ${v}`);
+	return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+
 export function loadConfig(): Config {
 	checkRemovedVars();
 	const admin = process.env.AF_ADMIN_USER?.trim() || "admin";
@@ -172,6 +194,8 @@ export function loadConfig(): Config {
 		webDir: process.env.AF_WEB_DIR ?? join(REPO_ROOT, "apps/web/dist"),
 		dataDir,
 		corsOrigins: parseCorsOrigins(process.env.AF_CORS_ORIGINS),
+		publicUrl: parsePublicUrl(process.env.AF_PUBLIC_URL),
+		mcpAllowPrivate: process.env.AF_MCP_ALLOW_PRIVATE === "1",
 	};
 }
 

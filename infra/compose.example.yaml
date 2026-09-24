@@ -69,6 +69,8 @@ services:
       AF_TRUST_PROXY: "1"
       # iOS 앱 오리진 (비우면 capacitor://localhost)
       # AF_CORS_ORIGINS: capacitor://localhost
+      # 사람이 브라우저로 여는 공개 주소 — MCP OAuth(TradingView 등) 콜백의 기준. 비우면 OAuth 연결만 막힌다
+      # AF_PUBLIC_URL: https://alphafolio.example.com
 
       # ── 선택 ────────────────────────────────────────────────────────
       # 유휴 대화를 메모리에서 내리는 기준(분). 응답 중인 대화는 기준과 무관하게 끝까지 돈다

@@ -87,6 +87,31 @@ export interface SecretStatus {
 	preview: string | null;
 }
 
+/** 원격 MCP 서버 상태 — 토큰·헤더 값은 서버가 내려주지 않는다 (이름·연결 여부만) */
+export interface McpServerStatus {
+	id: string;
+	name: string;
+	url: string;
+	auth: "oauth" | "headers" | "none";
+	preset: string | null;
+	headerNames: string[];
+	connected: boolean;
+	expiresAt: number | null;
+	problem: string | null;
+}
+
+export interface McpListing {
+	items: McpServerStatus[];
+	presets: Array<{ id: string; name: string; url: string; added: boolean }>;
+	oauthReady: boolean;
+	storageReady: boolean;
+}
+
+export type McpAddInput =
+	| { preset: string }
+	| { name: string; url: string; auth: "oauth" | "none" }
+	| { name: string; url: string; auth: "bearer"; token: string };
+
 export const api = {
 	health: () => request<{ ok: boolean; ledger: boolean; model: string }>("/api/health"),
 
@@ -155,6 +180,16 @@ export const api = {
 		request<{ items: SecretStatus[] }>(`/api/secrets/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
 	testD1: () => request<{ ok: boolean; message: string }>("/api/secrets/test/d1", { method: "POST" }),
+
+	// ── 원격 MCP 서버 (설정 화면 전용 — 에이전트는 추가·연결할 수 없다) ───────
+	mcpServers: () => request<McpListing>("/api/mcp/servers"),
+	addMcpServer: (input: McpAddInput) => request<McpListing>("/api/mcp/servers", { method: "POST", body: JSON.stringify(input) }),
+	deleteMcpServer: (id: string) => request<McpListing>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+	/** 인가 주소를 받는다 — 화면이 그리로 이동한다 (웹: 같은 탭, 앱: 시스템 브라우저) */
+	startMcpOAuth: (id: string, client: "web" | "app") =>
+		request<{ url: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/oauth/start`, { method: "POST", body: JSON.stringify({ client }) }),
+	disconnectMcp: (id: string) => request<McpListing>(`/api/mcp/servers/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
+	testMcp: (id: string) => request<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, { method: "POST" }),
 
 	// ── 가계부 (ledgerId 를 비우면 서버가 기본 가계부를 고른다) ─────────────
 	transactions: (

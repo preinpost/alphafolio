@@ -174,6 +174,35 @@ CREATE TABLE IF NOT EXISTS signup_invites (
 );
 `.trim(),
 	},
+	{
+		// 사용자별 원격 MCP 서버 (PLAN §38). 자격증명(고정 헤더·OAuth 토큰)은 행 단위 암호화.
+		// auth: oauth | headers | none. preset: 알려진 서버(tradingview)면 이름 — 읽기 허용목록이 여기에 묶인다.
+		// mcp_oauth_clients: 동적 등록(DCR)한 client_id — 인가 서버·redirect_uri 마다 서버 전역 1회.
+		id: "0008_mcp_servers",
+		sql: `
+CREATE TABLE IF NOT EXISTS user_mcp_servers (
+  member      TEXT NOT NULL,
+  id          TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  url         TEXT NOT NULL,
+  auth        TEXT NOT NULL,
+  preset      TEXT,
+  headers_enc TEXT,
+  tokens_enc  TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (member, id)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+  issuer       TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  client_enc   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (issuer, redirect_uri)
+);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `
