@@ -27,3 +27,5 @@ export * from "./quote.ts";
 export * from "./names.ts";
 export * from "./movers.ts";
 export * from "./news.ts";
+export * from "./oas.ts";
+export * from "./data/gateway.ts";

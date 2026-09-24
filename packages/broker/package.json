@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./tools": "./src/tools.ts",
-    "./order-tools": "./src/order-tools.ts"
+    "./order-tools": "./src/order-tools.ts",
+    "./data-tools": "./src/data-tools.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

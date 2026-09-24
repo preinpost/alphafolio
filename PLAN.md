@@ -1277,3 +1277,28 @@ repo 를 목으로 대체하면 정작 틀리기 쉬운 권한 조인·부분 �
 - 사고: 1단계 커밋에 **다른 세션의 진행 중 변경**(타점 백테스트)이 `git add -A` 로 섞였다 → push 전에 되돌리고 변경 덩어리 단위로 갈라
   내 것만 다시 커밋. 이후 커밋 전에 남의 변경을 덩어리 단위로 확인한다.
 - 남은 것: KIS 예약주문·미국 주간주문·신용·선물옵션·채권 주문, 토스 1억원 이상 주문(confirmHighValueOrder), KIS 실계좌 확인(사용자).
+
+## 35. 모든 API 를 툴로 — 4차(a): 해외·코인 데이터 조회 ~600개 (2026-09-24)
+
+finnhub · Twelve Data · CoinGecko · Binance — 네 곳 모두 공식 규격이 있다 (finnhub Swagger 2.0, Twelve OpenAPI 3.1,
+CoinGecko `coingecko-api-oas` demo, Binance `binance-api-swagger` spot YAML).
+
+- 카탈로그 `packages/broker/src/data/catalogs/*.json`, 생성 `scripts/build-oas-catalog.mjs <provider> <spec>`.
+  Twelve Data 가 983KB 였다 — 같은 파라미터 설명(isin·cusip…)이 150번 넘게 반복 → 파라미터 명세·필드 설명을 한 번만 두고
+  번호로 가리키게 해서 네 개 합계 1.9MB → 715KB. 읽을 때 펼친다.
+- 조회: finnhub 113 · Twelve 186 · CoinGecko 66 · Binance 230 (공개 18 · 키 24 · 서명 298 중 GET).
+  600개라 토스처럼 툴 설명에 목록을 못 싣는다 → `data_find`(검색·상세) + `data_call`(호출).
+- 공용화: 토스 게이트웨이의 파라미터 검증·응답 펼치기·범례·날짜 토큰을 `oas.ts` 로 옮기고 토스·데이터 제공자가 같이 쓴다
+  (토스 테스트 그대로 통과).
+- 인증은 서버가: finnhub 는 **쿼리 대신 헤더**(X-Finnhub-Token — URL·로그에 키가 남지 않게), Twelve `Authorization: apikey`,
+  CoinGecko `x-cg-demo-api-key`(없어도 공개 한도), Binance `X-MBX-APIKEY` + 서명 API 는 timestamp·recvWindow·HMAC 서명
+  (공식 문서 예제와 일치 검증). 모델이 준 서명·timestamp 는 무시. 오류 메시지에서 키를 지운다.
+- 무료 요금제 간격: Twelve 7.6초(8/분) · finnhub 1.1초 · CoinGecko 2.1초. Twelve 는 HTTP 200 + `status:error` 로 실패를 알려 따로 잡는다.
+- Binance 캔들·호가는 이름 없는 배열이고 규격에 필드 설명도 없다 → 서버가 openTime(KST)·open·high·low·close·volume… 이름을 붙인다
+  (모델이 어느 값이 종가인지 추측하지 않게).
+- 설정 화면 키 칸: 데이터(해외) — Finnhub·Twelve·CoinGecko, 코인(Binance) — Key·Secret·환경(testnet), "출금 권한 없이 발급" 안내.
+- 실측: Binance 시세·캔들·호가, CoinGecko 가격·트렌딩·글로벌 (키 없이). finnhub·Twelve 는 키 입력 후.
+- **곁가지로 발견**: 첫 LLM 요청이 가끔 1~4초 만에 "Request timed out." 으로 실패하고 pi 가 자동 재시도했다 (그 시각 일시적 — 이후 새 프로세스
+  14번 재현 안 됨). 그런데 서버가 재시도 예정 종료(`agent_end.willRetry`)도 "답 끝" 으로 보내 화면이 끝났다가 다시 이어졌고,
+  실패한 시도가 대화 기록에 오류 말풍선으로 남았다 → 재시도 예정이면 끝 신호를 보내지 않고, 재시도로 이어진 빈 실패는 기록에서 숨긴다.
+- 다음: 4차(b) Binance 현물 거래 — 주문·취소·OCO 만 확인 카드로, 출금·이체·마진·전환 등 자금 이동 58개 + 그 외 sapi 쓰기는 영구 차단.

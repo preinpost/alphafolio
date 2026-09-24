@@ -20,6 +20,8 @@ import {
 import { createLedgerTools, type D1Provider } from "@alphafolio/ledger/tools";
 import { createBrokerTools } from "@alphafolio/broker/tools";
 import { createOrderTools } from "@alphafolio/broker/order-tools";
+import { createDataTools } from "@alphafolio/broker/data-tools";
+import type { DataCreds } from "@alphafolio/broker";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
 import { ConversationPool, SESSION_ID_RE } from "./conversations.ts";
@@ -42,6 +44,8 @@ export interface RuntimeManagerOptions {
 	brokerAccess: (user: string) => BrokerAccess;
 	/** 사용자별 네이버 뉴스 자격증명. 미설정이면 툴 실행 시 설정 안내로 실패한다. */
 	naverCreds: (user: string) => NaverCredentials;
+	/** 해외·코인 데이터 제공자 키 (finnhub·Twelve·CoinGecko·Binance) */
+	dataCreds: (user: string) => DataCreds;
 	/**
 	 * 주문 확인 토큰 발급기. 툴은 이걸로 **준비만** 하고, 실행은 사람이
 	 * /api/orders/execute 를 호출해야 한다.
@@ -142,6 +146,8 @@ export class RuntimeManager {
 				}),
 				// 정정·취소·조건주문 — 역시 준비만 (확인 카드)
 				...createOrderTools({ brokers: this.opts.brokerAccess(user), prepareOrder: this.opts.prepareOrder(user) }),
+				// 해외·코인 데이터 — 조회만
+				...createDataTools({ creds: () => this.opts.dataCreds(user) }),
 			],
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});

@@ -31,6 +31,7 @@ import {
 	describeAction,
 	executeOrderAction,
 	type OrderAction,
+	type DataCreds,
 } from "@alphafolio/broker";
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
@@ -187,6 +188,19 @@ async function main(): Promise<void> {
 	});
 
 	/** 네이버 뉴스 자격증명 — 다른 키와 마찬가지로 사용자별이다. */
+	/** 해외·코인 데이터 제공자 키 — 호출 시점에 읽는다 (설정에서 넣으면 재시작 없이) */
+	const dataCreds = (user: string): DataCreds => {
+		const get = (n: string): string | undefined => secrets.get(n, user) || undefined;
+		const bKey = get("BINANCE_API_KEY");
+		const bSecret = get("BINANCE_API_SECRET");
+		return {
+			finnhub: get("FINNHUB_API_KEY"),
+			twelve: get("TWELVE_API_KEY"),
+			coingecko: get("COINGECKO_API_KEY"),
+			...(bKey && bSecret ? { binance: { key: bKey, secret: bSecret, testnet: get("BINANCE_ENV")?.toLowerCase() === "testnet" } } : {}),
+		};
+	};
+
 	const naverCreds = (user: string): NaverCredentials => {
 		const clientId = secrets.get("NCP_APIGW_API_KEY_ID", user);
 		const clientSecret = secrets.get("NCP_APIGW_API_KEY", user);
@@ -232,6 +246,7 @@ async function main(): Promise<void> {
 		ledgerConfig,
 		brokerAccess,
 		naverCreds,
+		dataCreds,
 		prepareOrder,
 		llmKeys,
 		idleMinutes: cfg.idleMinutes,

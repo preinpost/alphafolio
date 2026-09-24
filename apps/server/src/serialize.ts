@@ -81,8 +81,21 @@ export function serializeMessages(messages: unknown[]): UIMessage[] {
 		}
 	}
 
+	/**
+	 * 자동 재시도로 이어진 실패인가 — 뒤에(다음 사용자 메시지 전에) 다른 답이 있다.
+	 * pi 는 실패한 시도("Request timed out." 등)도 세션에 남긴다. 재시도가 성공했는데 오류 말풍선이 기록에 남으면
+	 * 실패한 것처럼 보인다 (실측: 첫 연결이 일시적으로 끊겼다가 재시도로 답이 나왔다).
+	 */
+	const retriedAfter = (i: number): boolean => {
+		for (let j = i + 1; j < msgs.length; j++) {
+			if (msgs[j]!.role === "user") return false;
+			if (msgs[j]!.role === "assistant") return true;
+		}
+		return false;
+	};
+
 	const out: UIMessage[] = [];
-	for (const m of msgs) {
+	for (const [i, m] of msgs.entries()) {
 		if (m.role === "toolResult") continue; // toolCall 블록에 합쳐진다
 
 		if (m.role === "user") {
@@ -125,6 +138,8 @@ export function serializeMessages(messages: unknown[]): UIMessage[] {
 					}
 				}
 			}
+			// 본문 없는 실패가 재시도로 이어졌으면 숨긴다. 본문이 있거나(도중에 끊긴 답) 마지막 실패면 그대로 보여준다
+			if (blocks.length === 0 && m.errorMessage && retriedAfter(i)) continue;
 			if (blocks.length > 0 || m.errorMessage) {
 				out.push({
 					role: "assistant",

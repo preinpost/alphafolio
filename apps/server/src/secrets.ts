@@ -47,8 +47,18 @@ export const SECRET_CATALOG: readonly SecretSpec[] = [
 	{ name: "OPENROUTER_API_KEY", label: "OpenRouter API 키", group: "LLM", hint: "비우면 서버 기본 계정" },
 	{ name: "ANTHROPIC_API_KEY", label: "Anthropic API 키", group: "LLM", hint: "비우면 서버 기본 계정" },
 
-	// Twelve Data·Finnhub·CoinGecko 는 쓰는 툴이 없어 뺐다 (넣어도 아무 일도 안 일어나는 칸이었다).
-	// 해당 시세 소스를 붙일 때 여기와 툴을 같이 추가한다.
+	// 해외·코인 데이터 (data_find·data_call, PLAN §35) — 사용자별
+	{ name: "FINNHUB_API_KEY", label: "Finnhub API 키", group: "데이터 (해외)", hint: "finnhub.io 무료 가입 → Dashboard" },
+	{ name: "TWELVE_API_KEY", label: "Twelve Data API 키", group: "데이터 (해외)", hint: "twelvedata.com 무료 가입 (분당 8회)" },
+	{ name: "COINGECKO_API_KEY", label: "CoinGecko Demo API 키", group: "데이터 (해외)", hint: "없어도 공개 한도로 동작" },
+	{
+		name: "BINANCE_API_KEY",
+		label: "Binance API Key",
+		group: "코인 (Binance)",
+		hint: "⚠️ 출금 권한 없이 발급 (조회·현물 거래만). 시세는 키 없이도 된다",
+	},
+	{ name: "BINANCE_API_SECRET", label: "Binance Secret Key", group: "코인 (Binance)" },
+	{ name: "BINANCE_ENV", label: "Binance 환경", group: "코인 (Binance)", hint: "testnet 이라고 넣으면 테스트넷, 비우면 실계좌" },
 	{
 		name: "NCP_APIGW_API_KEY_ID",
 		label: "네이버 API Key ID",

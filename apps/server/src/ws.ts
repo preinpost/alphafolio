@@ -147,6 +147,11 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 				});
 				return;
 			case "agent_end":
+				// 자동 재시도가 이어지면 아직 끝이 아니다 — 끝 신호를 보내면 화면이 "답 완료" 로 바뀌었다가 다시 이어진다
+				if ((raw as { willRetry?: boolean }).willRetry === true) {
+					snapshot();
+					return;
+				}
 				toViewers(user, sessionId, { type: "agent_end" });
 				snapshot();
 				toUser(user, { type: "activity", sessionId, streaming: false });
