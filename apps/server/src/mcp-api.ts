@@ -6,7 +6,7 @@
  */
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { judgeTool, McpSession, PRESETS, renderCallResult, type FetchLike, type McpServerHandle } from "@alphafolio/mcp";
+import { judgeTool, McpSession, PRESETS, rawResult, renderCallResult, summarizeResult, type FetchLike, type McpServerHandle, type SummaryLine } from "@alphafolio/mcp";
 import { explainMcpError, type McpWriteRequest } from "@alphafolio/mcp/tools";
 import { HttpError, readJson } from "./ledger-api.ts";
 import { createOrderToken, ORDER_TOKEN_TTL_MS, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
@@ -60,7 +60,19 @@ function confirmFailure(reason: VerifyFailure): string {
 }
 
 /** 사람이 카드에서 [확인] 을 눌렀다 — 실제로 외부 계정이 바뀌는 유일한 경로 */
-async function executeMcpWrite(deps: McpApiDeps, user: string, token: string): Promise<{ ok: boolean; message: string; output: string }> {
+/** 확인 카드가 받는 실행 결과 — 원본 JSON 은 raw 로만 (카드가 접어 둔다) */
+export interface McpExecuteResult {
+	ok: boolean;
+	message: string;
+	/** 사람이 볼 요약 (알림 id·조건·만료 등). JSON 이 아니면 비고 detail 이 곧 내용 */
+	summary: SummaryLine[];
+	/** 짧은 본문 — 실패 사유나 JSON 이 아닌 응답 */
+	detail: string;
+	/** 원본 응답 (펼쳐 볼 때만) */
+	raw: string;
+}
+
+async function executeMcpWrite(deps: McpApiDeps, user: string, token: string): Promise<McpExecuteResult> {
 	const verified = deps.confirm.guard.verify(token, deps.confirm.secret, user);
 	if (!verified.ok) throw new HttpError(400, confirmFailure(verified.reason));
 	const { mcp, nonce } = verified.payload;
@@ -83,13 +95,16 @@ async function executeMcpWrite(deps: McpApiDeps, user: string, token: string): P
 	});
 	try {
 		const result = await session.callTool(mcp.tool, mcp.args);
-		const out = renderCallResult(result, 1_500);
+		const summary = result.isError ? [] : summarizeResult(result, mcp.tool, h.preset);
+		// 요약이 됐으면 본문은 원본으로만, 안 되면(JSON 이 아닌 응답·실패 사유) 짧게 보여 준다
+		const detail = summary.length ? "" : renderCallResult(result, 500).text;
+		const raw = rawResult(result);
 		return result.isError
-			? { ok: false, message: `${rec.name} 가 거절했습니다`, output: out.text }
-			: { ok: true, message: `${rec.name} 에서 실행했습니다`, output: out.text };
+			? { ok: false, message: `${rec.name} 가 거절했습니다`, summary, detail, raw }
+			: { ok: true, message: `${rec.name} 에서 실행했습니다`, summary, detail, raw };
 	} catch (err) {
 		// 네트워크 오류는 실행 여부를 모른다 — 다시 누르지 말고 조회로 확인하게
-		return { ok: false, message: `${explainMcpError(rec.name, err)} (실행됐는지 알 수 없으니 목록을 조회해 확인하세요)`, output: "" };
+		return { ok: false, message: `${explainMcpError(rec.name, err)} (실행됐는지 알 수 없으니 목록을 조회해 확인하세요)`, summary: [], detail: "", raw: "" };
 	} finally {
 		void session.close();
 	}

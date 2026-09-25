@@ -20,7 +20,7 @@ import {
 	registerClient,
 } from "../src/oauth.ts";
 import { judgeTool, nameWords, TRADINGVIEW } from "../src/policy.ts";
-import { renderCallResult } from "../src/render.ts";
+import { rawResult, renderCallResult, summarizeResult } from "../src/render.ts";
 import { createMcpTools, type McpWriteRequest } from "../src/tools.ts";
 import type { McpServerHandle } from "../src/pool.ts";
 import { createFakeServer, ISSUER, MCP_URL } from "./fake-server.ts";
@@ -340,6 +340,12 @@ describe("mcp_call 게이트웨이", () => {
 		});
 	});
 
+	it("알림 만들기 카드: 인자는 종목 → 조건 → 가격 → 이름 → 메시지 순서", async () => {
+		const { run } = setup();
+		const r = await run({ tool: "mcp-tv-create-alert", arguments: { message: "m", name: "n", price: 1, condition: "cross_up", symbol: "BINANCE:ETHUSDT" } });
+		assert.deepEqual((r.details as unknown as { args: Array<{ name: string }> }).args.map((a) => a.name), ["symbol", "condition", "price", "name", "message"]);
+	});
+
 	it("알림 만들기 카드: 조건·주기·켬/끔·만료를 한글·KST 로, 기본값 안내", async () => {
 		const { run, prepared } = setup();
 		const r = await run({
@@ -351,7 +357,7 @@ describe("mcp_call 게이트웨이", () => {
 		assert.equal(card.destructive, false);
 		assert.deepEqual(
 			card.args.map((a) => `${a.label}=${a.value}`),
-			["종목=NASDAQ:AAPL", "가격=250", "조건=위로 돌파 (cross_up)", "차트 주기=일봉 (1D)", "한 번 울리면 끄기=켬", "만료=2026-10-31 15:00 (KST)", "이름=AAPL 250 돌파"],
+			["종목=NASDAQ:AAPL", "조건=위로 돌파 (cross_up)", "가격=250", "이름=AAPL 250 돌파", "차트 주기=일봉 (1D)", "만료=2026-10-31 15:00 (KST)", "한 번 울리면 끄기=켬"],
 		);
 		assert.match(card.notes[0] ?? "", /만료 30일 뒤.*알림은 주문이 아닙니다/);
 		assert.deepEqual(card.warnings, []);
@@ -440,6 +446,60 @@ describe("mcp_call 게이트웨이", () => {
 		const r = (await tool!.execute("id", {} as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }> };
 		assert.match(r.content[0]!.text, /연결된 MCP 서버가 없습니다/);
 		await assert.rejects(tool!.execute("id", { tool: "x" } as never, undefined, undefined, undefined as never), /연결된 MCP 서버가 없습니다/);
+	});
+});
+
+describe("쓰기 결과 요약", () => {
+	/** 실제 create-alert 응답 (2026-09-25, 표시용 필드 일부 생략) */
+	const ALERT = {
+		active: true,
+		alert_id: 5698079814,
+		auto_deactivate: false,
+		complexity: "primitive",
+		condition: { cross_interval: true, frequency: "on_first_fire", resolution: "1", series: [{ type: "barset" }, { type: "value", value: 2800 }], type: "cross_up" },
+		create_time: "2026-09-25T08:13:40Z",
+		email: false,
+		expiration: "2026-10-25T08:13:40Z",
+		has_webhook: false,
+		mobile_push: true,
+		name: "ETH 2800달러 돌파",
+		popup: true,
+		presentation_data: { main_series: { "base-currency-logoid": "crypto/XTVCETH" } },
+		pro_symbol: '={"symbol":"BINANCE:ETHUSDT"}',
+		symbol: "BINANCE:ETHUSDT",
+		type: "price",
+	};
+	const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v) }] });
+
+	it("TradingView 알림: 필요한 것만 한글로 (조건은 가격 + 방향, 만료는 KST)", () => {
+		assert.deepEqual(summarizeResult(text(ALERT), "mcp-tv-create-alert", TRADINGVIEW), [
+			{ label: "알림 id", value: "5698079814" },
+			{ label: "이름", value: "ETH 2800달러 돌파" },
+			{ label: "종목", value: "BINANCE:ETHUSDT" },
+			{ label: "조건", value: "2,800 위로 돌파" },
+			{ label: "상태", value: "켜짐" },
+			{ label: "만료", value: "2026-10-25 17:13 (KST)" },
+			{ label: "알림 방법", value: "모바일 푸시 · 팝업" },
+		]);
+		// get-alerts 모양({ alerts: [하나] })도 같다
+		assert.equal(summarizeResult(text({ alerts: [ALERT], success: true }), "mcp-tv-get-alerts", TRADINGVIEW)[0]?.value, "5698079814");
+	});
+
+	it("일반 요약: id·이름을 앞에, 표시용·중첩 필드는 빼고 8줄까지. JSON 이 아니면 없음", () => {
+		const lines = summarizeResult(text({ ...ALERT, alert_id: undefined, alert_ids: [1, 2] }), "x");
+		assert.equal(lines[0]?.label, "alert_ids");
+		assert.ok(lines.length <= 8);
+		assert.ok(!lines.some((l) => /logo|presentation|pro_symbol|complexity/.test(l.label)));
+		assert.ok(!lines.some((l) => l.label === "condition")); // 중첩 객체
+		assert.deepEqual(summarizeResult(text({ success: true }), "x"), [{ label: "success", value: "예" }]);
+		assert.deepEqual(summarizeResult({ content: [{ type: "text", text: "Deleted 2 alerts" }] }, "x"), []);
+		assert.deepEqual(summarizeResult({ structuredContent: { deleted: 2 }, content: [] }, "x"), [{ label: "deleted", value: "2" }]);
+	});
+
+	it("원본은 들여쓴 JSON, 길면 자른다", () => {
+		assert.equal(rawResult(text({ a: 1 })), '{\n  "a": 1\n}');
+		assert.match(rawResult(text({ s: "x".repeat(100) }), 50), /…\(잘림\)$/);
+		assert.equal(rawResult({ content: [{ type: "text", text: "plain" }] }), "plain");
 	});
 });
 

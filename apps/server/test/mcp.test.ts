@@ -15,7 +15,7 @@ import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d
 import { createFakeServer, MCP_URL, type FakeServer } from "../../../packages/mcp/test/fake-server.ts";
 import { parsePublicUrl } from "../src/config.ts";
 import { McpAuthManager } from "../src/mcp-auth.ts";
-import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpWritePayload } from "../src/mcp-api.ts";
+import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpExecuteResult, type McpWritePayload } from "../src/mcp-api.ts";
 import { OrderTokenGuard } from "../src/order-tokens.ts";
 import { McpConfigError, McpStore, normalizeHeaders } from "../src/mcp-store.ts";
 
@@ -194,7 +194,7 @@ describe("토큰 갱신", () => {
 describe("쓰기 확인 카드 → 실행 (PLAN §39)", () => {
 	/** handleMcp 에 넣을 가짜 요청 */
 	const post = (body: unknown) => Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: "POST" }) as unknown as IncomingMessage;
-	const execute = (user: string, token: string) => handleMcp(post({ token }), "/api/mcp/execute", user, deps) as Promise<{ ok: boolean; message: string; output: string }>;
+	const execute = (user: string, token: string) => handleMcp(post({ token }), "/api/mcp/execute", user, deps) as Promise<McpExecuteResult>;
 	const calls = () => srv.log.filter((l) => l.rpc === "tools/call");
 
 	/** mcp_call 로 쓰기를 준비해 카드를 받는다 (실제 서버와 같은 발급기) */
@@ -215,7 +215,8 @@ describe("쓰기 확인 카드 → 실행 (PLAN §39)", () => {
 		const token = await prepare();
 		assert.equal(calls().length, 0);
 		const r = await execute("ms", token);
-		assert.deepEqual(r, { ok: true, message: "Example 에서 실행했습니다", output: "called delete_alert" });
+		// JSON 이 아닌 응답은 요약 없이 본문이 곧 내용
+		assert.deepEqual(r, { ok: true, message: "Example 에서 실행했습니다", summary: [], detail: "called delete_alert", raw: "called delete_alert" });
 		assert.equal(calls().length, 1);
 		assert.deepEqual(JSON.parse(calls()[0]!.body ?? "{}").params, { name: "delete_alert", arguments: { alert_ids: [7] } });
 		await assert.rejects(execute("ms", token), /이미 처리한 요청/);
@@ -253,7 +254,22 @@ describe("쓰기 확인 카드 → 실행 (PLAN §39)", () => {
 		const failing = createFakeServer({ acceptToken: latest, tools: [{ name: "delete_alert" }], callResult: () => ({ isError: true, content: [{ type: "text", text: "alert 7 not found" }] }) });
 		deps = { ...deps, fetch: (url, init) => (url.startsWith(MCP_URL) ? failing.fetch(url, init) : srv.fetch(url, init)) };
 		const token = await prepare();
-		assert.deepEqual(await execute("ms", token), { ok: false, message: "Example 가 거절했습니다", output: "alert 7 not found" });
+		assert.deepEqual(await execute("ms", token), { ok: false, message: "Example 가 거절했습니다", summary: [], detail: "alert 7 not found", raw: "alert 7 not found" });
+	});
+
+	it("JSON 응답은 요약 줄 + 원본(들여쓰기)으로 — 본문에 JSON 을 늘어놓지 않는다", async () => {
+		const payload = { success: true, data: { id: "wl-9", name: "반도체", symbols: ["NASDAQ:NVDA", "NASDAQ:AMD"], logoid: "x" } };
+		const jsonSrv = createFakeServer({ acceptToken: latest, tools: [{ name: "delete_alert" }], callResult: () => ({ content: [{ type: "text", text: JSON.stringify(payload) }] }) });
+		deps = { ...deps, fetch: (url, init) => (url.startsWith(MCP_URL) ? jsonSrv.fetch(url, init) : srv.fetch(url, init)) };
+		const r = await execute("ms", await prepare());
+		assert.deepEqual(r.summary, [
+			{ label: "id", value: "wl-9" },
+			{ label: "name", value: "반도체" },
+			{ label: "success", value: "예" },
+			{ label: "symbols", value: "NASDAQ:NVDA, NASDAQ:AMD" },
+		]);
+		assert.equal(r.detail, "");
+		assert.equal(r.raw, JSON.stringify(payload, null, 2));
 	});
 });
 

@@ -107,6 +107,15 @@ export interface McpListing {
 	storageReady: boolean;
 }
 
+/** 확인 카드 실행 결과 — 원본 JSON(raw)은 카드가 접어 둔다 */
+export interface McpExecuteResult {
+	ok: boolean;
+	message: string;
+	summary: Array<{ label: string; value: string }>;
+	detail: string;
+	raw: string;
+}
+
 export type McpAddInput =
 	| { preset: string }
 	| { name: string; url: string; auth: "oauth" | "none" }
@@ -191,7 +200,7 @@ export const api = {
 	disconnectMcp: (id: string) => request<McpListing>(`/api/mcp/servers/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
 	// ⚠️ MCP 쓰기가 실제로 실행되는 유일한 클라이언트 경로. 확인 카드의 버튼에서만 호출한다 (PLAN §39)
 	executeMcp: (token: string) =>
-		request<{ ok: boolean; message: string; output: string }>("/api/mcp/execute", { method: "POST", body: JSON.stringify({ token }) }),
+		request<McpExecuteResult>("/api/mcp/execute", { method: "POST", body: JSON.stringify({ token }) }),
 	testMcp: (id: string) => request<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, { method: "POST" }),
 
 	// ── 가계부 (ledgerId 를 비우면 서버가 기본 가계부를 고른다) ─────────────

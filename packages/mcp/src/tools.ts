@@ -62,7 +62,11 @@ export function describeArgs(tool: McpTool, args: Record<string, unknown>, prese
 		string,
 		{ description?: string }
 	>;
-	return Object.entries(args).map(([name, v]) => ({
+	const order = preset?.argOrder ?? [];
+	const rank = (n: string) => (order.includes(n) ? order.indexOf(n) : order.length);
+	return Object.entries(args)
+		.sort(([a], [b]) => rank(a) - rank(b))
+		.map(([name, v]) => ({
 		name,
 		label: preset?.argLabels?.[name] ?? null,
 		value: preset?.formatArg?.(tool.name, name, v) ?? (typeof v === "string" ? v : JSON.stringify(v)),

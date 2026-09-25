@@ -23,6 +23,41 @@ const TV_RESOLUTIONS: Readonly<Record<string, string>> = {
 	"1D": "일봉", D: "일봉", "1W": "주봉", W: "주봉", "1M": "월봉", M: "월봉",
 };
 
+export interface SummaryLine {
+	label: string;
+	value: string;
+}
+
+/**
+ * TradingView 알림 응답(create·update 는 알림 전체, get 은 { alerts: [...] }) → 요약 줄.
+ * 알림 모양이 아니면 null (일반 요약으로).
+ */
+function summarizeTvAlert(data: unknown): SummaryLine[] | null {
+	const obj = data as Record<string, unknown> | null;
+	const alert = (Array.isArray(obj?.alerts) && obj.alerts.length === 1 ? obj.alerts[0] : obj) as Record<string, unknown> | null;
+	if (!alert || typeof alert !== "object" || alert.alert_id === undefined) return null;
+	const out: SummaryLine[] = [{ label: "알림 id", value: String(alert.alert_id) }];
+	if (typeof alert.name === "string" && alert.name) out.push({ label: "이름", value: alert.name });
+	if (typeof alert.symbol === "string") out.push({ label: "종목", value: alert.symbol });
+	const cond = alert.condition as { type?: string; series?: Array<{ type?: string; value?: unknown }> } | undefined;
+	if (cond?.type) {
+		const value = cond.series?.find((s) => s.type === "value")?.value;
+		const how = TV_CONDITIONS[cond.type] ?? cond.type;
+		out.push({ label: "조건", value: value !== undefined ? `${Number(value).toLocaleString("en-US")} ${how}` : how });
+	}
+	if (typeof alert.active === "boolean") out.push({ label: "상태", value: alert.active ? "켜짐" : "꺼짐" });
+	if (typeof alert.expiration === "string" && alert.expiration) out.push({ label: "만료", value: kstTime(alert.expiration) });
+	const via = [
+		alert.mobile_push === true && "모바일 푸시",
+		alert.popup === true && "팝업",
+		alert.email === true && "이메일",
+		(alert.has_webhook === true || (typeof alert.webhook === "string" && alert.webhook)) && "웹훅",
+	].filter(Boolean);
+	if (via.length) out.push({ label: "알림 방법", value: via.join(" · ") });
+	if (alert.auto_deactivate === true) out.push({ label: "반복", value: "한 번 울리면 꺼짐" });
+	return out;
+}
+
 /** ISO 시각 → "2026-10-31 15:00 (KST)" — 해석이 안 되면 원문 */
 function kstTime(iso: string): string {
 	const t = Date.parse(iso);
@@ -50,6 +85,10 @@ export interface McpPreset {
 	notes?: Readonly<Record<string, string>>;
 	/** 카드에 붙일 경고 — 외부로 데이터가 나가는 설정 등 */
 	warn?: (tool: string, args: Record<string, unknown>) => string[];
+	/** 카드의 인자 순서 (없는 이름은 뒤에 원래 순서로) */
+	argOrder?: readonly string[];
+	/** 실행 결과(JSON) → 사람이 볼 요약 줄. null 이면 일반 요약 */
+	summarize?: (tool: string, data: unknown) => SummaryLine[] | null;
 	/** 모델에게 보여 줄 역할 안내 — 기존 KIS·토스·네이버 툴과 겹치는 영역을 피한다 */
 	role: string;
 }
@@ -148,6 +187,8 @@ export const TRADINGVIEW: McpPreset = {
 		"mcp-tv-create-alert": "생략한 값은 TradingView 기본값 — 조건 교차(어느 방향이든), 차트 주기 1분, 만료 30일 뒤, 모바일 푸시·팝업 켬. 알림은 주문이 아닙니다.",
 		"mcp-tv-update-alert": "조건·종목·차트 주기는 바꿀 수 없습니다 (지우고 새로 만들어야 한다). 수정하면 알림이 다시 켜집니다.",
 	},
+	argOrder: ["alert_id", "alert_ids", "watchlist_id", "symbol", "symbols", "condition", "price", "name", "description", "message", "resolution", "expiration", "auto_deactivate", "mobile_push", "popup", "email", "webhook", "monitor", "conditions"],
+	summarize: (_tool, data) => summarizeTvAlert(data),
 	warn: (_tool, args) => [
 		...(typeof args.webhook === "string" && args.webhook ? [`알림이 울리면 이 주소로 데이터가 전송됩니다: ${args.webhook} — 직접 입력한 주소가 맞는지 확인하세요.`] : []),
 		...(args.monitor === true ? ["모니터링 웹훅을 켭니다 (알림이 울리면 TradingView 가 분석용으로 외부에 전송)."] : []),

@@ -3,6 +3,7 @@
  * 이미지·오디오 원본은 싣지 않는다 (토큰 폭발 — 금융 조회에 필요한 건 텍스트·JSON).
  */
 import type { McpCallResult, McpTool } from "./client.ts";
+import type { McpPreset, SummaryLine } from "./policy.ts";
 
 export const MAX_RESULT_CHARS = 16_000;
 
@@ -39,6 +40,64 @@ export function renderCallResult(r: McpCallResult, max = MAX_RESULT_CHARS): { te
 		text: `${text.slice(0, max)}\n\n…(잘림 — 전체 ${text.length.toLocaleString("en-US")}자 중 ${max.toLocaleString("en-US")}자. 인자(limit·기간·columns)를 좁혀 다시 요청)`,
 		truncated: true,
 	};
+}
+
+/** 결과 본문이 JSON 이면 파싱 (structuredContent 우선) */
+export function resultData(r: McpCallResult): unknown {
+	if (r.structuredContent !== undefined && r.structuredContent !== null) return r.structuredContent;
+	const text = (r.content ?? []).find((c) => c.type === "text") as { text?: string } | undefined;
+	if (typeof text?.text !== "string") return undefined;
+	try {
+		return JSON.parse(text.text);
+	} catch {
+		return undefined;
+	}
+}
+
+/** 요약에서 뺄 필드 — 표시·내부용 */
+const NOISE = /logo|presentation|pro_symbol|sound|complexity|kinds|policy|cross_interval|frequency|^_/i;
+/** 앞에 둘 필드 — 순서대로 (id → 이름 → 상태 → 종목), 나머지는 원래 순서 */
+const FIRST = [/(^|_)(id|ids)$/, /^(name|title)$/, /^(status|success|message)$/, /^symbol/];
+const rankOf = (key: string): number => {
+	const i = FIRST.findIndex((re) => re.test(key));
+	return i < 0 ? FIRST.length : i;
+};
+
+function scalar(v: unknown): string | null {
+	if (typeof v === "string") return v.length > 200 ? `${v.slice(0, 199)}…` : v;
+	if (typeof v === "number") return v.toLocaleString("en-US", { maximumFractionDigits: 8 });
+	if (typeof v === "boolean") return v ? "예" : "아니오";
+	if (Array.isArray(v) && v.length <= 10 && v.every((x) => typeof x === "string" || typeof x === "number")) return v.join(", ");
+	return null;
+}
+
+/**
+ * 쓰기 실행 결과 → 확인 카드에 보일 요약 줄 (최대 8개). 원본 JSON 을 그대로 늘어놓지 않는다.
+ * 프리셋이 아는 모양이면 그것, 아니면 윗단 스칼라 필드 (`data` 한 겹은 벗긴다). JSON 이 아니면 빈 목록 (원문이 곧 요약).
+ */
+export function summarizeResult(r: McpCallResult, tool: string, preset?: McpPreset): SummaryLine[] {
+	const data = resultData(r);
+	if (data === undefined) return [];
+	const special = preset?.summarize?.(tool, data);
+	if (special) return special;
+	let obj = data as Record<string, unknown>;
+	if (obj && typeof obj === "object" && !Array.isArray(obj) && obj.data && typeof obj.data === "object" && !Array.isArray(obj.data)) {
+		obj = { ...(obj.data as Record<string, unknown>), ...(obj.success !== undefined ? { success: obj.success } : {}) };
+	}
+	if (!obj || typeof obj !== "object" || Array.isArray(obj)) return [];
+	const lines = Object.entries(obj)
+		.filter(([k]) => !NOISE.test(k))
+		.map(([k, v]) => ({ label: preset?.argLabels?.[k] ?? k, value: scalar(v), rank: rankOf(k) }))
+		.filter((x): x is { label: string; value: string; rank: number } => x.value !== null && x.value !== "")
+		.sort((a, b) => a.rank - b.rank);
+	return lines.slice(0, 8).map(({ label, value }) => ({ label, value }));
+}
+
+/** 원본 응답 — 사람이 펼쳐 볼 때만. JSON 이면 들여쓰기 */
+export function rawResult(r: McpCallResult, max = 6_000): string {
+	const data = resultData(r);
+	const text = data !== undefined ? JSON.stringify(data, null, 2) : renderCallResult(r, max).text;
+	return text.length > max ? `${text.slice(0, max)}\n…(잘림)` : text;
 }
 
 /** 목록용 한 줄 설명 — 첫 문장, 120자 */

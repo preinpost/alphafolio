@@ -31,13 +31,31 @@ async function executeOrder(token: string): Promise<string> {
 	return `${r.message}${id ? ` (${id.slice(0, 12)}${id.length > 12 ? "…" : ""})` : ""}`;
 }
 
+/** 실행 결과 — 문장 하나, 또는 문장 + 카드가 따로 그릴 값 (MCP 결과 요약) */
+export type ConfirmOutcome<D> = string | { text: string; detail: D };
+
+/** 실패지만 카드가 따로 그릴 값이 있다 (MCP 서버가 거절한 이유·원본) */
+export class ConfirmError<D> extends Error {
+	readonly detail: D;
+	constructor(message: string, detail: D) {
+		super(message);
+		this.detail = detail;
+	}
+}
+
 /**
  * 확인 버튼·남은 시간·결과 — 신규·정정·취소·조건주문 카드, MCP 쓰기 카드(McpCards) 공용.
  * ⚠️ confirm() 이 서버로 토큰을 보내는 것이 **실행되는 유일한 경로**다. run 은 실패면 throw 한다.
  */
-export function useConfirm(token: string | null, expiresAt: number | null, ok: boolean, run: (token: string) => Promise<string> = executeOrder) {
+export function useConfirm<D = never>(
+	token: string | null,
+	expiresAt: number | null,
+	ok: boolean,
+	run: (token: string) => Promise<ConfirmOutcome<D>> = executeOrder,
+) {
 	const [phase, setPhase] = useState<Phase>("idle");
 	const [message, setMessage] = useState<string | null>(null);
+	const [detail, setDetail] = useState<D | null>(null);
 	const [remain, setRemain] = useState(() => secondsLeft(expiresAt));
 
 	// 남은 시간 표시 — 토큰은 2분이라 사용자가 흐름을 알 수 있어야 한다
@@ -55,18 +73,23 @@ export function useConfirm(token: string | null, expiresAt: number | null, ok: b
 		if (!token) return;
 		setPhase("sending");
 		try {
-			const text = await run(token);
+			const out = await run(token);
 			setPhase("done");
-			setMessage(text);
+			if (typeof out === "string") setMessage(out);
+			else {
+				setMessage(out.text);
+				setDetail(out.detail);
+			}
 		} catch (err) {
 			setPhase("failed");
 			setMessage(err instanceof Error ? err.message : String(err));
+			if (err instanceof ConfirmError) setDetail(err.detail as D);
 		}
 	}
-	return { phase, message, remain, confirm, dismiss: () => setPhase("expired") };
+	return { phase, message, detail, remain, confirm, dismiss: () => setPhase("expired") };
 }
 
-export function ConfirmBar({ c, verb }: { c: ReturnType<typeof useConfirm>; verb: string }) {
+export function ConfirmBar({ c, verb }: { c: Pick<ReturnType<typeof useConfirm>, "phase" | "message" | "remain" | "confirm" | "dismiss">; verb: string }) {
 	return (
 		<div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
 			{c.phase === "idle" && (
