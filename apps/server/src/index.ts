@@ -49,7 +49,7 @@ import { attachWebSocket } from "./ws.ts";
 import { createSafeFetch } from "@alphafolio/mcp";
 import { McpStore } from "./mcp-store.ts";
 import { CALLBACK_PATH, McpAuthManager } from "./mcp-auth.ts";
-import { handleMcp, handleMcpCallback, mcpHandles, type McpApiDeps } from "./mcp-api.ts";
+import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpWritePayload } from "./mcp-api.ts";
 
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -120,6 +120,8 @@ async function main(): Promise<void> {
 		auth: new McpAuthManager({ store: mcpStore, publicUrl: cfg.publicUrl, fetch: mcpFetch, policy: mcpPolicy }),
 		fetch: mcpFetch,
 		publicUrl: cfg.publicUrl,
+		// 쓰기 확인 카드 — 주문과 같은 구조, 서명 키만 분리 (PLAN §39)
+		confirm: { secret: mcpConfirmSecret(cfg.auth.secret), guard: new OrderTokenGuard<McpWritePayload>() },
 	};
 
 	setLedgerConfigProvider(ledgerConfig);
@@ -273,6 +275,7 @@ async function main(): Promise<void> {
 		llmKeys,
 		mcpServers: (user) => mcpHandles(mcpDeps, user),
 		mcpFetch,
+		prepareMcpWrite: (user) => prepareMcpWrite(mcpDeps, user),
 		idleMinutes: cfg.idleMinutes,
 	});
 

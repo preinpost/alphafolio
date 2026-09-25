@@ -40,6 +40,7 @@ const CARD_KINDS = new Set([
 	"order-change-card",
 	"conditional-order-card",
 	"binance-order-card",
+	"mcp-confirm-card",
 	"overview-card",
 ]);
 

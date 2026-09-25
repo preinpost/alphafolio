@@ -21,7 +21,7 @@ import {
 } from "../src/oauth.ts";
 import { judgeTool, nameWords, TRADINGVIEW } from "../src/policy.ts";
 import { renderCallResult } from "../src/render.ts";
-import { createMcpTools } from "../src/tools.ts";
+import { createMcpTools, type McpWriteRequest } from "../src/tools.ts";
 import type { McpServerHandle } from "../src/pool.ts";
 import { createFakeServer, ISSUER, MCP_URL } from "./fake-server.ts";
 
@@ -70,28 +70,45 @@ describe("네트워크 경계 (SSRF)", () => {
 	});
 });
 
-describe("읽기 전용 정책", () => {
-	it("TradingView: 쓰기 10개 + 목록 밖은 차단, 읽기 25개만 허용", () => {
-		const allowed = TV_TOOLS.filter((name) => judgeTool({ name }, TRADINGVIEW).allowed);
-		assert.equal(allowed.length, 25);
-		for (const w of TV_WRITES) assert.equal(judgeTool({ name: w }, TRADINGVIEW).allowed, false, w);
-		// 허용목록에 이름이 모두 실제로 있다 (오타 방지)
+describe("읽기/쓰기 판정", () => {
+	/** preset 을 null 로 주면 일반 서버 규칙 (undefined 는 기본값 TradingView 가 된다) */
+	const mode = (name: string, preset: typeof TRADINGVIEW | null = TRADINGVIEW, annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }) =>
+		judgeTool({ name, ...(annotations ? { annotations } : {}) }, preset ?? undefined).mode;
+
+	it("TradingView: 읽기 25개는 바로, 쓰기 10개·목록 밖 새 툴은 확인 카드", () => {
+		assert.equal(TV_TOOLS.filter((n) => mode(n) === "read").length, 25);
+		for (const w of TV_WRITES) assert.equal(mode(w), "confirm", w);
+		// 목록에 이름이 모두 실제로 있다 (오타 방지) — 읽기·쓰기가 겹치지 않고 35개를 다 덮는다
 		for (const a of TRADINGVIEW.allow) assert.ok(TV_TOOLS.includes(a), a);
-		// 새로 생긴 툴은 읽기처럼 보여도 목록에 올릴 때까지 막는다
-		assert.equal(judgeTool({ name: "mcp-tv-get-something-new" }, TRADINGVIEW).allowed, false);
+		assert.deepEqual(Object.keys(TRADINGVIEW.writeLabels).sort(), [...TV_WRITES].sort());
+		// 새로 생긴 툴은 읽기처럼 보여도 목록에 올릴 때까지 확인을 받는다
+		const unknown = judgeTool({ name: "mcp-tv-get-something-new" }, TRADINGVIEW);
+		assert.equal(unknown.mode, "confirm");
+		assert.equal(unknown.mode === "confirm" && unknown.label, null);
 	});
 
-	it("일반 서버: 쓰기 동사가 있으면 readOnlyHint 여도 막고, 모르는 이름은 막는다", () => {
+	it("쓰기 카드: 한글 이름, 삭제·제거는 되돌릴 수 없음 표시", () => {
+		const del = judgeTool({ name: "mcp-tv-delete-alert" }, TRADINGVIEW);
+		assert.deepEqual(del, { mode: "confirm", reason: "쓰기", destructive: true, label: "TradingView 알림 삭제" });
+		const rm = judgeTool({ name: "mcp-watchlist-remove-from-watchlist" }, TRADINGVIEW);
+		assert.equal(rm.mode === "confirm" && rm.destructive, true);
+		const create = judgeTool({ name: "mcp-tv-create-alert" }, TRADINGVIEW);
+		assert.equal(create.mode === "confirm" && create.destructive, false);
+		const stop = judgeTool({ name: "mcp-tv-stop-alerts" }, TRADINGVIEW);
+		assert.equal(stop.mode === "confirm" && stop.destructive, false); // 중지는 다시 켤 수 있다
+	});
+
+	it("일반 서버: 쓰기 동사는 readOnlyHint 여도 확인, 모르는 이름도 확인", () => {
 		assert.deepEqual(nameWords("getOpenOrders"), ["get", "open", "orders"]);
-		assert.equal(judgeTool({ name: "get_quote" }).allowed, true);
-		assert.equal(judgeTool({ name: "searchSymbols" }).allowed, true);
-		assert.equal(judgeTool({ name: "place_order" }).allowed, false);
-		assert.equal(judgeTool({ name: "create_alert", annotations: { readOnlyHint: true } }).allowed, false);
-		assert.equal(judgeTool({ name: "get_x", annotations: { destructiveHint: true } }).allowed, false);
-		assert.equal(judgeTool({ name: "screener", annotations: { readOnlyHint: true } }).allowed, true);
-		assert.equal(judgeTool({ name: "screener" }).allowed, false);
-		// 일반 규칙으로도 TradingView 쓰기는 전부 막힌다 (프리셋이 없던 시절의 안전망)
-		for (const w of TV_WRITES) assert.equal(judgeTool({ name: w }).allowed, false, w);
+		assert.equal(mode("get_quote", null), "read");
+		assert.equal(mode("searchSymbols", null), "read");
+		assert.equal(mode("place_order", null), "confirm");
+		assert.equal(mode("create_alert", null, { readOnlyHint: true }), "confirm");
+		assert.equal(mode("get_x", null, { destructiveHint: true }), "confirm");
+		assert.equal(mode("screener", null, { readOnlyHint: true }), "read");
+		assert.equal(mode("screener", null), "confirm");
+		// 일반 규칙으로도 TradingView 쓰기는 전부 확인 (프리셋이 없던 시절의 안전망)
+		for (const w of TV_WRITES) assert.equal(mode(w, null), "confirm", w);
 	});
 });
 
@@ -243,35 +260,152 @@ describe("OAuth", () => {
 });
 
 describe("mcp_call 게이트웨이", () => {
+	/** 실제 create-alert 스키마 (2026-09-23 목록에서 발췌) */
+	const CREATE_ALERT_SCHEMA = {
+		type: "object",
+		properties: {
+			symbol: { type: "string", description: "Symbol in EXCHANGE:TICKER format" },
+			price: { type: "number", description: "Price threshold for a simple price condition" },
+			condition: { type: "string", description: "Price condition type: cross, cross_up, cross_down, greater, less. Default cross" },
+			message: { type: "string" },
+			name: { type: "string" },
+			resolution: { type: "string" },
+			expiration: { type: "string" },
+			auto_deactivate: { type: "boolean" },
+			mobile_push: { type: ["null", "boolean"] },
+			webhook: { type: "string" },
+			monitor: { type: "boolean" },
+			conditions: { type: ["null", "array"] },
+		},
+		required: ["symbol"],
+		additionalProperties: false,
+	};
 	const TV_FAKE = TV_TOOLS.map((name) => ({
 		name,
 		description: `${name} does things. More detail here.`,
-		inputSchema: { type: "object", properties: { symbol: { type: "string", description: "EXCHANGE:TICKER" }, limit: { type: "integer" } }, required: name.includes("forecast") ? ["symbol"] : [] },
+		inputSchema:
+			name === "mcp-tv-create-alert"
+				? CREATE_ALERT_SCHEMA
+				: { type: "object", properties: { symbol: { type: "string", description: "EXCHANGE:TICKER" }, limit: { type: "integer" } }, required: name.includes("forecast") ? ["symbol"] : [] },
 	}));
 
-	function setup(extra: Partial<McpServerHandle> = {}, opts: Parameters<typeof createFakeServer>[0] = {}) {
+	function setup(extra: Partial<McpServerHandle> = {}, opts: Parameters<typeof createFakeServer>[0] = {}, withPrepare = true) {
 		const srv = createFakeServer({ tools: TV_FAKE, ...opts });
 		const handle: McpServerHandle = { id: "tradingview", name: "TradingView", url: MCP_URL, preset: TRADINGVIEW, state: "ready", version: "v1", headers: async () => ({}), ...extra };
-		const [tool] = createMcpTools({ servers: () => [handle], fetch: srv.fetch });
+		const prepared: McpWriteRequest[] = [];
+		const [tool] = createMcpTools({
+			servers: () => [handle],
+			fetch: srv.fetch,
+			...(withPrepare ? { prepareWrite: (req: McpWriteRequest) => (prepared.push(req), { token: `tok-${prepared.length}`, expiresAt: 42 }) } : {}),
+		});
 		const run = async (params: Record<string, unknown>) =>
-			(await tool!.execute("id", params as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }>; details: { kind: string } };
-		return { srv, run };
+			(await tool!.execute("id", params as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }>; details: Record<string, unknown> & { kind: string } };
+		return { srv, run, prepared };
 	}
 
-	it("목록: 읽기 25개만 보이고 차단 개수·역할 안내가 붙는다", async () => {
+	it("목록: 읽기 25개 + 쓰기 10개(확인 카드)를 나눠 보여 주고 역할 안내가 붙는다", async () => {
 		const { run } = setup();
-		const r = await run({});
-		const text = r.content[0]!.text;
-		assert.match(text, /읽기 25개 \(쓰기·미확인 10개 차단\)/);
+		const text = (await run({})).content[0]!.text;
+		assert.match(text, /읽기 25개 · 쓰기 10개 \(확인 카드 — 사용자가 눌러야 실행\)/);
 		assert.match(text, /역할: 경제 캘린더/);
-		assert.doesNotMatch(text, /create-alert|delete-watchlist/);
 		assert.match(text, /- mcp-tv-get-forecasts — mcp-tv-get-forecasts does things\./);
+		// 쓰기는 "사용자가 요청했을 때만" 아래에 있다
+		const [readPart, writePart] = text.split("쓰기 (사용자가 요청했을 때만):");
+		assert.doesNotMatch(readPart ?? "", /create-alert/);
+		assert.match(writePart ?? "", /- mcp-tv-create-alert/);
+		assert.match(writePart ?? "", /- mcp-watchlist-delete-watchlist/);
 	});
 
-	it("쓰기 툴은 describe 도 호출도 거절하고, 네트워크에 tools/call 이 나가지 않는다", async () => {
-		const { srv, run } = setup();
-		await assert.rejects(run({ tool: "mcp-tv-create-alert", arguments: { symbol: "NASDAQ:AAPL" } }), /차단된 툴/);
-		await assert.rejects(run({ tool: "mcp-watchlist-add-to-watchlist", describe: true }), /차단된 툴/);
+	it("쓰기 툴은 실행하지 않고 확인 카드만 — tools/call 이 나가지 않고, 서버·주소·툴·인자가 그대로 서명 대상이 된다", async () => {
+		const { srv, run, prepared } = setup();
+		const r = await run({ tool: "mcp-tv-delete-alert", arguments: { symbol: "NASDAQ:AAPL", limit: 3 } });
+		assert.equal(srv.log.filter((l) => l.rpc === "tools/call").length, 0);
+		assert.deepEqual(prepared, [{ serverId: "tradingview", url: MCP_URL, tool: "mcp-tv-delete-alert", args: { symbol: "NASDAQ:AAPL", limit: 3 } }]);
+		assert.match(r.content[0]!.text, /아직 실행되지 않았다/);
+		assert.deepEqual(r.details, {
+			kind: "mcp-confirm-card",
+			token: "tok-1",
+			expiresAt: 42,
+			server: "TradingView",
+			tool: "mcp-tv-delete-alert",
+			label: "TradingView 알림 삭제",
+			description: "mcp-tv-delete-alert does things.",
+			destructive: true,
+			args: [
+				{ name: "symbol", label: "종목", value: "NASDAQ:AAPL", description: "EXCHANGE:TICKER" },
+				{ name: "limit", label: null, value: "3", description: null },
+			],
+			notes: [],
+			warnings: ["되돌릴 수 없는 동작일 수 있습니다 (삭제 등)."],
+		});
+	});
+
+	it("알림 만들기 카드: 조건·주기·켬/끔·만료를 한글·KST 로, 기본값 안내", async () => {
+		const { run, prepared } = setup();
+		const r = await run({
+			tool: "mcp-tv-create-alert",
+			arguments: { symbol: "NASDAQ:AAPL", price: 250, condition: "cross_up", resolution: "1D", auto_deactivate: true, expiration: "2026-10-31T06:00:00Z", name: "AAPL 250 돌파" },
+		});
+		const card = r.details as unknown as { label: string; destructive: boolean; args: Array<{ label: string | null; value: string }>; notes: string[]; warnings: string[] };
+		assert.equal(card.label, "TradingView 알림 만들기");
+		assert.equal(card.destructive, false);
+		assert.deepEqual(
+			card.args.map((a) => `${a.label}=${a.value}`),
+			["종목=NASDAQ:AAPL", "가격=250", "조건=위로 돌파 (cross_up)", "차트 주기=일봉 (1D)", "한 번 울리면 끄기=켬", "만료=2026-10-31 15:00 (KST)", "이름=AAPL 250 돌파"],
+		);
+		assert.match(card.notes[0] ?? "", /만료 30일 뒤.*알림은 주문이 아닙니다/);
+		assert.deepEqual(card.warnings, []);
+		// 서명 대상은 표시용 값이 아니라 **원래 인자** 그대로다
+		assert.equal(prepared[0]?.args.condition, "cross_up");
+		assert.equal(prepared[0]?.args.auto_deactivate, true);
+	});
+
+	it("알림 만들기: 형식이 틀리면 카드를 만들지 않는다 (규격이 설명으로만 적어 둔 규칙)", async () => {
+		const { run, prepared } = setup();
+		const bad = (args: Record<string, unknown>) => run({ tool: "mcp-tv-create-alert", arguments: args });
+		await assert.rejects(bad({ symbol: "AAPL", price: 250 }), /EXCHANGE:TICKER/);
+		await assert.rejects(bad({ symbol: "NASDAQ:AAPL" }), /price\(0보다 큰 숫자\)/);
+		await assert.rejects(bad({ symbol: "NASDAQ:AAPL", price: -1 }), /price/);
+		await assert.rejects(bad({ symbol: "NASDAQ:AAPL", price: 250, condition: "above" }), /cross · cross_up · cross_down · greater · less/);
+		await assert.rejects(bad({ symbol: "NASDAQ:AAPL", price: 250, expiration: "다음 주" }), /ISO/);
+		assert.equal(prepared.length, 0);
+		// 국내·코인·선물 심볼도 통과
+		for (const symbol of ["KRX:005930", "BINANCE:BTCUSDT", "CME_MINI:ES1!", "NYSE:BRK.B"]) await bad({ symbol, price: 1 });
+		assert.equal(prepared.length, 4);
+	});
+
+	it("웹훅·모니터링을 켜면 외부 전송 경고 — 일반 서버도 인자 속 외부 주소를 알린다", async () => {
+		const { run } = setup();
+		const r = await run({ tool: "mcp-tv-create-alert", arguments: { symbol: "NASDAQ:AAPL", price: 1, webhook: "https://evil.example.net/h", monitor: true } });
+		const warnings = (r.details as unknown as { warnings: string[] }).warnings;
+		assert.match(warnings[0] ?? "", /이 주소로 데이터가 전송됩니다: https:\/\/evil\.example\.net\/h/);
+		assert.match(warnings[1] ?? "", /모니터링 웹훅/);
+
+		const srv = createFakeServer({ tools: [{ name: "send_message", inputSchema: { type: "object", properties: { to: { type: "string" }, opts: { type: "object" } } } }] });
+		const [tool] = createMcpTools({
+			servers: () => [{ id: "x", name: "X", url: MCP_URL, state: "ready", version: "1", headers: async () => ({}) }],
+			fetch: srv.fetch,
+			prepareWrite: () => ({ token: "t", expiresAt: 1 }),
+		});
+		const g = (await tool!.execute("id", { tool: "send_message", arguments: { to: "a", opts: { cb: "http://10.0.0.1/x" } } } as never, undefined, undefined, undefined as never)) as {
+			details: { warnings: string[] };
+		};
+		assert.ok(g.details.warnings.some((w) => /opts\.cb 에 외부 주소가 있습니다: http:\/\/10\.0\.0\.1\/x/.test(w)));
+	});
+
+	it("쓰기도 인자 검사는 준비 전에 — 모르는 인자·너무 긴 인자는 카드를 만들지 않는다", async () => {
+		const { run, prepared } = setup();
+		await assert.rejects(run({ tool: "mcp-watchlist-add-to-watchlist", arguments: { price: 100 } }), /모르는 인자: price/);
+		await assert.rejects(run({ tool: "mcp-watchlist-add-to-watchlist", arguments: { symbol: "x".repeat(9_000) } }), /인자가 너무 깁니다/);
+		await assert.rejects(run({ tool: "mcp-tv-create-alert", arguments: { price: 100 } }), /필수 인자가 없습니다: symbol/);
+		assert.equal(prepared.length, 0);
+	});
+
+	it("발급기가 없으면 쓰기는 거절, describe 는 쓰기라는 안내와 함께 보여 준다", async () => {
+		const { srv, run } = setup({}, {}, false);
+		await assert.rejects(run({ tool: "mcp-tv-create-alert", arguments: { symbol: "NASDAQ:AAPL" } }), /실행할 수 없습니다/);
+		const d = await run({ tool: "mcp-watchlist-add-to-watchlist", describe: true });
+		assert.match(d.content[0]!.text, /쓰기 툴 — 호출하면 실행되지 않고 확인 카드가 뜬다/);
 		assert.equal(srv.log.filter((l) => l.rpc === "tools/call").length, 0);
 	});
 

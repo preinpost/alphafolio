@@ -5,7 +5,8 @@
  * 핵심: 토큰이 평문으로 DB 에 남지 않는다 / state 는 1회용·사용자 고정 / 동시 갱신은 한 번만 / 갱신 거절이면 "다시 연결".
  */
 import assert from "node:assert/strict";
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { migrate } from "@alphafolio/ledger";
 import { McpNeedsAuthError } from "@alphafolio/mcp";
@@ -14,7 +15,8 @@ import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d
 import { createFakeServer, MCP_URL, type FakeServer } from "../../../packages/mcp/test/fake-server.ts";
 import { parsePublicUrl } from "../src/config.ts";
 import { McpAuthManager } from "../src/mcp-auth.ts";
-import { handleMcpCallback, mcpHandles, type McpApiDeps } from "../src/mcp-api.ts";
+import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpWritePayload } from "../src/mcp-api.ts";
+import { OrderTokenGuard } from "../src/order-tokens.ts";
 import { McpConfigError, McpStore, normalizeHeaders } from "../src/mcp-store.ts";
 
 const SECRET = "test-secret";
@@ -38,7 +40,7 @@ beforeEach(async () => {
 	store = new McpStore(() => d1.cfg, SECRET, policy);
 	await store.load();
 	auth = new McpAuthManager({ store, publicUrl: PUBLIC, fetch: srv.fetch, policy, now: () => clock });
-	deps = { store, auth, fetch: srv.fetch, publicUrl: PUBLIC };
+	deps = { store, auth, fetch: srv.fetch, publicUrl: PUBLIC, confirm: { secret: mcpConfirmSecret(SECRET), guard: new OrderTokenGuard<McpWritePayload>() } };
 });
 afterEach(() => d1.restore());
 
@@ -169,7 +171,7 @@ describe("토큰 갱신", () => {
 		assert.match(s?.problem ?? "", /만료/);
 	});
 
-	it("mcp_call 끝까지: 서버가 401 을 주면 한 번 갱신 후 재시도, 쓰기 툴은 목록에서 빠진다", async () => {
+	it("mcp_call 끝까지: 서버가 401 을 주면 한 번 갱신 후 재시도, 쓰기 툴은 쓰기 목록으로", async () => {
 		const id = await addOAuth();
 		await auth.callback(await connect("ms", id));
 		const [tool] = createMcpTools({ servers: () => mcpHandles(deps, "ms"), fetch: srv.fetch });
@@ -178,7 +180,7 @@ describe("토큰 갱신", () => {
 
 		const list = await run({});
 		assert.match(list, /get_quote/);
-		assert.doesNotMatch(list, /- delete_alert/);
+		assert.match(list, /쓰기 \(사용자가 요청했을 때만\):\n- delete_alert/);
 
 		// 서버 쪽에서 토큰이 폐기된 상황 — 가짜 서버가 새 토큰만 받게 만든다
 		srv.issued.access.push("server-side-rotated");
@@ -186,7 +188,72 @@ describe("토큰 갱신", () => {
 		// 갱신되면 latest() 가 새로 발급된 토큰이 된다
 		assert.match(await run({ tool: "get_quote", arguments: {} }), /called get_quote/);
 		assert.equal(tokenRequests("refresh_token"), before + 1);
-		await assert.rejects(run({ tool: "delete_alert" }), /차단된 툴/);
+	});
+});
+
+describe("쓰기 확인 카드 → 실행 (PLAN §39)", () => {
+	/** handleMcp 에 넣을 가짜 요청 */
+	const post = (body: unknown) => Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: "POST" }) as unknown as IncomingMessage;
+	const execute = (user: string, token: string) => handleMcp(post({ token }), "/api/mcp/execute", user, deps) as Promise<{ ok: boolean; message: string; output: string }>;
+	const calls = () => srv.log.filter((l) => l.rpc === "tools/call");
+
+	/** mcp_call 로 쓰기를 준비해 카드를 받는다 (실제 서버와 같은 발급기) */
+	async function prepare(user = "ms", args: Record<string, unknown> = { alert_ids: [7] }) {
+		const [tool] = createMcpTools({ servers: () => mcpHandles(deps, user), fetch: srv.fetch, prepareWrite: prepareMcpWrite(deps, user) });
+		const r = (await tool!.execute("id", { tool: "delete_alert", arguments: args } as never, undefined, undefined, undefined as never)) as {
+			details: { kind: string; token: string };
+		};
+		assert.equal(r.details.kind, "mcp-confirm-card");
+		return r.details.token;
+	}
+
+	beforeEach(async () => {
+		await auth.callback(await connect("ms", await addOAuth("ms")));
+	});
+
+	it("준비는 실행하지 않는다 — [확인] 을 눌러야 준비한 인자 그대로 한 번 나간다. 같은 카드를 다시 누르면 거절", async () => {
+		const token = await prepare();
+		assert.equal(calls().length, 0);
+		const r = await execute("ms", token);
+		assert.deepEqual(r, { ok: true, message: "Example 에서 실행했습니다", output: "called delete_alert" });
+		assert.equal(calls().length, 1);
+		assert.deepEqual(JSON.parse(calls()[0]!.body ?? "{}").params, { name: "delete_alert", arguments: { alert_ids: [7] } });
+		await assert.rejects(execute("ms", token), /이미 처리한 요청/);
+		assert.equal(calls().length, 1);
+	});
+
+	it("다른 사용자·변조한 토큰·주문 키로 서명한 토큰은 거절 (MCP 토큰과 주문 토큰은 서로 못 쓴다)", async () => {
+		const token = await prepare();
+		await assert.rejects(execute("kim", token), /다른 사용자/);
+		// 인자를 바꿔치기 — 서명이 깨진다
+		const [body, mac] = token.split(".");
+		const payload = JSON.parse(Buffer.from(body as string, "base64url").toString()) as McpWritePayload;
+		payload.mcp.args = { alert_ids: [1, 2, 3] };
+		await assert.rejects(execute("ms", `${Buffer.from(JSON.stringify(payload)).toString("base64url")}.${mac}`), /올바르지 않습니다/);
+		// 주문 실행기(마스터 키)로 검증하면 서명 불일치 — 반대 방향도 같다
+		assert.deepEqual(new OrderTokenGuard().verify(token, SECRET, "ms"), { ok: false, reason: "bad-signature" });
+		assert.equal(calls().length, 0);
+	});
+
+	it("준비 뒤 서버를 지웠거나 다른 주소로 바꿨으면 보내지 않는다", async () => {
+		const token = await prepare();
+		const rec = store.get("ms", store.list("ms")[0]!.id)!;
+		rec.url = "https://other.example.com/mcp";
+		await assert.rejects(execute("ms", token), /주소가 바뀌었습니다/);
+		const token2 = await (async () => {
+			rec.url = MCP_URL;
+			return prepare();
+		})();
+		await store.remove("ms", rec.id);
+		await assert.rejects(execute("ms", token2), /삭제됐습니다/);
+		assert.equal(calls().length, 0);
+	});
+
+	it("MCP 서버가 거절(isError)하면 ok:false + 서버 메시지", async () => {
+		const failing = createFakeServer({ acceptToken: latest, tools: [{ name: "delete_alert" }], callResult: () => ({ isError: true, content: [{ type: "text", text: "alert 7 not found" }] }) });
+		deps = { ...deps, fetch: (url, init) => (url.startsWith(MCP_URL) ? failing.fetch(url, init) : srv.fetch(url, init)) };
+		const token = await prepare();
+		assert.deepEqual(await execute("ms", token), { ok: false, message: "Example 가 거절했습니다", output: "alert 7 not found" });
 	});
 });
 

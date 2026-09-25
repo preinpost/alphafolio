@@ -18,6 +18,7 @@ import {
 	TimingCardView,
 	ResearchCardView,
 } from "./BrokerCards.tsx";
+import { McpConfirmCardView } from "./McpCards.tsx";
 import { BinanceOrderCardView, ConditionalOrderCardView, OrderChangeCardView, OrderListCardView, OrderPreviewCardView } from "./OrderCards.tsx";
 
 export function CardView({ card }: { card: UICard }) {
@@ -50,6 +51,8 @@ export function CardView({ card }: { card: UICard }) {
 			return <ConditionalOrderCardView card={card} />;
 		case "binance-order-card":
 			return <BinanceOrderCardView card={card} />;
+		case "mcp-confirm-card":
+			return <McpConfirmCardView card={card} />;
 		case "overview-card":
 			return <OverviewCardView card={card} />;
 		default:

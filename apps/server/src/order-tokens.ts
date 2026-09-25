@@ -44,12 +44,19 @@ function safeEqual(a: string, b: string): boolean {
 	return timingSafeEqual(bufA, bufB);
 }
 
-export function createOrderToken(
-	payload: Omit<OrderTokenPayload, "exp" | "nonce">,
+/** 서명 토큰 공통 필드 — 주문 외의 확인 카드(MCP 쓰기, PLAN §39)도 같은 구조를 쓴다 (서명 키는 용도별로 다르다) */
+export interface SignedPayload {
+	u: string;
+	exp: number;
+	nonce: string;
+}
+
+export function createOrderToken<P extends { u: string } = Omit<OrderTokenPayload, "exp" | "nonce">>(
+	payload: P,
 	secret: string,
 	now = Date.now(),
-): { token: string; payload: OrderTokenPayload } {
-	const full: OrderTokenPayload = {
+): { token: string; payload: P & { exp: number; nonce: string } } {
+	const full = {
 		...payload,
 		exp: now + ORDER_TOKEN_TTL_MS,
 		// 토스 clientOrderId 제약: 최대 36자, 영숫자·-·_
@@ -66,19 +73,19 @@ export type VerifyFailure =
 	| "used"
 	| "wrong-user";
 
-export type VerifyResult =
-	| { ok: true; payload: OrderTokenPayload }
+export type VerifyResult<P extends SignedPayload = OrderTokenPayload> =
+	| { ok: true; payload: P }
 	| { ok: false; reason: VerifyFailure };
 
 /**
  * 사용된 nonce. 메모리에만 둔다 — 재시작하면 기존 토큰이 무효가 되는데,
  * 어차피 2분짜리라 실질 영향이 없고 저장소를 늘릴 이유도 없다.
  */
-export class OrderTokenGuard {
+export class OrderTokenGuard<P extends SignedPayload = OrderTokenPayload> {
 	private readonly used = new Map<string, number>();
 	private lastSweep = Date.now();
 
-	verify(token: string | undefined, secret: string, user: string, now = Date.now()): VerifyResult {
+	verify(token: string | undefined, secret: string, user: string, now = Date.now()): VerifyResult<P> {
 		if (!token) return { ok: false, reason: "malformed" };
 
 		const dot = token.lastIndexOf(".");
@@ -88,9 +95,9 @@ export class OrderTokenGuard {
 		const mac = token.slice(dot + 1);
 		if (!safeEqual(mac, sign(body, secret))) return { ok: false, reason: "bad-signature" };
 
-		let payload: OrderTokenPayload;
+		let payload: P;
 		try {
-			payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as OrderTokenPayload;
+			payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as P;
 		} catch {
 			return { ok: false, reason: "malformed" };
 		}

@@ -367,6 +367,30 @@ export interface OverviewCard {
 	surplus: number;
 }
 
+/**
+ * 외부 MCP 쓰기 확인 카드 (PLAN §39) — mcp_call 이 쓰기 툴을 **준비만** 한 결과.
+ * [확인] 을 눌러야 서버가 그 MCP 서버에 tools/call 을 보낸다 (토큰에 서버·툴·인자가 서명돼 있다).
+ */
+export interface McpConfirmCard {
+	kind: "mcp-confirm-card";
+	token: string;
+	expiresAt: number;
+	/** 서버 이름 (TradingView 등) */
+	server: string;
+	tool: string;
+	/** 한글 동작 이름 (프리셋이 아는 툴만) */
+	label: string | null;
+	/** 툴 설명 한 줄 (서버가 준 영문 그대로일 수 있다) */
+	description: string;
+	/** 되돌리기 어려운 동작 (삭제 등) — 경고색 */
+	destructive: boolean;
+	/** label: 한글 인자 이름 (프리셋이 아는 것만), value: 표시용 (조건·주기는 한글, 시각은 KST) */
+	args: Array<{ name: string; label: string | null; value: string; description: string | null }>;
+	/** 안내 — 생략한 값의 기본값 등 */
+	notes: string[];
+	warnings: string[];
+}
+
 export type UICard =
 	| LedgerTxCard
 	| LedgerSummaryCard
@@ -386,6 +410,7 @@ export type UICard =
 	| OrderChangeCard
 	| ConditionalOrderCard
 	| BinanceOrderCard
+	| McpConfirmCard
 	| OverviewCard;
 
 // ── 메시지 ──────────────────────────────────────────────────────────────

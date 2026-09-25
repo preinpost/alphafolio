@@ -1,5 +1,6 @@
 /**
- * mcp_call — 사용자가 연결한 외부 MCP 서버의 읽기 툴을 부르는 게이트웨이 (PLAN §38).
+ * mcp_call — 사용자가 연결한 외부 MCP 서버의 툴을 부르는 게이트웨이 (PLAN §38·§39).
+ * 읽기 툴은 바로 호출, 쓰기(생성·수정·삭제)는 **준비만** 하고 확인 카드를 띄운다 — 실행은 사람이 [확인] 으로.
  *
  * 외부 툴을 하나씩 customTools 로 노출하지 않는다: TradingView 만 35개라 툴 선택 정확도·매 요청 비용이 무너지고
  * (툴 수 관리), 서버 목록이 사용자별·실행 중에 바뀌는데 pi 의 툴 목록은 에이전트 생성 때 고정된다.
@@ -9,21 +10,65 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { McpAuthError, McpHttpError, McpRpcError, type McpTool } from "./client.ts";
 import { OAuthError } from "./oauth.ts";
-import { judgeTool } from "./policy.ts";
+import { judgeTool, urlWarnings, type McpPreset } from "./policy.ts";
 import { McpNeedsAuthError, McpPool, type McpServerHandle } from "./pool.ts";
 import { describeTool, oneLine, renderCallResult } from "./render.ts";
 import type { FetchLike } from "./net.ts";
+
+/** 쓰기 준비 요청 — 서버가 이 내용 전체를 서명한 1회용 토큰을 만든다 */
+export interface McpWriteRequest {
+	serverId: string;
+	/** 준비 시점의 서버 주소 — 실행 때 설정이 바뀌었으면 거절한다 */
+	url: string;
+	tool: string;
+	args: Record<string, unknown>;
+}
 
 export interface McpToolDeps {
 	/** 호출 시점에 읽는다 — 설정에서 서버를 추가·연결하면 재시작 없이 된다 */
 	servers: () => McpServerHandle[] | Promise<McpServerHandle[]>;
 	fetch: FetchLike;
+	/** 쓰기 확인 토큰 발급기. 없으면 쓰기 툴은 거절한다 (주문의 prepareOrder 와 같은 역할) */
+	prepareWrite?: (req: McpWriteRequest) => { token: string; expiresAt: number };
+}
+
+/** @alphafolio/protocol 의 McpConfirmCard 와 같은 모양 (이 패키지는 protocol 에 의존하지 않는다) */
+export interface McpConfirmDetails {
+	kind: "mcp-confirm-card";
+	token: string;
+	expiresAt: number;
+	server: string;
+	tool: string;
+	label: string | null;
+	description: string;
+	destructive: boolean;
+	args: Array<{ name: string; label: string | null; value: string; description: string | null }>;
+	notes: string[];
+	warnings: string[];
 }
 
 type McpDetails =
 	| { kind: "mcp-list"; servers: number; tools: number }
 	| { kind: "mcp-describe"; server: string; tool: string }
-	| { kind: "mcp-call"; server: string; tool: string; truncated: boolean };
+	| { kind: "mcp-call"; server: string; tool: string; truncated: boolean }
+	| McpConfirmDetails;
+
+/** 토큰에 인자가 통째로 실린다 — 너무 크면 거절 (카드·URL 길이·로그) */
+export const MAX_WRITE_ARGS_CHARS = 8_000;
+
+/** 카드에 보일 인자 목록 — 값은 문자열로(프리셋이 알면 한글로), 스키마 설명을 곁들인다 */
+export function describeArgs(tool: McpTool, args: Record<string, unknown>, preset?: McpPreset): McpConfirmDetails["args"] {
+	const props = ((tool.inputSchema as { properties?: Record<string, { description?: string }> } | undefined)?.properties ?? {}) as Record<
+		string,
+		{ description?: string }
+	>;
+	return Object.entries(args).map(([name, v]) => ({
+		name,
+		label: preset?.argLabels?.[name] ?? null,
+		value: preset?.formatArg?.(tool.name, name, v) ?? (typeof v === "string" ? v : JSON.stringify(v)),
+		description: props[name]?.description?.replace(/\s+/g, " ").trim() || null,
+	}));
+}
 
 const SETTINGS_HINT = "설정 → 연결 → MCP 서버";
 
@@ -86,9 +131,10 @@ export function createMcpTools(deps: McpToolDeps) {
 		name: "mcp_call",
 		label: "외부 MCP",
 		description:
-			"사용자가 설정에서 연결한 외부 MCP 서버(TradingView 등)의 **읽기 전용** 툴을 부른다. " +
-			"인자 없이 부르면 연결된 서버와 쓸 수 있는 툴 목록, { server, tool, describe: true } 로 파라미터 상세, { server, tool, arguments } 로 호출. " +
-			"알림·관심목록 변경 같은 쓰기 툴은 차단된다. 시세·일봉·국내 뉴스는 전용 툴(market_price·market_technical·market_news)이 먼저이고, " +
+			"사용자가 설정에서 연결한 외부 MCP 서버(TradingView 등)의 툴을 부른다. " +
+			"인자 없이 부르면 연결된 서버와 툴 목록, { server, tool, describe: true } 로 파라미터 상세, { server, tool, arguments } 로 호출. " +
+			"읽기 툴은 바로 결과가 오고, **쓰기 툴(알림·관심목록 생성·수정·삭제 등)은 실행되지 않고 확인 카드만 뜬다** — 사용자가 [확인] 을 눌러야 실행된다. " +
+			"쓰기는 사용자가 직접 요청했을 때만 준비한다. 시세·일봉·국내 뉴스는 전용 툴(market_price·market_technical·market_news)이 먼저이고, " +
 			"여기는 경제·실적·배당 캘린더, 스크리너, 해외 종목 재무·애널리스트 예측치처럼 그쪽에 없는 것에 쓴다.",
 		parameters: Type.Object({
 			server: Type.Optional(Type.String({ description: "서버 id 또는 이름 (목록 결과의 id). 서버가 하나면 생략" })),
@@ -113,13 +159,14 @@ export function createMcpTools(deps: McpToolDeps) {
 					targets.map(async (h) => {
 						try {
 							const tools = await loadTools(h);
-							const allowed = tools.filter((t) => judgeTool(t, h.preset).allowed);
-							total += allowed.length;
-							const blocked = tools.length - allowed.length;
+							const reads = tools.filter((t) => judgeTool(t, h.preset).mode === "read");
+							const writes = tools.filter((t) => judgeTool(t, h.preset).mode === "confirm");
+							total += tools.length;
 							return [
-								`[${h.name}] id=${h.id} · 읽기 ${allowed.length}개${blocked ? ` (쓰기·미확인 ${blocked}개 차단)` : ""}`,
+								`[${h.name}] id=${h.id} · 읽기 ${reads.length}개${writes.length ? ` · 쓰기 ${writes.length}개 (확인 카드 — 사용자가 눌러야 실행)` : ""}`,
 								...(h.preset ? [`역할: ${h.preset.role}`] : []),
-								...allowed.map((t) => `- ${t.name} — ${oneLine(t)}`),
+								...reads.map((t) => `- ${t.name} — ${oneLine(t)}`),
+								...(writes.length ? ["쓰기 (사용자가 요청했을 때만):", ...writes.map((t) => `- ${t.name} — ${oneLine(t)}`)] : []),
 							].join("\n");
 						} catch (err) {
 							return `[${h.name}] id=${h.id} · ⚠ ${explainMcpError(h.name, err)}`;
@@ -146,13 +193,11 @@ export function createMcpTools(deps: McpToolDeps) {
 				throw new Error(`${h.name} 에 "${params.tool}" 툴이 없습니다${near.length ? ` — 비슷한 이름: ${near.slice(0, 5).join(", ")}` : ""}. 인자 없이 mcp_call 로 목록을 보세요.`);
 			}
 			const verdict = judgeTool(target, h.preset);
-			if (!verdict.allowed) {
-				throw new Error(`${target.name} 은(는) 차단된 툴입니다 (${verdict.reason}). 외부 계정을 바꾸는 동작은 지원하지 않습니다 — 필요하면 ${h.name} 에서 직접 하라고 안내하세요.`);
-			}
 
 			if (params.describe) {
+				const note = verdict.mode === "confirm" ? "\n\n⚠ 쓰기 툴 — 호출하면 실행되지 않고 확인 카드가 뜬다 (사용자가 [확인] 을 눌러야 실행)." : "";
 				return {
-					content: [{ type: "text" as const, text: describeTool(h.name, target) }],
+					content: [{ type: "text" as const, text: describeTool(h.name, target) + note }],
 					details: { kind: "mcp-describe", server: h.id, tool: target.name } as McpDetails,
 				};
 			}
@@ -160,6 +205,45 @@ export function createMcpTools(deps: McpToolDeps) {
 			const args = (params.arguments ?? {}) as Record<string, unknown>;
 			const bad = checkArguments(target, args);
 			if (bad) throw new Error(`${bad}. mcp_call { server: "${h.id}", tool: "${target.name}", describe: true } 로 확인하세요.`);
+
+			// ── 쓰기: 준비만 — 확인 카드 ──
+			if (verdict.mode === "confirm") {
+				if (!deps.prepareWrite) throw new Error(`${target.name} 은(는) 쓰기 툴이라 이 환경에서는 실행할 수 없습니다.`);
+				if (JSON.stringify(args).length > MAX_WRITE_ARGS_CHARS) throw new Error(`인자가 너무 깁니다 (${MAX_WRITE_ARGS_CHARS.toLocaleString("en-US")}자 초과) — 줄여서 다시 준비하세요.`);
+				const invalid = h.preset?.validate?.(target.name, args);
+				if (invalid) throw new Error(`${invalid}. 고쳐서 다시 준비하세요.`);
+				// 프리셋이 아는 경고(웹훅 등)가 있으면 그걸, 없으면 일반 규칙(인자 속 외부 주소)
+				const presetWarn = h.preset?.warn?.(target.name, args) ?? [];
+				const { token, expiresAt } = deps.prepareWrite({ serverId: h.id, url: h.url, tool: target.name, args });
+				const card: McpConfirmDetails = {
+					kind: "mcp-confirm-card",
+					token,
+					expiresAt,
+					server: h.name,
+					tool: target.name,
+					label: verdict.label,
+					description: oneLine(target),
+					destructive: verdict.destructive,
+					args: describeArgs(target, args, h.preset),
+					notes: h.preset?.notes?.[target.name] ? [h.preset.notes[target.name] as string] : [],
+					warnings: [
+						...(verdict.destructive ? ["되돌릴 수 없는 동작일 수 있습니다 (삭제 등)."] : []),
+						...(presetWarn.length ? presetWarn : urlWarnings(args)),
+						...(verdict.label ? [] : [`판정 근거: ${verdict.reason}`]),
+					],
+				};
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text:
+								`[${h.name}] ${verdict.label ?? target.name} — 확인 카드를 띄웠다. **아직 실행되지 않았다.** ` +
+								"사용자가 화면에서 [확인] 을 눌러야 실행되고, 눌렀는지는 알 수 없다. \"화면에서 확인을 눌러 주세요\" 라고 안내한다 (2분 안에).",
+						},
+					],
+					details: card as McpDetails,
+				};
+			}
 
 			let result;
 			try {

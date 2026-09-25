@@ -24,11 +24,18 @@ function BrokerBadge({ broker }: { broker: "toss" | "kis" | "binance" }) {
 	return <span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">{BROKER_LABEL[broker]}</span>;
 }
 
+/** 주문 실행 — 결과 문장 (주문번호 앞 12자) */
+async function executeOrder(token: string): Promise<string> {
+	const r = await api.executeOrder(token);
+	const id = r.orderId ?? r.conditionalOrderId;
+	return `${r.message}${id ? ` (${id.slice(0, 12)}${id.length > 12 ? "…" : ""})` : ""}`;
+}
+
 /**
- * 확인 버튼·남은 시간·결과 — 신규·정정·취소·조건주문 카드 공용.
- * ⚠️ confirm() 이 서버로 토큰을 보내는 것이 **실행되는 유일한 경로**다.
+ * 확인 버튼·남은 시간·결과 — 신규·정정·취소·조건주문 카드, MCP 쓰기 카드(McpCards) 공용.
+ * ⚠️ confirm() 이 서버로 토큰을 보내는 것이 **실행되는 유일한 경로**다. run 은 실패면 throw 한다.
  */
-function useConfirm(token: string | null, expiresAt: number | null, ok: boolean) {
+export function useConfirm(token: string | null, expiresAt: number | null, ok: boolean, run: (token: string) => Promise<string> = executeOrder) {
 	const [phase, setPhase] = useState<Phase>("idle");
 	const [message, setMessage] = useState<string | null>(null);
 	const [remain, setRemain] = useState(() => secondsLeft(expiresAt));
@@ -48,10 +55,9 @@ function useConfirm(token: string | null, expiresAt: number | null, ok: boolean)
 		if (!token) return;
 		setPhase("sending");
 		try {
-			const r = await api.executeOrder(token);
-			const id = r.orderId ?? r.conditionalOrderId;
+			const text = await run(token);
 			setPhase("done");
-			setMessage(`${r.message}${id ? ` (${id.slice(0, 12)}${id.length > 12 ? "…" : ""})` : ""}`);
+			setMessage(text);
 		} catch (err) {
 			setPhase("failed");
 			setMessage(err instanceof Error ? err.message : String(err));
@@ -60,7 +66,7 @@ function useConfirm(token: string | null, expiresAt: number | null, ok: boolean)
 	return { phase, message, remain, confirm, dismiss: () => setPhase("expired") };
 }
 
-function ConfirmBar({ c, verb }: { c: ReturnType<typeof useConfirm>; verb: string }) {
+export function ConfirmBar({ c, verb }: { c: ReturnType<typeof useConfirm>; verb: string }) {
 	return (
 		<div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
 			{c.phase === "idle" && (
@@ -105,7 +111,7 @@ function Problems({ title, errors }: { title: string; errors: string[] }) {
 	);
 }
 
-function Warnings({ items }: { items: string[] }) {
+export function Warnings({ items }: { items: string[] }) {
 	if (items.length === 0) return null;
 	return (
 		<ul className="mt-3 space-y-1 border-t border-line pt-2">

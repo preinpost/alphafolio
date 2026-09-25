@@ -46,7 +46,9 @@
   - TradingView 읽기 허용목록 25개 (쓰기 10개 차단), 그 외 서버는 이름·힌트 판정. 역할 분담은 persona 에
   - 디스커버리·DCR(전역 1회 캐시)·PKCE·resource, 콜백 `/api/mcp/oauth/callback`, 단일비행 갱신, 해제 시 폐기
   - bearer/인증 없음 서버도 같은 경로. 설정 → 연결 → MCP 서버 (웹·앱)
-- [ ] 운영에 `AF_PUBLIC_URL` 설정 → TradingView 실제 연결·툴 호출 확인 (사람 손 — 계정 로그인 필요)
+- [x] 운영에 `AF_PUBLIC_URL` 설정 → TradingView 연결 확인 (읽기 25 · 쓰기 10)
+- [x] MCP 쓰기(CUD)는 확인 카드로 — 준비만 하고 사람이 [확인] (PLAN §39)
+- [ ] TradingView 알림 만들기 → 확인 → list-alerts 로 확인 → 삭제 실측 (사람 손)
 - [ ] iOS 앱에서 시스템 브라우저 OAuth 흐름 확인 (`window.open` → Safari → 완료 페이지 → 앱 복귀 시 재조회)
 - [ ] MCP 결과 카드 렌더러 — 경제·실적 캘린더, 스크리너 (`details.kind`)
 

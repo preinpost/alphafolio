@@ -4,10 +4,12 @@
  * 에이전트는 여기에 올 수 없다 (사용자 인증 토큰이 없다). 서버 추가·연결·삭제는 사람이 화면에서만 한다 —
  * 뉴스·웹 본문의 지시로 모델이 새 MCP 서버를 붙이는 일이 없게.
  */
+import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { judgeTool, McpSession, PRESETS, type FetchLike, type McpServerHandle } from "@alphafolio/mcp";
-import { explainMcpError } from "@alphafolio/mcp/tools";
+import { judgeTool, McpSession, PRESETS, renderCallResult, type FetchLike, type McpServerHandle } from "@alphafolio/mcp";
+import { explainMcpError, type McpWriteRequest } from "@alphafolio/mcp/tools";
 import { HttpError, readJson } from "./ledger-api.ts";
+import { createOrderToken, ORDER_TOKEN_TTL_MS, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
 import type { McpAuthManager, OAuthClientKind } from "./mcp-auth.ts";
 import { McpConfigError, normalizeHeaders, type McpServerRecord, type McpStore } from "./mcp-store.ts";
 
@@ -16,6 +18,81 @@ export interface McpApiDeps {
 	auth: McpAuthManager;
 	fetch: FetchLike;
 	publicUrl: string | undefined;
+	/** 쓰기 확인 토큰 (PLAN §39) — 서명 키는 mcpConfirmSecret(마스터) */
+	confirm: { secret: string; guard: OrderTokenGuard<McpWritePayload> };
+}
+
+// ── 쓰기 확인 (PLAN §39) ────────────────────────────────────────────────
+// 주문 확인 토큰과 같은 구조(서명·1회용·2분)를 쓰되 **서명 키를 따로 파생**한다 —
+// MCP 토큰을 /api/orders/execute 에 넣거나 그 반대로 쓰면 서명 검증에서 떨어진다.
+
+export interface McpWritePayload {
+	u: string;
+	mcp: McpWriteRequest;
+	exp: number;
+	nonce: string;
+}
+
+export function mcpConfirmSecret(master: string): string {
+	return createHmac("sha256", master).update("alphafolio/mcp-confirm/v1").digest("hex");
+}
+
+/** mcp_call 이 쓰기 툴을 준비할 때 — 서버·툴·인자 전체를 서명한다 */
+export function prepareMcpWrite(deps: McpApiDeps, user: string) {
+	return (req: McpWriteRequest): { token: string; expiresAt: number } => {
+		const { token, payload } = createOrderToken({ u: user, mcp: req }, deps.confirm.secret);
+		console.log(`[mcp] 쓰기 준비 user=${user} server=${req.serverId} tool=${req.tool} nonce=${payload.nonce}`);
+		return { token, expiresAt: payload.exp };
+	};
+}
+
+function confirmFailure(reason: VerifyFailure): string {
+	switch (reason) {
+		case "expired":
+			return `확인 시간이 지났습니다 (${ORDER_TOKEN_TTL_MS / 60_000}분). 챗에서 다시 요청해 주세요.`;
+		case "used":
+			return "이미 처리한 요청입니다.";
+		case "wrong-user":
+			return "다른 사용자의 확인 카드입니다.";
+		default:
+			return "확인 정보가 올바르지 않습니다.";
+	}
+}
+
+/** 사람이 카드에서 [확인] 을 눌렀다 — 실제로 외부 계정이 바뀌는 유일한 경로 */
+async function executeMcpWrite(deps: McpApiDeps, user: string, token: string): Promise<{ ok: boolean; message: string; output: string }> {
+	const verified = deps.confirm.guard.verify(token, deps.confirm.secret, user);
+	if (!verified.ok) throw new HttpError(400, confirmFailure(verified.reason));
+	const { mcp, nonce } = verified.payload;
+	// 보내기 **전에** 소비한다 — 더블클릭·재전송이 두 번 실행되지 않게 (실패해도 재사용 없음)
+	deps.confirm.guard.consume(nonce);
+
+	const rec = deps.store.get(user, mcp.serverId);
+	if (!rec) throw new HttpError(400, "그 사이 MCP 서버 설정이 삭제됐습니다.");
+	// 준비한 뒤 서버 주소를 바꿨다면 다른 곳으로 보내지 않는다
+	if (rec.url !== mcp.url) throw new HttpError(400, "그 사이 MCP 서버 주소가 바뀌었습니다. 챗에서 다시 요청해 주세요.");
+	const h = handleFor(deps, user, rec);
+	if (h.state === "needs_auth") throw new HttpError(400, `${rec.name} 연결이 필요합니다 — 설정 → 연결 → MCP 서버`);
+
+	console.log(`[mcp] 쓰기 실행 user=${user} server=${mcp.serverId} tool=${mcp.tool} nonce=${nonce}`);
+	const session = new McpSession({
+		url: h.url,
+		fetch: deps.fetch,
+		headers: () => h.headers(),
+		...(h.onUnauthorized ? { onUnauthorized: h.onUnauthorized } : {}),
+	});
+	try {
+		const result = await session.callTool(mcp.tool, mcp.args);
+		const out = renderCallResult(result, 1_500);
+		return result.isError
+			? { ok: false, message: `${rec.name} 가 거절했습니다`, output: out.text }
+			: { ok: true, message: `${rec.name} 에서 실행했습니다`, output: out.text };
+	} catch (err) {
+		// 네트워크 오류는 실행 여부를 모른다 — 다시 누르지 말고 조회로 확인하게
+		return { ok: false, message: `${explainMcpError(rec.name, err)} (실행됐는지 알 수 없으니 목록을 조회해 확인하세요)`, output: "" };
+	} finally {
+		void session.close();
+	}
 }
 
 function handleFor(deps: McpApiDeps, user: string, rec: McpServerRecord): McpServerHandle {
@@ -65,6 +142,12 @@ function asConfigError(err: unknown): never {
 /** 처리한 경로면 응답 본문, 아니면 undefined */
 export async function handleMcp(req: IncomingMessage, path: string, user: string, deps: McpApiDeps): Promise<unknown> {
 	if (path === "/api/mcp/servers" && req.method === "GET") return listing(deps, user);
+
+	// ⚠️ 확인 카드의 [확인] 버튼만 부른다. 에이전트는 사용자 인증 토큰이 없어 여기에 올 수 없다
+	if (path === "/api/mcp/execute" && req.method === "POST") {
+		const body = await readJson(req);
+		return executeMcpWrite(deps, user, String(body.token ?? ""));
+	}
 
 	if (path === "/api/mcp/servers" && req.method === "POST") {
 		const body = await readJson(req);
@@ -139,12 +222,13 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 		});
 		try {
 			const tools = await session.listTools();
-			const allowed = tools.filter((t) => judgeTool(t, h.preset).allowed).length;
+			const reads = tools.filter((t) => judgeTool(t, h.preset).mode === "read").length;
+			const writes = tools.length - reads;
 			return {
 				ok: true,
-				message: `연결 성공 — 툴 ${tools.length}개 중 읽기 ${allowed}개 사용 (${tools.length - allowed}개 차단)`,
-				allowed,
-				blocked: tools.length - allowed,
+				message: `연결 성공 — 툴 ${tools.length}개: 읽기 ${reads}개는 바로, 쓰기 ${writes}개는 확인 카드로`,
+				reads,
+				writes,
 			};
 		} catch (err) {
 			return { ok: false, message: explainMcpError(rec.name, err) };

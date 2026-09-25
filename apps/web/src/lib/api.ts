@@ -189,6 +189,9 @@ export const api = {
 	startMcpOAuth: (id: string, client: "web" | "app") =>
 		request<{ url: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/oauth/start`, { method: "POST", body: JSON.stringify({ client }) }),
 	disconnectMcp: (id: string) => request<McpListing>(`/api/mcp/servers/${encodeURIComponent(id)}/disconnect`, { method: "POST" }),
+	// ⚠️ MCP 쓰기가 실제로 실행되는 유일한 클라이언트 경로. 확인 카드의 버튼에서만 호출한다 (PLAN §39)
+	executeMcp: (token: string) =>
+		request<{ ok: boolean; message: string; output: string }>("/api/mcp/execute", { method: "POST", body: JSON.stringify({ token }) }),
 	testMcp: (id: string) => request<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, { method: "POST" }),
 
 	// ── 가계부 (ledgerId 를 비우면 서버가 기본 가계부를 고른다) ─────────────
