@@ -37,7 +37,7 @@ import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
 import { kstParts, SnapshotScheduler, SnapshotStore } from "./snapshots.ts";
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
-import { loadConfig, loadDotEnv } from "./config.ts";
+import { APP_VERSION, loadConfig, loadDotEnv } from "./config.ts";
 import { corsFor } from "./cors.ts";
 import { handleLedger, handleLedgerAdmin, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
 import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
@@ -343,7 +343,7 @@ async function main(): Promise<void> {
 
 		// ── 공개 엔드포인트 ────────────────────────────────────────
 		if (path === "/api/health") {
-			json(res, 200, { ok: true, ledger: ledgerReady(), model: cfg.agent.model ?? "(기본)" });
+			json(res, 200, { ok: true, version: APP_VERSION, ledger: ledgerReady(), model: cfg.agent.model ?? "(기본)" });
 			return;
 		}
 
@@ -622,7 +622,7 @@ async function main(): Promise<void> {
 	});
 
 	server.listen(cfg.port, cfg.host, () => {
-		console.log(`\n  AlphaFolio  http://${cfg.host}:${cfg.port}`);
+		console.log(`\n  AlphaFolio v${APP_VERSION}  http://${cfg.host}:${cfg.port}`);
 		console.log(`  ├ env      ${envFile ?? "(없음 — process.env만 사용)"}`);
 		console.log(`  ├ model    ${cfg.agent.model ?? "(기본)"} · thinking ${cfg.agent.thinking}`);
 		console.log(

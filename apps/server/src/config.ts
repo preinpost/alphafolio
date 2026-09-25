@@ -17,6 +17,15 @@ import { parseThinkingLevel, type ThinkingLevel } from "@alphafolio/agent";
 /** 저장소 루트 (apps/server/src → ../../..). */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
+/** 앱 버전 — 루트 package.json (릴리스 워크플로가 올린다). 화면이 자기 번들 버전과 비교해 옛 번들을 알아챈다 */
+export const APP_VERSION: string = (() => {
+	try {
+		return (JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { version?: string }).version ?? "unknown";
+	} catch {
+		return "unknown";
+	}
+})();
+
 /** 루트 .env 를 process.env 에 병합한다. 이미 설정된 값이 우선. */
 export function loadDotEnv(): string | null {
 	const file = join(REPO_ROOT, ".env");

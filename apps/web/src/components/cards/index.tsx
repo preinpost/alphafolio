@@ -56,6 +56,20 @@ export function CardView({ card }: { card: UICard }) {
 		case "overview-card":
 			return <OverviewCardView card={card} />;
 		default:
-			return <LedgerCardView card={card} />;
+			// 가계부 카드만 여기로. 모르는 종류를 가계부 렌더러에 넘기면 **조용히 빈칸**이 된다 —
+			// 서버가 새 카드를 보냈는데 화면이 옛 번들인 경우 (서비스워커 캐시, 실측 2026-09-25)
+			if (card.kind.startsWith("ledger-")) return <LedgerCardView card={card} />;
+			return <UnknownCardView kind={(card as { kind: string }).kind} />;
 	}
+}
+
+function UnknownCardView({ kind }: { kind: string }) {
+	return (
+		<div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-line bg-inset px-4 py-3 text-xs text-muted">
+			<span>이 카드는 새 버전에서 보입니다 ({kind}).</span>
+			<button onClick={() => location.reload()} className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-ink">
+				새로고침
+			</button>
+		</div>
+	);
 }

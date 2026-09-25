@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
@@ -12,7 +13,11 @@ import { VitePWA } from "vite-plugin-pwa";
  */
 const SERVER_PORT = process.env.AF_PORT ?? "8080";
 
+/** 앱 버전 = 루트 package.json (릴리스 워크플로가 올린다). 화면 버전 표시·서버 버전과 비교 (App.tsx) */
+const APP_VERSION = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;
+
 export default defineConfig({
+	define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,

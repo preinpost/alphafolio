@@ -48,7 +48,8 @@ export function McpSettings() {
 
 	useEffect(() => setNotice(takeCallbackNotice()), []);
 
-	const list = useQuery({ queryKey: ["mcp"], queryFn: api.mcpServers });
+	// 앱에서 시스템 브라우저로 로그인하고 돌아오면 다시 읽는다 — 전역 기본값은 포커스 재조회를 끈다 (main.tsx)
+	const list = useQuery({ queryKey: ["mcp"], queryFn: api.mcpServers, refetchOnWindowFocus: "always" });
 	const set = (data: McpListing) => qc.setQueryData(["mcp"], data);
 
 	const add = useMutation({ mutationFn: (i: McpAddInput) => api.addMcpServer(i), onSuccess: (d) => (set(d), setAdding(false)) });

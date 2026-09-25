@@ -276,6 +276,7 @@ function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClos
 						{chat.connected ? modelName(chat.model) || "연결됨" : "연결 중…"}
 					</span>
 				</div>
+				<AppVersion connected={chat.connected} />
 				<button
 					onClick={onLogout}
 					className="flex w-full items-center gap-2.5 rounded-lg px-3 py-3 text-[15px] text-muted transition hover:bg-hover hover:text-ink active:bg-selected md:py-2 md:text-sm"
@@ -285,6 +286,27 @@ function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClos
 				</button>
 			</div>
 		</div>
+	);
+}
+
+/**
+ * 이 화면(번들)의 버전 + 서버 버전이 다르면 새로고침 안내.
+ * 배포 직후 서비스워커가 옛 번들을 주면 새 카드가 안 보인다 (PLAN §39) — 여기서 바로 드러난다.
+ * 서버 버전은 소켓이 다시 붙을 때(= 배포로 서버가 재시작) 다시 읽는다.
+ */
+function AppVersion({ connected }: { connected: boolean }) {
+	const health = useQuery({ queryKey: ["health", connected], queryFn: api.health, staleTime: Infinity, retry: false });
+	const server = health.data?.version;
+	const stale = !!server && server !== "unknown" && server !== __APP_VERSION__;
+	if (!stale) return <div className="px-3 pl-[1.625rem] text-[11px] text-faint">v{__APP_VERSION__}</div>;
+	return (
+		<button
+			onClick={() => location.reload()}
+			className="block w-full px-3 pl-[1.625rem] text-left text-[11px] text-danger"
+			title="서버가 새 버전입니다. 새로고침하면 새 화면을 받습니다."
+		>
+			v{__APP_VERSION__} → v{server} 새로고침
+		</button>
 	);
 }
 

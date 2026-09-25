@@ -113,7 +113,7 @@ export type McpAddInput =
 	| { name: string; url: string; auth: "bearer"; token: string };
 
 export const api = {
-	health: () => request<{ ok: boolean; ledger: boolean; model: string }>("/api/health"),
+	health: () => request<{ ok: boolean; version?: string; ledger: boolean; model: string }>("/api/health"),
 
 	me: () => request<MeDto>("/api/me"),
 
