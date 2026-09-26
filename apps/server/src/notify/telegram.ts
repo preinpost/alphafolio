@@ -8,7 +8,10 @@
 const API = "https://api.telegram.org";
 const TIMEOUT_MS = 10_000;
 
-export class TelegramError extends Error {}
+export class TelegramError extends Error {
+	/** 텔레그램 error_code (없으면 HTTP 상태) — 409 = 다른 곳이 이 봇을 읽고 있다 */
+	code: number | null = null;
+}
 
 export interface TelegramDeps {
 	fetch?: typeof fetch;
@@ -33,7 +36,7 @@ export function describeNetError(err: unknown): string {
 	return detail ? `${err.message} (${detail})` : err.message;
 }
 
-/** 봇 id = 토큰의 앞 숫자 ("8501279729:AA…" → "8501279729") */
+/** 봇 id = 토큰의 앞 숫자 ("123456789:AA…" → "123456789") */
 export function botIdOf(token: string): string {
 	return token.trim().split(":")[0] ?? "";
 }
@@ -42,7 +45,7 @@ function redact(text: string, token: string): string {
 	return token ? text.split(token).join("<봇 토큰>") : text;
 }
 
-async function call<T>(token: string, method: string, body: Record<string, unknown>, deps: TelegramDeps = {}): Promise<T> {
+export async function call<T>(token: string, method: string, body: Record<string, unknown>, deps: TelegramDeps = {}, timeoutMs = TIMEOUT_MS): Promise<T> {
 	const f = deps.fetch ?? fetch;
 	let res: Response;
 	try {
@@ -50,7 +53,7 @@ async function call<T>(token: string, method: string, body: Record<string, unkno
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(TIMEOUT_MS),
+			signal: AbortSignal.timeout(timeoutMs),
 		});
 	} catch (err) {
 		throw new TelegramError(`텔레그램에 연결하지 못했습니다: ${redact(describeNetError(err), token)}`);
@@ -68,7 +71,9 @@ async function call<T>(token: string, method: string, body: Record<string, unkno
 					: code === 409
 						? " — 이 봇에 웹훅이 설정돼 있어 메시지를 읽을 수 없습니다 (다른 곳에서 쓰는 봇이면 새 봇을 만들어 주세요)"
 						: "";
-		throw new TelegramError(`텔레그램 오류 ${code}: ${redact(json?.description ?? "응답 없음", token)}${hint}`);
+		const e = new TelegramError(`텔레그램 오류 ${code}: ${redact(json?.description ?? "응답 없음", token)}${hint}`);
+		e.code = code;
+		throw e;
 	}
 	return json.result as T;
 }
@@ -102,6 +107,32 @@ export function escapeHtml(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export async function sendMessage(token: string, chatId: string, html: string, deps?: TelegramDeps): Promise<void> {
-	await call(token, "sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true } }, deps);
+/** 인라인 버튼 — callback_data 는 64바이트까지 */
+export type Buttons = Array<Array<{ text: string; callback_data: string }>>;
+
+export async function sendMessage(token: string, chatId: string, html: string, deps?: TelegramDeps, buttons?: Buttons): Promise<void> {
+	await call(
+		token,
+		"sendMessage",
+		{ chat_id: chatId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}) },
+		deps,
+	);
+}
+
+/** 버튼이 달린 메시지를 고쳐 쓴다 (목록 갱신·확인 결과) */
+export async function editMessage(token: string, chatId: string, messageId: number, html: string, deps?: TelegramDeps, buttons?: Buttons): Promise<void> {
+	await call(
+		token,
+		"editMessageText",
+		{ chat_id: chatId, message_id: messageId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: buttons ?? [] } },
+		deps,
+	).catch((err: unknown) => {
+		// 내용이 같으면 텔레그램이 400 을 준다 — 무시
+		if (!(err instanceof TelegramError && /not modified/i.test(err.message))) throw err;
+	});
+}
+
+/** 버튼 누름에 답한다 (안 하면 버튼이 계속 로딩 중으로 보인다) */
+export async function answerCallback(token: string, callbackId: string, text: string, deps?: TelegramDeps): Promise<void> {
+	await call(token, "answerCallbackQuery", { callback_query_id: callbackId, text: text.slice(0, 190) }, deps).catch(() => undefined);
 }

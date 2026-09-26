@@ -10,7 +10,8 @@
     "./order-tools": "./src/order-tools.ts",
     "./data-tools": "./src/data-tools.ts",
     "./stream-tools": "./src/stream-tools.ts",
-    "./derivatives-tools": "./src/derivatives/tool.ts"
+    "./derivatives-tools": "./src/derivatives/tool.ts",
+    "./watch-tools": "./src/triggers/tool.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

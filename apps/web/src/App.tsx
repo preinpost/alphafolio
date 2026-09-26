@@ -1,4 +1,4 @@
-import type { ConversationListItem } from "@alphafolio/protocol";
+import type { ConversationListItem, StreamMessage } from "@alphafolio/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ComponentType, type TouchEvent } from "react";
 import { api } from "./lib/api.ts";
@@ -59,12 +59,20 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 	const chat = useChat({
 		initialSessionId: initial.view === "chat" ? initial.sessionId : null,
 		onActivity: () => void qc.invalidateQueries({ queryKey: ["sessions"] }),
+		onWatchEvent: (ev) => {
+			void qc.invalidateQueries({ queryKey: ["watch"] });
+			// 상태 변경(일시정지 등)은 목록만 갱신 — 발동·만료·비상 정지만 띄운다
+			if (["fired", "missed", "expired", "stopped"].includes(ev.kind)) setToast(ev);
+		},
 		onMissing: () => {
 			lastSession.set(null);
 			if (parseRoute(location.pathname).view === "chat") navigate({ view: "chat", sessionId: null }, { replace: true });
 		},
 	});
 	const [view, setView] = useState<View>(initial.view);
+	const [toast, setToast] = useState<WatchToastEvent | null>(null);
+	/** 이미 설정 화면일 때 감시 탭으로 옮기려면 다시 그려야 한다 (탭은 처음 그릴 때 주소에서 읽는다) */
+	const [settingsKey, setSettingsKey] = useState(0);
 	const [drawer, setDrawer] = useState(false);
 	const swipe = useDrawerSwipe(drawer, setDrawer);
 
@@ -199,9 +207,52 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 				) : view === "portfolio" ? (
 					<PortfolioPage />
 				) : (
-					<SettingsPage />
+					<SettingsPage key={settingsKey} onOpenConversation={openConversation} />
 				)}
 			</main>
+			{toast && (
+				<WatchToast
+					ev={toast}
+					onClose={() => setToast(null)}
+					onOpen={() => {
+						setToast(null);
+						const conv = toast.path?.match(/^\/c\/(.+)$/)?.[1];
+						if (conv) return openConversation(decodeURIComponent(conv));
+						history.pushState(null, "", "/settings/watch");
+						setView("settings");
+						setSettingsKey((k) => k + 1);
+					}}
+				/>
+			)}
+		</div>
+	);
+}
+
+type WatchToastEvent = Extract<StreamMessage, { type: "watch_event" }>;
+
+/** 감시 발동 알림 — 12초 뒤 사라진다. 누르면 만든 대화(또는 설정 → 감시) */
+function WatchToast({ ev, onClose, onOpen }: { ev: WatchToastEvent; onClose: () => void; onOpen: () => void }) {
+	useEffect(() => {
+		const id = setTimeout(onClose, 12_000);
+		return () => clearTimeout(id);
+	}, [ev, onClose]);
+	return (
+		<div className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-50 flex justify-center px-4">
+			<div className="w-full max-w-md rounded-xl border border-accent/50 bg-card p-3 shadow-lg">
+				<div className="flex items-start justify-between gap-3">
+					<button onClick={onOpen} className="min-w-0 text-left">
+						<div className="truncate text-sm font-medium text-ink">🔔 {ev.title}</div>
+						{ev.lines.map((l) => (
+							<div key={l} className="text-xs text-muted">
+								{l}
+							</div>
+						))}
+					</button>
+					<button onClick={onClose} className="shrink-0 text-xs text-faint" aria-label="닫기">
+						닫기
+					</button>
+				</div>
+			</div>
 		</div>
 	);
 }

@@ -391,6 +391,28 @@ export interface McpConfirmCard {
 	warnings: string[];
 }
 
+/**
+ * 감시 켜기 확인 카드 (PLAN §40) — watch_alert 가 **준비만** 한 결과. [켜기] 를 눌러야 감시가 시작된다.
+ * broker/src/triggers/tool.ts 의 WatchConfirmCard 와 같은 모양.
+ */
+export interface WatchConfirmCard {
+	kind: "watch-confirm-card";
+	token: string;
+	expiresAt: number;
+	name: string;
+	/** 조건 한 줄 ("ETHUSDT · 1시간봉 마감 · 종가 < 2,600") */
+	text: string;
+	interval: string;
+	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
+	lastClose: number | null;
+	lastBarAt: number | null;
+	holdsNow: boolean | null;
+	/** 지난 기간에 이 조건이었다면 울렸을 횟수·마지막 몇 번 (at = 봉 마감 시각) */
+	preview: { days: number; count: number; recent: Array<{ at: number; close: number }> };
+	channels: string[];
+	warnings: string[];
+}
+
 export type UICard =
 	| LedgerTxCard
 	| LedgerSummaryCard
@@ -411,6 +433,7 @@ export type UICard =
 	| ConditionalOrderCard
 	| BinanceOrderCard
 	| McpConfirmCard
+	| WatchConfirmCard
 	| OverviewCard;
 
 // ── 메시지 ──────────────────────────────────────────────────────────────
@@ -487,6 +510,8 @@ export type StreamMessage =
 	 * 지금 보고 있지 않은 대화의 내용은 보내지 않는다.
 	 */
 	| { type: "activity"; sessionId: string; streaming: boolean }
+	/** 감시 트리거 발동·만료·상태 변경 (PLAN §40) — 떠 있는 모든 화면에. path 는 결과를 볼 곳 */
+	| { type: "watch_event"; triggerId: string; name: string; kind: string; title: string; lines: string[]; path: string | null; at: number }
 	| { type: "pong" };
 
 /** GET /api/sessions — 사이드바 대화 목록 (최근 순) */

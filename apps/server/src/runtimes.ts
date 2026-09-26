@@ -26,6 +26,7 @@ import { createDerivativesTools } from "@alphafolio/broker/derivatives-tools";
 import { createMcpTools } from "@alphafolio/mcp/tools";
 import type { FetchLike, McpServerHandle } from "@alphafolio/mcp";
 import type { McpWriteRequest } from "@alphafolio/mcp/tools";
+import { createWatchTools, type WatchToolDeps } from "@alphafolio/broker/watch-tools";
 import type { DataCreds } from "@alphafolio/broker";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
@@ -62,6 +63,8 @@ export interface RuntimeManagerOptions {
 	mcpFetch: FetchLike;
 	/** MCP 쓰기 확인 토큰 발급기 — 툴은 준비만, 실행은 사람이 /api/mcp/execute 로 (PLAN §39) */
 	prepareMcpWrite: (user: string) => (req: McpWriteRequest) => { token: string; expiresAt: number };
+	/** 감시 트리거 (PLAN §40) — 툴은 준비·목록·일시정지만. 켜기는 사람이 확인 카드로 */
+	watch: (user: string) => WatchToolDeps;
 	/** 사용자가 직접 저장한 LLM 키 (providerId → key). env 값은 넣지 않는다 — pi 가 알아서 읽는다. */
 	llmKeys: (user: string) => Record<string, string>;
 	/** 유휴 대화 정리 기준(분). 0이면 정리하지 않는다. 응답 중인 대화는 기준과 무관하게 남는다. */
@@ -164,6 +167,8 @@ export class RuntimeManager {
 				...createDerivativesTools({ brokers: this.opts.brokerAccess(user) }),
 				// 외부 MCP (TradingView 등) — 읽기는 바로, 쓰기는 확인 카드 (PLAN §38·§39)
 				...createMcpTools({ servers: () => this.opts.mcpServers(user), fetch: this.opts.mcpFetch, prepareWrite: this.opts.prepareMcpWrite(user) }),
+				// 자체 감시 — 봉 마감 조건 알림 (PLAN §40)
+				...createWatchTools(this.opts.watch(user)),
 			],
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});

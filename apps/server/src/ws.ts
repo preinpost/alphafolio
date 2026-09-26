@@ -55,7 +55,12 @@ interface Client {
 	sessionId: string | null;
 }
 
-export function attachWebSocket(server: Server, deps: WsDeps): void {
+/** 대화 밖에서 사용자 화면에 알릴 때 (감시 이벤트 등) */
+export interface WsHub {
+	toUser: (user: string, msg: StreamMessage) => void;
+}
+
+export function attachWebSocket(server: Server, deps: WsDeps): WsHub {
 	// 기본 한도(100MB)는 너무 크다 — 이미지 첨부 최대치까지만 받는다
 	const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD });
 	/** 사용자별 인증된 소켓 */
@@ -338,4 +343,6 @@ export function attachWebSocket(server: Server, deps: WsDeps): void {
 				sendTo(c, { type: "error", message: "알 수 없는 명령" });
 		}
 	}
+
+	return { toUser };
 }

@@ -41,6 +41,8 @@ export interface ChatOptions {
 	onActivity?: (sessionId: string, streaming: boolean) => void;
 	/** 요청한 대화가 없어 새 대화로 돌아감 — 주소를 / 로 */
 	onMissing?: (sessionId: string) => void;
+	/** 감시 발동·상태 변경 (PLAN §40) — 대화와 무관하게 온다 */
+	onWatchEvent?: (ev: Extract<StreamMessage, { type: "watch_event" }>) => void;
 }
 
 const RECONNECT_DELAY_MS = 1500;
@@ -140,6 +142,9 @@ export function useChat(opts: ChatOptions): ChatState {
 					return;
 				case "activity":
 					optsRef.current.onActivity?.(msg.sessionId, msg.streaming);
+					return;
+				case "watch_event":
+					optsRef.current.onWatchEvent?.(msg);
 					return;
 				default:
 					return;

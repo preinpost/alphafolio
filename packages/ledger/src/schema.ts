@@ -203,6 +203,46 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
 );
 `.trim(),
 	},
+	{
+		// 감시 트리거 (PLAN §40). source·action 은 JSON — 소스(자체 감시·웹훅)·동작(알림·주문)이 늘어도 스키마를 안 바꾼다.
+		// last_bar_t: 마지막으로 평가한 봉 시작(epoch ms) — 발동 규칙이 봉 배열만으로 정해져서 이것만 기억하면 된다.
+		// trigger_events: 발동·만료·오류 기록. 트리거를 지워도 남긴다 (detail 에 이름을 복사해 둔다).
+		id: "0009_triggers",
+		sql: `
+CREATE TABLE IF NOT EXISTS triggers (
+  id              TEXT PRIMARY KEY,
+  member          TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  conversation_id TEXT,
+  source          TEXT NOT NULL,
+  action          TEXT NOT NULL,
+  max_fires       INTEGER,
+  cooldown_sec    INTEGER NOT NULL DEFAULT 0,
+  expires_at      TEXT NOT NULL,
+  state           TEXT NOT NULL,
+  fires           INTEGER NOT NULL DEFAULT 0,
+  last_bar_t      INTEGER,
+  last_fired_at   INTEGER,
+  last_eval_at    INTEGER,
+  last_error      TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_triggers_member ON triggers(member, state);
+
+CREATE TABLE IF NOT EXISTS trigger_events (
+  id         TEXT PRIMARY KEY,
+  trigger_id TEXT NOT NULL,
+  member     TEXT NOT NULL,
+  at         INTEGER NOT NULL,
+  kind       TEXT NOT NULL,
+  bar_t      INTEGER,
+  detail     TEXT,
+  notified   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trigger_events_member ON trigger_events(member, at);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

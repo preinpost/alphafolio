@@ -9,7 +9,12 @@ import { describe, it } from "node:test";
 import { Notifier, TELEGRAM_CHAT, TELEGRAM_TOKEN } from "../src/notify/index.ts";
 import { botIdOf, describeNetError, escapeHtml, findPrivateChat, getBotName, isBotToken, sendMessage, TelegramError } from "../src/notify/telegram.ts";
 
-const TOKEN = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ";
+/**
+ * 가짜 토큰 — 실행할 때 조립한다. 토큰 모양 문자열을 소스에 그대로 두면 GitHub 비밀 스캔이 진짜 토큰으로 경고한다
+ * (2026-09-26: 문서 예시값 + 실제 봇 id 조합이 경고를 받았다)
+ */
+const fakeToken = (botId: string) => `${botId}:${"x".repeat(35)}`;
+const TOKEN = fakeToken("123456789");
 
 /** 가짜 api.telegram.org — 호출 기록 + 메서드별 응답 */
 function fakeTelegram(replies: Record<string, { status?: number; body: unknown } | (() => never)>) {
@@ -97,7 +102,7 @@ describe("텔레그램 채널", () => {
 	});
 
 	it("채팅 id 에 봇 자신의 id 를 넣은 403 은 그렇다고 알려 준다", async () => {
-		assert.equal(botIdOf("8501279729:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ"), "8501279729");
+		assert.equal(botIdOf(fakeToken("987654321")), "987654321");
 		const t = fakeTelegram({ sendMessage: { status: 403, body: { ok: false, error_code: 403, description: "Forbidden: bot can't send messages to bots" } } });
 		await assert.rejects(sendMessage(TOKEN, "123456789", "x", { fetch: t.fetch }), /봇 자신의 id/);
 	});

@@ -55,10 +55,12 @@ export function createOrderToken<P extends { u: string } = Omit<OrderTokenPayloa
 	payload: P,
 	secret: string,
 	now = Date.now(),
+	/** 주문은 2분. 감시 켜기(PLAN §40)처럼 급하지 않은 확인은 더 길게 — 가드의 consume 에도 같은 값을 준다 */
+	ttlMs = ORDER_TOKEN_TTL_MS,
 ): { token: string; payload: P & { exp: number; nonce: string } } {
 	const full = {
 		...payload,
-		exp: now + ORDER_TOKEN_TTL_MS,
+		exp: now + ttlMs,
 		// 토스 clientOrderId 제약: 최대 36자, 영숫자·-·_
 		nonce: `af${randomBytes(12).toString("hex")}`,
 	};
@@ -114,9 +116,10 @@ export class OrderTokenGuard<P extends SignedPayload = OrderTokenPayload> {
 	 * 실행 직전에 소비한다. **주문을 보내기 전에** 호출해야 더블클릭이 두 번
 	 * 나가지 않는다 (실패해도 재사용을 허용하지 않는 쪽이 안전하다).
 	 */
-	consume(nonce: string, now = Date.now()): void {
+	consume(nonce: string, now = Date.now(), ttlMs = ORDER_TOKEN_TTL_MS): void {
 		this.sweep(now);
-		this.used.set(nonce, now + ORDER_TOKEN_TTL_MS);
+		// 토큰 수명 동안은 기억해야 재사용을 막는다
+		this.used.set(nonce, now + ttlMs);
 	}
 
 	private sweep(now: number): void {

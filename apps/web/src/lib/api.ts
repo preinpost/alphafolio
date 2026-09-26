@@ -121,6 +121,39 @@ export type McpAddInput =
 	| { name: string; url: string; auth: "oauth" | "none" }
 	| { name: string; url: string; auth: "bearer"; token: string };
 
+export interface WatchItem {
+	id: string;
+	name: string;
+	text: string;
+	state: "armed" | "paused" | "done" | "expired" | "off";
+	fires: number;
+	maxFires: number | null;
+	expiresAt: string;
+	lastFiredAt: number | null;
+	lastEvalAt: number | null;
+	nextEvalAt: number | null;
+	lastError: string | null;
+	conversationId: string | null;
+	createdAt: string;
+}
+
+export interface WatchEventItem {
+	id: string;
+	triggerId: string;
+	at: number;
+	kind: string;
+	barT: number | null;
+	detail: { name?: string; values?: Record<string, number>; missed?: number; by?: string; count?: number };
+}
+
+export interface WatchView {
+	items: WatchItem[];
+	events: WatchEventItem[];
+	channels: string[];
+	telegram: { listening: boolean; problem: string | null };
+	storageReady: boolean;
+}
+
 export const api = {
 	health: () => request<{ ok: boolean; version?: string; ledger: boolean; model: string }>("/api/health"),
 
@@ -193,6 +226,15 @@ export const api = {
 	/** 텔레그램 연결 테스트 — 채팅 id 를 자동으로 찾아 저장하면 갱신된 키 목록(items)이 함께 온다 */
 	testTelegram: () =>
 		request<{ ok: boolean; message: string; items?: SecretStatus[] }>("/api/notify/telegram/test", { method: "POST" }),
+
+	// ── 감시 (PLAN §40) ──────────────────────────────────────────────
+	watches: () => request<WatchView>("/api/watch"),
+	/** ⚠️ 감시가 시작되는 유일한 클라이언트 경로 — 확인 카드의 [켜기] 에서만 */
+	armWatch: (token: string) => request<{ ok: boolean; watch: WatchItem }>("/api/watch/arm", { method: "POST", body: JSON.stringify({ token }) }),
+	pauseWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}/pause`, { method: "POST" }),
+	resumeWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}/resume`, { method: "POST" }),
+	deleteWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}`, { method: "DELETE" }),
+	stopAllWatches: () => request<{ stopped: number }>("/api/watch/stop-all", { method: "POST" }),
 
 	// ── 원격 MCP 서버 (설정 화면 전용 — 에이전트는 추가·연결할 수 없다) ───────
 	mcpServers: () => request<McpListing>("/api/mcp/servers"),

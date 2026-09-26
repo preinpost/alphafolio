@@ -46,7 +46,11 @@ import { RuntimeManager } from "./runtimes.ts";
 import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
 import { AccountError, AccountStore } from "./accounts.ts";
 import { handleAccounts } from "./accounts-api.ts";
-import { attachWebSocket } from "./ws.ts";
+import { attachWebSocket, type WsHub } from "./ws.ts";
+import { TriggerError, TriggerStore } from "./triggers.ts";
+import { Watcher, type WatchEvent } from "./watcher.ts";
+import { TelegramBots } from "./notify/telegram-bot.ts";
+import { handleWatch, watchConfirmSecret, WatchOps, type WatchTokenPayload } from "./watch-api.ts";
 import { createSafeFetch } from "@alphafolio/mcp";
 import { McpStore } from "./mcp-store.ts";
 import { CALLBACK_PATH, McpAuthManager } from "./mcp-auth.ts";
@@ -140,6 +144,49 @@ async function main(): Promise<void> {
 	// 알림 (PLAN §40) — 트리거·체결 결과를 사용자 채널로. 지금은 텔레그램
 	const notifier = new Notifier({ secrets, publicUrl: cfg.publicUrl });
 
+	// 감시 트리거 (PLAN §40) — 알림은 떠 있는 화면(WebSocket) + 사용자 채널(텔레그램)
+	const triggerStore = new TriggerStore(ledgerConfig);
+	let wsHub: WsHub | null = null;
+	const deliverWatch = async (ev: WatchEvent, opts: { channels?: boolean } = {}): Promise<unknown> => {
+		wsHub?.toUser(ev.user, {
+			type: "watch_event",
+			triggerId: ev.triggerId,
+			name: ev.name,
+			kind: ev.kind,
+			title: ev.message.title,
+			lines: ev.message.lines ?? [],
+			path: ev.message.path ?? null,
+			at: ev.at,
+		});
+		return opts.channels === false ? [] : notifier.notify(ev.user, ev.message);
+	};
+	const watchOps: WatchOps = new WatchOps({
+		store: triggerStore,
+		confirm: { secret: watchConfirmSecret(cfg.auth.secret), guard: new OrderTokenGuard<WatchTokenPayload>() },
+		deliver: deliverWatch,
+		channels: (user) => notifier.channels(user),
+		commandStatus: (user) => telegramBots.status(user),
+	});
+	// 텔레그램에서 감시 보기·멈추기·지우기 — 사용자 봇마다 롱 폴링 (PLAN §40)
+	const telegramBots: TelegramBots = new TelegramBots({
+		ops: watchOps,
+		creds: (user) => {
+			const token = notifier.userSecret(TELEGRAM_TOKEN, user);
+			const chatId = notifier.userSecret(TELEGRAM_CHAT, user);
+			return token && chatId ? { token, chatId } : null;
+		},
+		users: () => accounts.names(),
+		publicUrl: cfg.publicUrl,
+	});
+	/** 에이전트 툴 — 저장소 오류는 모델이 읽을 문장으로 */
+	const agentOp = async <T>(run: () => Promise<T>): Promise<T> => {
+		try {
+			return await run();
+		} catch (err) {
+			throw new Error(err instanceof TriggerError ? err.message : String(err));
+		}
+	};
+
 	/** D1 설정이 갖춰져 있는지. */
 	const ledgerReady = (): boolean => {
 		try {
@@ -158,6 +205,7 @@ async function main(): Promise<void> {
 			if (m.applied.length > 0) console.log(`[ledger] 마이그레이션 적용: ${m.applied.join(", ")}`);
 			await secrets.load();
 			await mcpStore.load();
+			await triggerStore.load();
 		} catch (err) {
 			console.warn("[secrets] 초기 적재 실패 — 설정 화면에서 D1 연결을 확인하세요:", err);
 		}
@@ -290,6 +338,12 @@ async function main(): Promise<void> {
 		mcpServers: (user) => mcpHandles(mcpDeps, user),
 		mcpFetch,
 		prepareMcpWrite: (user) => prepareMcpWrite(mcpDeps, user),
+		watch: (user) => ({
+			prepareWatch: (spec) => watchOps.prepare(user, spec),
+			listWatches: async () => watchOps.list(user),
+			pauseWatch: (id) => agentOp(() => watchOps.pause(user, id, "agent")),
+			channels: () => notifier.channels(user),
+		}),
 		idleMinutes: cfg.idleMinutes,
 	});
 
@@ -311,6 +365,8 @@ async function main(): Promise<void> {
 		users: () => accounts.names(),
 		brokerAccess,
 	});
+
+	const watcher = new Watcher({ store: triggerStore, deliver: (ev) => deliverWatch(ev), isActive: (u) => accounts.has(u) });
 
 	const loginLimiter = new LoginRateLimiter(cfg.login);
 	// 초대 코드 추측 방지 — 로그인과 따로 센다 (가입 실패가 로그인을 막지 않게)
@@ -479,6 +535,7 @@ async function main(): Promise<void> {
 				// LLM 키는 떠 있는 런타임에 바로 반영 (재시작·재로그인 불필요)
 				const llmProvider = LLM_SECRET_PROVIDERS[name];
 				if (llmProvider) await runtimes.applyLlmKey(user, llmProvider, secrets.get(name, user) ?? null);
+				if (name.startsWith("TELEGRAM_")) telegramBots.refresh(user);
 				json(res, 200, { items: secrets.status(user) });
 				return;
 			}
@@ -490,6 +547,7 @@ async function main(): Promise<void> {
 				// 제거하면 서버 기본(auth.json·env)으로 되돌아간다
 				const llmProvider = LLM_SECRET_PROVIDERS[name];
 				if (llmProvider) await runtimes.applyLlmKey(user, llmProvider, null);
+				if (name.startsWith("TELEGRAM_")) telegramBots.refresh(user);
 				json(res, 200, { items: secrets.status(user) });
 				return;
 			}
@@ -502,6 +560,14 @@ async function main(): Promise<void> {
 				} catch (err) {
 					json(res, 200, { ok: false, message: err instanceof Error ? err.message : String(err) });
 				}
+				return;
+			}
+
+			// ── 감시 트리거 (PLAN §40) ─────────────────────────
+			if (path === "/api/watch" || path.startsWith("/api/watch/")) {
+				const result = await handleWatch(req, path, user, watchOps);
+				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
+				json(res, 200, result);
 				return;
 			}
 
@@ -524,6 +590,8 @@ async function main(): Promise<void> {
 					json(res, 200, { ok: false, message: "봇 토큰 모양이 아닙니다 — 숫자:영문 형태의 토큰 전체를 붙여 넣으세요" });
 					return;
 				}
+				// 명령 수신(getUpdates 롱 폴링)과 채팅 찾기가 겹치면 409 — 테스트 동안 멈췄다가 끝나면 다시
+				telegramBots.refresh(user, { suspend: true });
 				try {
 					const bot = await getBotName(token);
 					let chat = notifier.userSecret(TELEGRAM_CHAT, user);
@@ -550,6 +618,8 @@ async function main(): Promise<void> {
 					json(res, 200, { ok: true, message: `연결됨 · ${bot}${found}`, items: secrets.status(user) });
 				} catch (err) {
 					json(res, 200, { ok: false, message: err instanceof TelegramError ? err.message : String(err) });
+				} finally {
+					telegramBots.refresh(user);
 				}
 				return;
 			}
@@ -669,7 +739,7 @@ async function main(): Promise<void> {
 		serveStatic(res, cfg.webDir, path);
 	}
 
-	attachWebSocket(server, {
+	wsHub = attachWebSocket(server, {
 		secret: cfg.auth.secret,
 		accounts,
 		runtimes,
@@ -709,11 +779,19 @@ async function main(): Promise<void> {
 		// D1 이 없으면 스냅샷을 저장할 곳이 없다 — 가계부와 같은 조건
 		if (process.env.AF_SNAPSHOT_DISABLED === "1") console.log("  스냅샷 비활성 (AF_SNAPSHOT_DISABLED=1)");
 		else snapshotScheduler.start();
+		// 감시 — 저장소가 적재됐을 때만 (D1 미설정이면 켤 트리거도 없다)
+		if (process.env.AF_WATCH_DISABLED === "1") console.log("  감시 비활성 (AF_WATCH_DISABLED=1)");
+		else if (triggerStore.ready) {
+			watcher.start();
+			telegramBots.start();
+		}
 	});
 
 	const shutdown = (): void => {
 		console.log("\n종료 중…");
 		snapshotScheduler.stop();
+		watcher.stop();
+		telegramBots.stopAll();
 		void runtimes.disposeAll();
 		server.close(() => process.exit(0));
 		setTimeout(() => process.exit(0), 3000).unref();
