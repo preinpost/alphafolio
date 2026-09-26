@@ -56,7 +56,7 @@ services:
       AF_D1_TOKEN: ""
 
       # ── 모델 ────────────────────────────────────────────────────────
-      AF_DEFAULT_MODEL: openrouter/deepseek/deepseek-v4.1-flash
+      AF_DEFAULT_MODEL: openrouter/openai/gpt-6-luna
       # 사고 강도 off/minimal/low/medium/high/xhigh/max
       AF_DEFAULT_THINKING: high
       # 서버 기본 LLM 키. 사용자가 설정 화면에 자기 키를 넣으면 그게 우선한다.

@@ -29,6 +29,6 @@ pi 에이전트 디렉터리에 올라가는 설정. 읽기 전용이면 되므�
 
 - 이 오버라이드는 **openrouter 프로바이더 경유**로 쓸 때만 적용된다
   (`DEEPSEEK_API_KEY` 직결은 해당 없음).
-- `AF_DEFAULT_MODEL` 은 `openrouter/deepseek/deepseek-v4.1-flash` 형식으로 쓴다.
-  모델 ID가 유일하면 프로바이더 접두어 없이 `deepseek/deepseek-v4.1-flash` 로 써도 openrouter로 해석된다.
-- `deepseek/deepseek-v4-flash-0731` 항목은 기본 모델을 바꿔도 남겨둔다 (UI 모델 선택 대비).
+- `AF_DEFAULT_MODEL` 은 `openrouter/openai/gpt-6-luna` 형식(프로바이더/모델)으로 쓴다 — 현재 기본값.
+  모델 ID가 유일하면 프로바이더 접두어 없이 `openai/gpt-6-luna` 로 써도 openrouter로 해석된다.
+- deepseek 항목들은 기본 모델을 바꿔도 남겨둔다 (UI 모델 선택 대비).
