@@ -11,6 +11,7 @@ import { copyFileSync, createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { mkdir } from "node:fs/promises";
+import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { d1ConfigFromEnv, d1Ping, ensureMigrated, LedgerAccessError, type D1Config } from "@alphafolio/ledger";
 import {
 	fetchPortfolio,
@@ -49,6 +50,8 @@ import { attachWebSocket } from "./ws.ts";
 import { createSafeFetch } from "@alphafolio/mcp";
 import { McpStore } from "./mcp-store.ts";
 import { CALLBACK_PATH, McpAuthManager } from "./mcp-auth.ts";
+import { Notifier, TELEGRAM_CHAT, TELEGRAM_TOKEN } from "./notify/index.ts";
+import { botIdOf, findPrivateChat, getBotName, isBotToken, sendMessage, TelegramError } from "./notify/telegram.ts";
 import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpWritePayload } from "./mcp-api.ts";
 
 const MIME: Record<string, string> = {
@@ -66,6 +69,14 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 	res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
 	res.end(payload);
 }
+
+/**
+ * 바깥 연결의 주소당 대기 시간 — Node 기본 250ms 는 먼 서버에 짧다.
+ * Node 는 IPv6·IPv4 주소를 번갈아 시도(happy eyeballs)하며 주소마다 이만큼만 기다린다. 한국 → 텔레그램(유럽) TCP 연결이
+ * 287ms 라 매번 직전에 포기하고 "fetch failed" 가 났다 (IPv6 는 경로 없음, 실측 2026-09-26 — curl 은 됐다).
+ * 늘려도 가까운 서버는 영향이 없다 (연결되는 즉시 끝난다).
+ */
+setDefaultAutoSelectFamilyAttemptTimeout(2_000);
 
 async function main(): Promise<void> {
 	const envFile = loadDotEnv();
@@ -125,6 +136,9 @@ async function main(): Promise<void> {
 	};
 
 	setLedgerConfigProvider(ledgerConfig);
+
+	// 알림 (PLAN §40) — 트리거·체결 결과를 사용자 채널로. 지금은 텔레그램
+	const notifier = new Notifier({ secrets, publicUrl: cfg.publicUrl });
 
 	/** D1 설정이 갖춰져 있는지. */
 	const ledgerReady = (): boolean => {
@@ -496,6 +510,47 @@ async function main(): Promise<void> {
 				const result = await handleMcp(req, path, user, mcpDeps);
 				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
 				json(res, 200, result);
+				return;
+			}
+
+			// 텔레그램 연결 테스트 — 채팅 id 가 없으면 봇에게 온 최근 개인 메시지에서 찾아 저장하고, 테스트 메시지를 보낸다
+			if (path === "/api/notify/telegram/test" && req.method === "POST") {
+				const token = notifier.userSecret(TELEGRAM_TOKEN, user);
+				if (!token) {
+					json(res, 200, { ok: false, message: "봇 토큰을 먼저 저장하세요 (@BotFather → /newbot)" });
+					return;
+				}
+				if (!isBotToken(token)) {
+					json(res, 200, { ok: false, message: "봇 토큰 모양이 아닙니다 — 숫자:영문 형태의 토큰 전체를 붙여 넣으세요" });
+					return;
+				}
+				try {
+					const bot = await getBotName(token);
+					let chat = notifier.userSecret(TELEGRAM_CHAT, user);
+					let found = "";
+					// 봇 자신의 id 를 넣은 경우 (웹 텔레그램 주소창의 숫자가 봇 id 다) — 무시하고 다시 찾는다
+					const wrongChat = chat === botIdOf(token);
+					if (!chat || wrongChat) {
+						const hit = await findPrivateChat(token);
+						if (!hit) {
+							const why = wrongChat ? "채팅 id 칸에 봇 자신의 id 가 들어 있습니다. " : "";
+							json(res, 200, {
+								ok: false,
+								message:
+									`${why}텔레그램에서 ${bot} 에게 아무 메시지나 보낸 뒤 다시 눌러 주세요. ` +
+									"그래도 안 되면 이 봇을 다른 프로그램이 읽고 있는 것입니다 — 채팅 id 에 내 계정 id(@userinfobot 이 알려 준다)를 직접 넣으세요.",
+							});
+							return;
+						}
+						await secrets.set(TELEGRAM_CHAT, hit.id, user);
+						chat = hit.id;
+						found = ` → ${hit.name}`;
+					}
+					await sendMessage(token, chat, "✅ <b>AlphaFolio 알림이 연결됐습니다</b>\n감시·체결 결과를 여기로 보냅니다.");
+					json(res, 200, { ok: true, message: `연결됨 · ${bot}${found}`, items: secrets.status(user) });
+				} catch (err) {
+					json(res, 200, { ok: false, message: err instanceof TelegramError ? err.message : String(err) });
+				}
 				return;
 			}
 

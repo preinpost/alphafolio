@@ -108,6 +108,7 @@ export function SettingsPage() {
 								onDelete={() => remove.mutate(item.name)}
 							/>
 						))}
+					{group === TELEGRAM_GROUP && <TelegramTest />}
 				</Section>
 			));
 
@@ -224,6 +225,42 @@ export function SettingsPage() {
 				</div>
 			</div>
 		</Tabs.Root>
+	);
+}
+
+/** 서버 카탈로그(secrets.ts)의 그룹 이름 */
+const TELEGRAM_GROUP = "알림 (텔레그램)";
+
+/**
+ * 텔레그램 연결 테스트 — 채팅 id 가 비어 있으면 서버가 봇에게 온 최근 개인 메시지에서 찾아 저장한다 (PLAN §40).
+ * 그래서 사용자는 봇 토큰만 넣고, 봇에게 한 번 말을 건 뒤 이 버튼을 누르면 된다.
+ */
+function TelegramTest() {
+	const qc = useQueryClient();
+	const test = useMutation({
+		mutationFn: api.testTelegram,
+		onSuccess: (r) => {
+			if (r.items) qc.setQueryData(["secrets"], (old: { items: SecretStatus[] } | undefined) => (old ? { ...old, items: r.items as SecretStatus[] } : old));
+		},
+	});
+	return (
+		<div className="space-y-1.5 border-t border-line pt-2">
+			<p className="text-[11px] text-faint">
+				① @BotFather 에서 /newbot 으로 봇을 만들어 토큰을 넣고 ② 텔레그램에서 그 봇에게 아무 메시지나 보낸 뒤 ③ 연결 테스트를 누르세요. 알림에는
+				종목·수량·체결가만 담고 잔고·평가금액은 보내지 않습니다.
+			</p>
+			<div className="flex flex-wrap items-center gap-2">
+				<button
+					onClick={() => test.mutate()}
+					disabled={test.isPending}
+					className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted disabled:opacity-50"
+				>
+					{test.isPending ? "확인 중…" : "연결 테스트"}
+				</button>
+				{test.data && <span className={`text-xs ${test.data.ok ? "text-success" : "text-danger"}`}>{test.data.message}</span>}
+				{test.error && <span className="text-xs text-danger">{test.error.message}</span>}
+			</div>
+		</div>
 	);
 }
 

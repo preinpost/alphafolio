@@ -66,6 +66,10 @@ export const SECRET_CATALOG: readonly SecretSpec[] = [
 		hint: "NCP 콘솔 → NAVER API HUB 구독 → Application",
 	},
 	{ name: "NCP_APIGW_API_KEY", label: "네이버 API Key", group: "뉴스 (네이버)" },
+
+	// 알림 채널 (PLAN §40) — 사용자마다 자기 봇. 서버 env 값은 쓰지 않는다 (notify/index.ts)
+	{ name: "TELEGRAM_BOT_TOKEN", label: "텔레그램 봇 토큰", group: "알림 (텔레그램)", hint: "@BotFather → /newbot" },
+	{ name: "TELEGRAM_CHAT_ID", label: "텔레그램 채팅 id", group: "알림 (텔레그램)", hint: "비우면 연결 테스트 때 자동으로 찾는다" },
 ];
 
 /** LLM 키 시크릿 → pi 프로바이더 ID. 여기 없는 LLM 키는 런타임에 전달되지 않는다. */

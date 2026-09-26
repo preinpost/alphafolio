@@ -190,6 +190,10 @@ export const api = {
 
 	testD1: () => request<{ ok: boolean; message: string }>("/api/secrets/test/d1", { method: "POST" }),
 
+	/** 텔레그램 연결 테스트 — 채팅 id 를 자동으로 찾아 저장하면 갱신된 키 목록(items)이 함께 온다 */
+	testTelegram: () =>
+		request<{ ok: boolean; message: string; items?: SecretStatus[] }>("/api/notify/telegram/test", { method: "POST" }),
+
 	// ── 원격 MCP 서버 (설정 화면 전용 — 에이전트는 추가·연결할 수 없다) ───────
 	mcpServers: () => request<McpListing>("/api/mcp/servers"),
 	addMcpServer: (input: McpAddInput) => request<McpListing>("/api/mcp/servers", { method: "POST", body: JSON.stringify(input) }),

@@ -1486,3 +1486,182 @@ CoinGecko `coingecko-api-oas` demo, Binance `binance-api-swagger` spot YAML).
   값은 고정폭 글꼴 대신 본문 글꼴, 기본값 안내는 실행 전에만. `useConfirm` 이 문장 + 카드용 값(detail)을 받게 넓혔다 (주문 카드는 그대로).
 - 테스트 +5 (실제 알림 응답으로 요약·순서·원본·일반 요약).
 
+## 40. 감시·자동 매매 헬퍼 — 설계 (2026-09-26, 미구현)
+
+토스 조건주문은 가격이 **한 번이라도 닿으면** 발동한다 — 순간 꼬리(피뢰침)에 손절이 걸리고, 봉 마감 기준·복합조건을 만들 수 없다.
+조건을 판정할 수 있는 곳에서 **신호**를 받아 알리거나 AlphaFolio 가 체결한다. TradingView 에 묶지 않는다 — **자체 감시가 1순위**, 웹훅은 소스 하나.
+
+성격: 독립 매매 봇이 아니라 **AlphaFolio 의 헬퍼 모듈** — 대화에서 만들고, 결과가 대화로 돌아오고, 기존 주문 실행기·증권 키·D1 을 쓴다.
+
+### 결정
+
+| 항목 | 결정 |
+|---|---|
+| 트리거 | `조건(소스) + 동작(알림 / 주문)` — TradingView 알림처럼 알림만 받는 것도 같은 틀 |
+| 소스 | 갈아 끼움: **자체 감시**(봉 마감·복합조건, 1순위) · 웹훅(TradingView·스크립트) |
+| 실행 | **자동이 기본.** 사람은 켤 때 한 번 승인. 한도(만료·실행 횟수·최악 허용가, 매수는 금액 상한) 없이는 켤 수 없다 |
+| 체결기 | 최적 단가 체결만. 시장가를 그대로 내지 않는다 (최악 허용가 안의 지정가) |
+| 대상 | 사용자 + 증권사 + **계좌 고정** (토스 accountSeq · KIS 계좌 · Binance 키 지문), 실행할 때 재확인 |
+| 자격증명 | 실행 시점에 저장된 키를 읽는다 (스냅샷 스케줄러와 같은 방식). 계정 비활성화 → 트리거 해제, 비밀번호 변경·모든 기기 로그아웃 → 유지 |
+| 웹훅 인증 | 트리거별 비밀값 (URL 경로, 해시 저장) + IP 보강. 로그인 토큰은 쓰지 않는다 (헤더 불가·권한 과다) |
+| 알림 | 알림 모듈 + 채널. **1차 텔레그램**(사용자별 봇 토큰), iOS APNs 는 TestFlight 때, 웹 푸시는 PC 브라우저용 선택 |
+| 이름 | 체결기(executor) / 트리거(조건 + 동작 전체) |
+| 기본 체결 방식 | 매도 immediate, 매수 patient 60초 |
+| 최악 허용가 | 필수, 현재가 ±x% 로 자동 산정 |
+
+### 구조
+
+```
+소스 (갈아 끼움)                              동작
+ ├ 자체 감시  봉 마감·복합조건 ─┐           ┌─ 알림 ─────────────────────────────▶ 알림 모듈
+ └ 웹훅       TradingView·스크립트 ─┴─▶ 신호 ─┤                                          (앱 화면·대화·텔레그램·APNs)
+                                            └─ 주문 ─▶ 규칙 ─▶ 리스크 ─▶ 체결기 ─▶ 증권사 ─▶ 알림 모듈
+```
+
+| 모듈 | 책임 | 하지 않는 것 |
+|---|---|---|
+| 소스: 자체 감시 | 봉 마감 시점에 조건 평가 (우리 봉 데이터 + `indicators.ts`) | 주문 판단 |
+| 소스: 웹훅 | 엔드포인트, 인증, 본문 64KB, 저장 후 202 (3초 제한), 보내는 쪽 형식 변환 | 주문 판단 |
+| 규칙 | 신호 → 체결 의도: 종목·방향·수량 정책(고정·보유 %·금액), 실행 횟수·쿨다운·만료, 최악 허용가 | 가격을 어떻게 낼지 |
+| 리스크 | 계정 단위: 1회·하루 금액 상한, 보유·잔고, 장 운영 여부, 비상 정지 | 개별 전략 |
+| **체결기** | 체결 의도 → 최적 단가 체결. 그것만 | 언제·무엇을·얼마나 |
+| 알림 | `notify(user, msg)` — 앱 화면·대화 기록은 항상, 외부 채널은 사용자 설정대로. 실패해도 체결 결과를 바꾸지 않는다 | 판단 |
+
+### 트리거
+
+```ts
+interface Trigger {
+  user: string;                       // 바꿀 수 없음
+  name: string;
+  conversationId: string | null;      // 결과를 기록할 대화
+  source:
+    | { kind: "watch"; condition: Condition }
+    | { kind: "webhook"; secretHash: string; ipAllow?: "tradingview" };
+  action:
+    | { kind: "notify" }
+    | { kind: "order"; target: Target; rule: OrderRule };
+  limits: { maxFires: number; cooldownSec: number; expiresAt: string };
+  state: "draft" | "armed" | "paused" | "done" | "expired" | "off";
+}
+
+interface Target { broker: "toss" | "kis" | "binance"; account: string; accountLabel: string }
+
+interface Signal {
+  triggerId: string; source: "watch" | "webhook"; receivedAt: number;
+  ref: string | null;                 // 중복 제거
+  vars: Record<string, unknown>;      // 규칙이 허용한 변수만 (1차는 비움)
+}
+```
+
+### 자체 감시
+
+조건은 코드가 아니라 선언형. 에이전트가 자연어를 이 모양으로 바꾸고, 사람이 확인 카드에서 켠다.
+
+```ts
+{
+  market: { venue: "binance", symbol: "ETHUSDT" },
+  interval: "1h",
+  when: "bar_close",                  // 꼬리가 아니라 마감가 (피뢰침 방지의 핵심)
+  all: [ { left: "close", op: "<", right: 2600 }, { left: "rsi14", op: "<", right: 30 } ],
+  confirmBars: 2,                     // N봉 연속
+  fire: "on_enter",                   // 거짓 → 참이 될 때만 (유지되는 동안 매 봉 울리지 않게)
+}
+```
+
+- 지표는 `indicators.ts` 에 있는 것만: close·open·high·low·volume·ma5/20/60·rsi14·볼린저 상·하단·atr·거래량 배수. 비교 `< > crosses_above crosses_below`.
+- 평가: 봉 마감 + 지연(Binance 3초, 주식 10초)마다, 켜진 트리거를 (종목, 간격) 으로 묶어 한 번만 조회 → 닫힌 봉만 평가 → 발동 규칙.
+- 데이터: Binance klines(1분~1일, 24시간) · 토스 1일·1분(1시간은 1분을 모아서) · KIS 국내 분봉·일봉(초당 한도 공유).
+- 켜기 전 **"지난 30일이었다면 언제 울렸을지"** 미리보기 (백테스트 스크립트의 봉 조회 재사용).
+
+### 체결기
+
+입력 `{ broker, account, symbol, side, quantity, worstPrice, urgency, deadline, remainder: "cancel" | "cross", nonce }`,
+출력 `{ status, filledQty, avgPrice, arrivalPrice, slippageBps, childOrders, reason }`.
+
+```text
+execute(intent)
+  book = 호가 스냅샷, arrival = 중간가
+  immediate: 잔량 누적으로 채우는 반대편 호가 (worstPrice 까지) → IOC 지정가 (없으면 지정가 + 즉시 취소)
+  patient:   우리 쪽 최우선 호가에 걸고 N초마다 한 호가씩 건너감 (worstPrice 를 넘지 않게) → 기한 뒤 remainder 대로
+  부분 체결은 조회로 따라가며 남은 수량만 / 자식 주문마다 보내기 전에 D1 기록
+```
+
+증권사 어댑터(`venues/`)는 "호가 · 지정가 · 정정·취소 · 체결 조회" 네 동작만 — 체결기는 증권사 API 를 모른다.
+하지 않는 것: 시간 분할(TWAP), 거래소 간 라우팅.
+
+| | 호가 | IOC | 정정 | 체결 조회 | 멱등키 |
+|---|---|---|---|---|---|
+| Binance | ✓ | ✓ | ✓ cancelReplace | ✓ | ✓ |
+| 토스 | ✓ getOrderbook | 확인 필요 | 국내 ✓ · 미국 가격만 | ✓ | ✓ clientOrderId |
+| KIS | ✓ | 국내 ✓ | ✓ | ✓ | ✗ (우리 기록에 의존) |
+
+### 권한
+
+| | 에이전트 | 사람 (화면) | 신호 |
+|---|---|---|---|
+| 트리거 준비 | ✓ | ✓ | |
+| **켜기 · 한도 변경** | | ✓ | |
+| 일시 정지 · 끄기 | ✓ | ✓ | |
+| 비상 정지 · 비밀 URL 보기·재발급 | | ✓ | |
+| **주문 일으키기** | | | ✓ (켜진 트리거만, 한도 안) |
+
+다른 사용자의 트리거는 그 계정 주인만 켠다. 비밀 URL 은 툴 결과에 싣지 않는다.
+
+### 처리 순서 · 복구
+
+```
+신호 (감시: 평가 결과 / 웹훅: 받음 → D1 → 202) ─▶ 사용자별 직렬 처리
+  → 중복·한도·장 운영 ─(탈락)→ 거절 + 이유
+  → 알림 동작: notify
+  → 주문 동작: 규칙(현재가·보유로 의도) → 리스크 → 체결기(자식 주문 선기록) → 보고 → 사용 횟수 +1 / 소진 시 해제 → notify
+```
+- 기동 시 "보내는 중" 이벤트: 토스·Binance 는 nonce 로 체결 내역을 맞추고, KIS 는 "결과 모름" 으로 알린다. 자동 재시도 없음.
+- 기동 시 놓친 봉은 소급 평가하되, **1봉 넘게 늦은 신호는 알림만 하고 주문하지 않는다.**
+
+### 빈틈과 대응
+
+| 위험 | 대응 |
+|---|---|
+| 서버가 꺼지면 감시·웹훅 모두 멈춘다 (컨테이너 1개, 배포 때 재시작) | 증권사 조건주문을 넓은 비상선으로 겹쳐 두기를 권한다. 늦은 신호는 알림만 |
+| 우리 봉 ≠ 사용자가 보는 차트 봉 | 트리거에 데이터 출처 명시, 평가한 봉 값을 이벤트에 기록 |
+| 같은 시각 다수 발동 | 사용자별 직렬, 전역 동시 실행 상한, 증권사 레이트 리미터 공유 |
+| 조건이 계속 참 | `fire: on_enter` 기본 — 거짓으로 돌아와야 다시 무장 |
+| 휴장·장 밖 | 토스 장 운영 캘린더로 판정. 장 밖이면 알림만, 주문은 거절 |
+| 잊힌 트리거 | 만료 필수, 목록에 다음 평가 시각·마지막 결과 |
+
+### 알림 채널
+
+- **텔레그램 (1차):** 사용자마다 자기 봇 토큰을 설정에 등록 (`user_secrets`, 암호화 — 증권 키와 같은 방식). 채팅 id 는 [연결 테스트] 가
+  `getUpdates` 로 찾아 저장 (사용자가 봇에게 먼저 한 번 말을 걸어야 한다). 서버 env 값으로는 보내지 않는다 (모든 사람의 알림이 한 채팅으로 간다).
+  받기 전용 — 텔레그램으로 주문을 확인하지 않는다. 기본 내용은 종목·수량·체결가, 잔고·평가금액은 싣지 않는다.
+- **iOS APNs:** TestFlight 때. Node 내장 `http2`·`crypto` 로 JWT(ES256) — 의존성 없음. 선행: Apple 개발자 계정, 번들 ID 확정.
+- 웹 푸시(PC 브라우저), Discord·Slack 웹훅(사용자 URL → SSRF 방어 fetch) 은 선택.
+
+### 저장 (D1)
+
+- `order_triggers`: 사용자, id, 이름, 대화 id, 소스(JSON), 동작(JSON), 한도, 만료, 상태, 사용 횟수, 마지막 신호·평가 시각
+- `trigger_events`: id, 트리거, 시각, 소스·IP, 본문 해시 + 앞 2KB, 평가한 봉 값, 상태, 이유, 체결 의도, 체결 보고, 자식 주문
+
+### 코드 위치
+
+```
+apps/server/src/notify/          알림 모듈 — index.ts(notify) · telegram.ts · (나중) apns.ts
+packages/broker/src/triggers/
+├── types.ts  condition.ts(순수 평가)  watch.ts(자체 감시)  rule.ts  risk.ts  executor.ts  venues/  tool.ts(alert_set)
+apps/server/src/hooks.ts         웹훅 소스
+apps/server/src/triggers.ts      D1·기동 복구·대화 기록
+```
+
+### 단계
+
+0. **알림 모듈 + 텔레그램 채널** + 설정 화면 + 연결 테스트 — ✅ 구현 (2026-09-26): `notify/index.ts`(Notifier — 사용자 저장값만,
+   실패는 결과로), `notify/telegram.ts`(getMe·getUpdates 개인 채팅 탐지·sendMessage HTML, 오류에서 토큰 제거),
+   `POST /api/notify/telegram/test`, 설정 → 연결 → 알림 (텔레그램). 테스트 8개, 뮤테이션 5/5. 아직 알림을 보내는 쪽(트리거)은 없다
+   - 첫 연결 테스트가 "fetch failed" — curl 은 되는데 Node 만 실패. 한국 → 텔레그램(유럽) TCP 연결 287ms 인데 Node 의 happy eyeballs 가
+     **주소당 250ms** 만 기다려 매번 직전에 포기했다 (IPv6 는 경로 없음). 기동 시 `setDefaultAutoSelectFamilyAttemptTimeout(2_000)`.
+     오류 메시지에 cause 의 주소별 원인 코드를 싣는다 ("fetch failed (ETIMEDOUT 149.154.166.110, …)").
+1. 자체 감시 + 알림 동작 (Binance 봉, 30일 미리보기, `alert_set` 툴)
+2. 주문 동작: 규칙·리스크·체결기(Binance), 자동 실행, 기동 복구, 비상 정지
+3. 웹훅 소스 (TradingView 프리셋 포함)
+4. 토스·KIS 봉 데이터와 체결기 어댑터 · iOS APNs
+
