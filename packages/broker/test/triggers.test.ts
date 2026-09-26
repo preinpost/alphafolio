@@ -57,7 +57,8 @@ describe("조건 평가", () => {
 		const b = bars(closes);
 		const c = cond({ all: [{ left: "close", op: "<", right: 2800 }, { left: "rsi14", op: "<", right: 30 }] });
 		const hits = evaluate(c, b);
-		assert.equal(hits[5], null); // RSI 가 아직 없다
+		assert.equal(hits[5], false); // 종가 조건이 확실히 거짓 — RSI 를 몰라도 AND 는 거짓
+		assert.equal(evaluate(cond({ all: [{ left: "rsi14", op: "<", right: 30 }] }), b)[5], null); // RSI 가 아직 없다
 		assert.equal(fireIndices(c, b)[0], 21); // 2,790 이 되는 첫 봉 (RSI 는 이미 0)
 		assert.equal(holdsNow(c, b), true);
 	});
@@ -118,7 +119,7 @@ describe("Binance 봉", () => {
 		const raw = [0, 1, 2, 3].map((i) => [T0 + i * H, "1.5", "2", "1", `${10 + i}`, "5", T0 + (i + 1) * H - 1]);
 		let url = "";
 		const b = await fetchBinanceBars("ETHUSDT", "1h", 100, { now, fetch: async (u) => ((url = u), new Response(JSON.stringify(raw))) });
-		assert.match(url, /\/api\/v3\/klines\?symbol=ETHUSDT&interval=1h&limit=100$/);
+		assert.match(url, /\/api\/v3\/klines\?symbol=ETHUSDT&interval=1h&limit=101$/); // 진행 중 봉을 빼므로 하나 더
 		assert.deepEqual(b.map((x) => x.close), [10, 11, 12]);
 		assert.equal(lastClosedStart({ market: { venue: "binance", symbol: "X" }, interval: "1h" }, now), T0 + 2 * H);
 	});

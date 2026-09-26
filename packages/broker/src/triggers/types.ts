@@ -29,12 +29,44 @@ export type SeriesName = (typeof SERIES)[number];
 export const OPS = ["<", ">", "<=", ">=", "crosses_above", "crosses_below"] as const;
 export type Op = (typeof OPS)[number];
 
+/** 봉에서 바로 읽는 값 — 지표의 재료 */
+export const FIELDS = ["close", "open", "high", "low", "volume"] as const;
+export type Field = (typeof FIELDS)[number];
+
+/**
+ * 매개변수가 있는 값. 모든 값에 mul(배수)을 붙일 수 있다 — "20봉 이평 × 1.02".
+ *   sma·ema      N봉 이동평균 (of 기본 close)
+ *   rsi          RSI(N)
+ *   highest·lowest  N봉 최고·최저 (of 기본 high·low, offset 기본 1 = 지금 봉을 빼고 "직전 N봉" — 돌파 판정용)
+ *   change_pct   N봉 전 대비 변동률 %
+ *   vol_ratio    거래량 ÷ 직전 N봉 평균
+ *   rvol         같은 시각 대비 거래량 (TradingView Relative Volume at Time) — 기준 = 그날(코인 UTC 00:00, 주식 장), 지난 length 일 평균 대비.
+ *                일봉 이상이면 기준 구간이 봉 하나라 "직전 length 봉 평균 대비" 가 된다 (TradingView 와 같다)
+ *   value        이름 값을 offset 봉 전으로 (예: 직전 봉 종가)
+ */
+export type IndicatorRef =
+	| { ind: "sma" | "ema"; period: number; of?: Field; mul?: number }
+	| { ind: "rsi"; period: number; mul?: number }
+	| { ind: "highest" | "lowest"; period: number; of?: Field; offset?: number; mul?: number }
+	| { ind: "change_pct"; period: number; of?: Field; mul?: number }
+	| { ind: "vol_ratio"; period: number; mul?: number }
+	| { ind: "rvol"; length?: number; mode?: "cumulative" | "regular"; mul?: number }
+	| { ind: "value"; of: SeriesName; offset?: number; mul?: number };
+
+export const INDICATORS = ["sma", "ema", "rsi", "highest", "lowest", "change_pct", "vol_ratio", "rvol", "value"] as const;
+
+/** 이름("rsi14" — 1단계 호환) 또는 매개변수 값 */
+export type ValueRef = SeriesName | IndicatorRef;
+
 export interface Clause {
-	left: SeriesName;
+	left: ValueRef;
 	op: Op;
 	/** 숫자 또는 다른 값 (예: close crosses_above ma20) */
-	right: number | SeriesName;
+	right: number | ValueRef;
 }
+
+/** 조건 트리 — 절, 모두(AND), 하나라도(OR), 최근 N봉 안에 한 번이라도 */
+export type CondNode = Clause | { all: CondNode[] } | { any: CondNode[] } | { within: number; cond: CondNode };
 
 /** binance = 코인(24시간), krx = 국장, us = 미장 */
 export const VENUES = ["binance", "krx", "us"] as const;
@@ -47,8 +79,10 @@ export interface Condition {
 	session?: "regular" | "extended";
 	/** 1단계는 봉 마감 판정만 — 꼬리(피뢰침)가 아니라 마감가로 본다 */
 	when: "bar_close";
-	/** 모두 충족 (AND). OR 가 필요하면 트리거를 둘 만든다 */
-	all: Clause[];
+	/** 모두 충족 (AND). 안에 any(OR)·within(최근 N봉) 을 둘 수 있다 */
+	all: CondNode[];
+	/** 프리셋으로 만들었으면 — 표시용 (평가는 all 만 본다) */
+	preset?: { id: string; params: Record<string, number | string> };
 	/** N봉 연속 충족해야 발동 (기본 1) */
 	confirmBars: number;
 	/** 거짓 → 참이 될 때만 (조건이 유지되는 동안 매 봉 울리지 않는다) */

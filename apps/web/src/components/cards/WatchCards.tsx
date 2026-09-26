@@ -32,6 +32,7 @@ export function WatchConfirmCardView({ card }: { card: WatchConfirmCard }) {
 				<div className="min-w-0 text-sm font-semibold text-ink">감시 켜기 — {card.name}</div>
 				<span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">{card.venue ?? "Binance"}</span>
 			</div>
+			{card.preset && <div className="mt-1 text-xs text-muted">프리셋 · {card.preset}</div>}
 			<div className="mt-1 text-sm text-ink">{card.text}</div>
 
 			<dl className="mt-3 grid grid-cols-[minmax(0,6.5rem)_1fr] gap-x-3 gap-y-1.5 border-t border-line pt-3 text-xs">

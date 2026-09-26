@@ -11,7 +11,9 @@ import type { Condition, Interval, WatchBar } from "./types.ts";
 
 const BINANCE = "https://api.binance.com";
 const TIMEOUT_MS = 10_000;
-export const MAX_BARS = 1000;
+/** Binance 한 번에 1,000개 — 그 이상은 endTime 으로 과거로 이어 받는다 (rvol 5분봉 10일 = 2,880봉) */
+const BINANCE_PAGE = 1000;
+export const MAX_BARS = 5000;
 
 export class BarsError extends Error {}
 
@@ -40,24 +42,34 @@ export async function fetchBinanceBars(symbol: string, interval: Interval, limit
 	const f = opts.fetch ?? (fetch as FetchLike);
 	const src = BINANCE_SOURCE[interval];
 	const apiInterval = src?.from ?? interval;
-	// 묶을 때는 원본을 n 배 + 경계 한 봉 더
-	const n = Math.min(Math.max((src ? limit * src.n + src.n : limit), 1), MAX_BARS);
-	const url = `${BINANCE}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${apiInterval}&limit=${n}`;
-	let res: Response;
-	try {
-		res = await f(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-	} catch (err) {
-		throw new BarsError(`Binance 봉 조회 실패: ${err instanceof Error ? err.message : String(err)}`);
-	}
-	const body = (await res.json().catch(() => null)) as unknown;
-	if (!res.ok || !Array.isArray(body)) {
-		const msg = (body as { msg?: string } | null)?.msg;
-		throw new BarsError(res.status === 400 && msg?.includes("symbol") ? `Binance 에 없는 종목입니다: ${symbol}` : `Binance 봉 조회 실패 (HTTP ${res.status})${msg ? `: ${msg}` : ""}`);
+	// 묶을 때는 원본을 n 배 + 경계 한 봉 더. 진행 중인 봉 한 개를 빼므로 하나 더
+	const want = Math.min(Math.max((src ? limit * src.n + src.n : limit) + 1, 1), MAX_BARS * (src?.n ?? 1));
+	let bars: WatchBar[] = [];
+	let endTime: number | undefined;
+	while (bars.length < want) {
+		const n = Math.min(BINANCE_PAGE, want - bars.length);
+		const url = `${BINANCE}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${apiInterval}&limit=${n}${endTime !== undefined ? `&endTime=${endTime}` : ""}`;
+		let res: Response;
+		try {
+			res = await f(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+		} catch (err) {
+			throw new BarsError(`Binance 봉 조회 실패: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		const body = (await res.json().catch(() => null)) as unknown;
+		if (!res.ok || !Array.isArray(body)) {
+			const msg = (body as { msg?: string } | null)?.msg;
+			throw new BarsError(res.status === 400 && msg?.includes("symbol") ? `Binance 에 없는 종목입니다: ${symbol}` : `Binance 봉 조회 실패 (HTTP ${res.status})${msg ? `: ${msg}` : ""}`);
+		}
+		// [openTime, open, high, low, close, volume, closeTime, ...] — 가격은 문자열
+		const page = (body as unknown[][])
+			.map((k) => ({ t: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]) }))
+			.filter((b) => Number.isFinite(b.t) && Number.isFinite(b.close) && (bars.length === 0 || b.t < (bars[0] as WatchBar).t));
+		if (page.length === 0) break;
+		bars = [...page, ...bars];
+		if (page.length < n) break; // 상장 초기 — 더 없다
+		endTime = (page[0] as WatchBar).t - 1;
 	}
 	const now = opts.now ?? Date.now();
-	// [openTime, open, high, low, close, volume, closeTime, ...] — 가격은 문자열
-	let bars = (body as unknown[][]).map((k) => ({ t: Number(k[0]), open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]) }));
-	bars = bars.filter((b) => Number.isFinite(b.t) && Number.isFinite(b.close));
 	if (src) {
 		// 앞쪽의 잘린 묶음(원본 봉이 n 개가 안 되는 첫 봉)은 버린다
 		const first = bars[0];

@@ -404,6 +404,8 @@ export interface WatchConfirmCard {
 	text: string;
 	/** 배지 — Binance · 국장 · 미장 */
 	venue: string;
+	/** 프리셋으로 만들었으면 이름 (\"거래량 급증 돌파\") */
+	preset?: string | null;
 	interval: string;
 	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
 	lastClose: number | null;

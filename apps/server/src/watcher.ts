@@ -19,13 +19,12 @@ import {
 	kstShort,
 	lastClosedStart,
 	lateAfter,
-	MAX_BARS,
+	maxBarsFor,
 	num,
-	SERIES_LABEL,
+	valuesText,
 	valuesAt,
 	warmupFor,
 	type Condition,
-	type SeriesName,
 	type WatchBar,
 } from "@alphafolio/broker";
 import type { NotifyMessage } from "./notify/index.ts";
@@ -60,13 +59,6 @@ export function recheckAfter(c: Condition): number {
 }
 /** 재기동 뒤 소급 평가할 봉 수 상한 */
 const MAX_CATCHUP_BARS = 200;
-
-/** \"종가 2,594.2 · RSI(14) 28.1\" */
-export function valuesText(values: Partial<Record<SeriesName, number>>): string {
-	return Object.entries(values)
-		.map(([k, v]) => `${SERIES_LABEL[k as SeriesName]} ${num(Math.round((v as number) * 100) / 100)}`)
-		.join(" · ");
-}
 
 export class Watcher {
 	private readonly opts: WatcherOptions;
@@ -139,7 +131,7 @@ export class Watcher {
 		const oldest = Math.min(...due.map((t) => t.lastBarT ?? target - step));
 		const missed = Math.min(MAX_CATCHUP_BARS, Math.ceil((target - oldest) / step));
 		const warm = Math.max(...due.map((t) => warmupFor(t.source.condition)));
-		const limit = Math.min(MAX_BARS, warm + missed + 1);
+		const limit = Math.min(maxBarsFor(c0), warm + missed + 1);
 		const at = now - evalDelay(c0);
 		let bars: WatchBar[];
 		try {
@@ -195,13 +187,13 @@ export class Watcher {
 		}
 	}
 
-	private async fire(t: TriggerRecord, bar: WatchBar, values: Partial<Record<SeriesName, number>>, now: number, opt: { missed?: number } = {}): Promise<TriggerRecord> {
+	private async fire(t: TriggerRecord, bar: WatchBar, values: Record<string, number>, now: number, opt: { missed?: number } = {}): Promise<TriggerRecord> {
 		const closeAt = barCloseAt(t.source.condition, bar.t);
 		const fires = t.fires + 1;
 		const done = t.maxFires !== null && fires >= t.maxFires;
 		const kind: TriggerEventKind = opt.missed ? "missed" : "fired";
 		const lines = [
-			`${kstShort(closeAt)} 마감 · ${valuesText(values)}`,
+			`${kstShort(closeAt)} 마감 · ${valuesText(t.source.condition, values)}`,
 			...(opt.missed ? [`⚠ 늦은 알림 — 서버가 멈춰 있던 동안 조건을 ${opt.missed}번 충족했습니다 (마지막 기준)`] : []),
 			...(done ? [`최대 발동 ${t.maxFires}회를 채워 감시를 끝냈습니다.`] : []),
 		];
