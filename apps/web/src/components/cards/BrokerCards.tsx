@@ -208,9 +208,12 @@ export function TechnicalCardView({ card }: { card: TechnicalCard }) {
 			</div>
 
 			{s.signals.length > 0 && (
-				<div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">
+				<div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
 					{s.signals.map((sig) => (
-						<span key={sig} className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink">
+						<span
+							key={sig}
+							className="inline-flex items-center rounded-lg border border-accent/40 bg-card px-2.5 py-1 text-xs font-medium leading-5 text-accent"
+						>
 							{sig}
 						</span>
 					))}
@@ -494,24 +497,38 @@ export function ResearchCardView({ card }: { card: ResearchCard }) {
 export function PortfolioSignalsCardView({ card }: { card: PortfolioSignalsCard }) {
 	return (
 		<div className="mt-2 overflow-hidden rounded-xl border border-line bg-inset">
-			<div className="px-4 py-2.5 text-xs text-muted">보유 {card.rows.length}종목 기술적 점검</div>
+			<div className="bg-card px-4 py-3 text-sm font-semibold text-ink">보유 {card.rows.length}종목 기술적 점검</div>
 			{card.rows.map((r) => (
-				<div key={r.symbol} className="border-t border-line px-4 py-2.5">
+				<div key={r.symbol} className="border-t border-line px-4 py-3">
 					<div className="flex items-baseline justify-between gap-2">
-						<span className="truncate text-sm text-ink">{r.name}</span>
-						<span className={`shrink-0 text-sm ${moveClass(r.vsAvgPct)}`}>
+						<span className="truncate text-[15px] font-semibold text-ink">{r.name}</span>
+						<span className={`shrink-0 text-sm font-semibold ${moveClass(r.vsAvgPct)}`}>
 							평단 대비 {sign(r.vsAvgPct)}
 							{r.vsAvgPct}%
 						</span>
 					</div>
-					<div className="mt-0.5 text-[11px] text-faint">
-						{money(r.price, r.currency)} · {r.trend}
-						{r.rsi !== null ? ` · RSI ${r.rsi}` : ""}
+					<div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+						<span className="font-semibold tabular-nums text-ink">{money(r.price, r.currency)}</span>
+						<span
+							className={`rounded-md border border-line bg-card px-2 py-1 font-semibold ${
+								r.trend === "정배열" ? "text-up" : r.trend === "역배열" ? "text-down" : "text-muted"
+							}`}
+						>
+							{r.trend}
+						</span>
+						{r.rsi !== null && (
+							<span className="rounded-md border border-line bg-card px-2 py-1 text-muted">
+								RSI <span className="font-semibold tabular-nums text-ink">{r.rsi}</span>
+							</span>
+						)}
 					</div>
 					{r.signals.length > 0 && (
-						<div className="mt-1.5 flex flex-wrap gap-1">
+						<div className="mt-2 flex flex-wrap gap-2">
 							{r.signals.map((sig) => (
-								<span key={sig} className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">
+								<span
+									key={sig}
+									className="inline-flex items-center rounded-lg border border-accent/40 bg-card px-2.5 py-1 text-xs font-medium leading-5 text-accent"
+								>
 									{sig}
 								</span>
 							))}
@@ -520,7 +537,7 @@ export function PortfolioSignalsCardView({ card }: { card: PortfolioSignalsCard 
 				</div>
 			))}
 			{card.skipped.length > 0 && (
-				<div className="border-t border-line px-4 py-2 text-[11px] text-faint">제외: {card.skipped.join(", ")}</div>
+				<div className="border-t border-line px-4 py-2 text-xs text-muted">제외: {card.skipped.join(", ")}</div>
 			)}
 		</div>
 	);
