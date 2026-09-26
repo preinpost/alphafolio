@@ -430,7 +430,7 @@ async function main(): Promise<void> {
 
 		// ── 공개 엔드포인트 ────────────────────────────────────────
 		if (path === "/api/health") {
-			json(res, 200, { ok: true, version: APP_VERSION, ledger: ledgerReady(), model: cfg.agent.model ?? "(기본)" });
+			json(res, 200, { ok: true, version: APP_VERSION, ledger: ledgerReady(), model: cfg.agent.model });
 			return;
 		}
 
@@ -766,7 +766,7 @@ async function main(): Promise<void> {
 	server.listen(cfg.port, cfg.host, () => {
 		console.log(`\n  AlphaFolio v${APP_VERSION}  http://${cfg.host}:${cfg.port}`);
 		console.log(`  ├ env      ${envFile ?? "(없음 — process.env만 사용)"}`);
-		console.log(`  ├ model    ${cfg.agent.model ?? "(기본)"} · thinking ${cfg.agent.thinking}`);
+		console.log(`  ├ model    ${cfg.agent.model} · thinking ${cfg.agent.thinking}`);
 		console.log(
 			`  ├ users    ${cfg.auth.admin} (관리자)` +
 				(accounts.ready ? ` + 가입 ${accounts.names().length - 1}명` : " — 가입 비활성 (D1 미설정)"),

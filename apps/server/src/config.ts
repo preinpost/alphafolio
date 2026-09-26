@@ -62,7 +62,8 @@ export interface Config {
 		cwd: string;
 		agentDir: string;
 		sessionsDir: string;
-		model: string | undefined;
+		/** AF_DEFAULT_MODEL — 기본 DEFAULT_MODEL */
+		model: string;
 		/** AF_DEFAULT_THINKING — 기본 high */
 		thinking: ThinkingLevel;
 		authPath: string | undefined;
@@ -116,6 +117,12 @@ function resolveAuthPath(agentDir: string): string | undefined {
 	}
 	return undefined;
 }
+
+/**
+ * AF_DEFAULT_MODEL 미지정 시 모델. 비워두면 pi SDK 가 키 있는 프로바이더의 기본값
+ * (openrouter 는 moonshotai/kimi-k2.6)으로 떨어지므로 명시해 둔다.
+ */
+const DEFAULT_MODEL = "openrouter/openai/gpt-6-luna";
 
 /** 슈퍼관리자 ID 규칙 — 가입 계정과 같다 (accounts.ts NAME_RE) */
 const ADMIN_NAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -188,7 +195,7 @@ export function loadConfig(): Config {
 			// 예전 기본값(.data/agent)은 비어 있어서 models.json 과 확장이 전혀 적용되지 않았다.
 			agentDir,
 			sessionsDir: process.env.AF_SESSIONS_DIR ?? join(dataDir, "sessions"),
-			model: process.env.AF_DEFAULT_MODEL,
+			model: process.env.AF_DEFAULT_MODEL?.trim() || DEFAULT_MODEL,
 			thinking: parseThinkingLevel(process.env.AF_DEFAULT_THINKING),
 			authPath: resolveAuthPath(agentDir),
 		},
