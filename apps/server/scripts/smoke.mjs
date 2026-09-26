@@ -498,11 +498,12 @@ async function main() {
 	);
 	check("코딩 툴 미노출", leaked.length === 0, leaked.join(", ") || "없음");
 
-	// pi 확장(pi-web-access)이 로드됐는지 — 거부목록으로 바꾼 이유가 이것이다
+	// pi 확장(pi-web-access)이 로드됐는지 — 거부목록으로 바꾼 이유가 이것이다.
+	// 0.31+ 는 새 대화에 web_enable 만 노출하고, 모델이 그걸 호출하면 web_search 등이 켜진다.
 	check(
-		"확장 툴(web_search) 로드",
-		stateTools.includes("web_search") && stateTools.includes("fetch_content"),
-		stateTools.filter((t) => /web_search|fetch_content|source_check/.test(t)).join(", ") || "(없음)",
+		"확장 툴(web_enable 또는 web_search) 로드",
+		stateTools.includes("web_enable") || (stateTools.includes("web_search") && stateTools.includes("fetch_content")),
+		stateTools.filter((t) => /web_enable|web_search|fetch_content|source_check/.test(t)).join(", ") || "(없음)",
 	);
 
 	// 증권 키도 사용자별이어야 한다

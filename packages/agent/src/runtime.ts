@@ -192,6 +192,12 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 
 		// 대화 안에서 세션을 바꾸지 않으므로 재구독(rebind)이 필요 없다
 		const session = runtime.session;
+		// 확장의 session_start 는 bindExtensions 에서만 발생한다 — 빼먹으면 pi-web-access 가
+		// 툴 지연 활성화(web_enable)·검색 결과 복원·백그라운드 본문 저장을 하지 못한다.
+		// UI 컨텍스트 없이 묶으므로 확장은 print 모드(무 UI)로 동작한다.
+		await session.bindExtensions({
+			onError: (e) => console.warn(`[agent:ext] ${e.event} — ${e.extensionPath}: ${e.error}`),
+		});
 		const listeners = new Set<(event: unknown) => void>();
 		const unsubscribe = session.subscribe((event: unknown) => {
 			for (const l of listeners) l(event);
