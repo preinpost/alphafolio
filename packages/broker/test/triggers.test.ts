@@ -8,11 +8,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { aggregate, fetchBinanceBars } from "../src/triggers/bars.ts";
 import { barCloseAt, cryptoBarStart, lastClosedStart, localDate, nextCloseAt, zoned } from "../src/triggers/market-time.ts";
-import { dailyToWatch, fetchStockBars, weeklyFromDaily } from "../src/triggers/stock-bars.ts";
+import { dailyToWatch, fetchStockBars, fetchStockDaily, weeklyFromDaily } from "../src/triggers/stock-bars.ts";
 import { evaluate, fireIndices, holdsNow, seriesOf, validateCondition, valuesAt, warmupFor } from "../src/triggers/condition.ts";
 import { conditionText, subject } from "../src/triggers/describe.ts";
 import type { Condition, TriggerSpec, WatchBar } from "../src/triggers/types.ts";
-import { createWatchTools, type WatchConfirmCard } from "../src/triggers/tool.ts";
+import { chooseFeed, createWatchTools, type WatchConfirmCard } from "../src/triggers/tool.ts";
 
 const H = 3_600_000;
 const T0 = Date.parse("2026-09-26T00:00:00Z");
@@ -282,5 +282,67 @@ describe("거래량 증가율 · 예열 · 10분봉", () => {
 		assert.deepEqual(validateCondition(cond({ market: { venue: "us", symbol: "BRK.B" }, interval: "1w" })), []);
 		assert.ok(validateCondition(cond({ market: { venue: "us", symbol: "AAPL" }, interval: "1d", session: "extended" })).some((e) => /정규장 기준/.test(e)));
 		assert.ok(validateCondition(cond({ market: { venue: "krx", symbol: "AAPL" }, interval: "1d" })).some((e) => /종목 형식/.test(e)));
+	});
+});
+
+describe("주식 시세 출처 고정", () => {
+	const kst = (s: string) => Date.parse(`${s}+09:00`);
+	const base = (feed?: Condition["market"]["feed"]): Condition => ({
+		market: { venue: "krx", symbol: "005930", ...(feed ? { feed } : {}) },
+		interval: "1d",
+		when: "bar_close",
+		all: [{ left: "vol_chg_pct", op: ">=", right: 40 }],
+		confirmBars: 1,
+		fire: "on_enter",
+	});
+
+	it("기본값: 국장은 KIS 가 있으면 KRX 정규장, 없으면 토스 통합. 미장은 KIS 우선", () => {
+		assert.deepEqual(chooseFeed("krx", { kis: true, toss: true }), { provider: "kis", basis: "krx" });
+		assert.deepEqual(chooseFeed("krx", { kis: false, toss: true }), { provider: "toss", basis: "integrated" });
+		assert.deepEqual(chooseFeed("krx", { kis: true, toss: true }, "integrated"), { provider: "kis", basis: "integrated" });
+		assert.throws(() => chooseFeed("krx", { kis: false, toss: true }, "krx"), /한국투자 키가 필요/);
+		assert.deepEqual(chooseFeed("us", { kis: false, toss: true }), { provider: "toss" });
+		assert.throws(() => chooseFeed("us", { kis: false, toss: false }), /증권 키가 필요/);
+		assert.ok(validateCondition(base({ provider: "toss", basis: "krx" })).some((e) => /토스 시세는 KRX\+NXT 통합뿐/.test(e)));
+		assert.ok(validateCondition({ ...base(), market: { venue: "binance", symbol: "ETHUSDT", feed: { provider: "kis" } } }).some((e) => /코인은 시세 출처/.test(e)));
+	});
+
+	it("통합 기준 일봉은 20:00 에 닫힌다 (종가 = NXT 20시 체결가)", () => {
+		const regular = base({ provider: "kis", basis: "krx" });
+		const integrated = base({ provider: "kis", basis: "integrated" });
+		const at = kst("2026-09-23T16:00:00");
+		assert.equal(lastClosedStart(regular, at), kst("2026-09-23T09:00:00"));
+		assert.equal(lastClosedStart(integrated, at), kst("2026-09-22T09:00:00")); // 아직 NXT 애프터 중
+		assert.equal(barCloseAt(integrated, kst("2026-09-23T09:00:00")), kst("2026-09-23T20:00:00"));
+		assert.equal(nextCloseAt(integrated, at), kst("2026-09-23T20:00:00"));
+		assert.match(conditionText(integrated), /국장 005930 \(KRX\+NXT 통합\)/);
+	});
+
+	it("고정된 출처로만 — 키가 없으면 다른 출처로 넘어가지 않고 오류. KIS 통합은 UN 코드", async () => {
+		const tossCtx = { creds: { clientId: "a", clientSecret: "b" }, store: { get: async () => ({ token: "t", expiresAt: Date.now() + 1e9 }), set: async () => {}, delete: async () => {} }, owner: "ms" };
+		await assert.rejects(fetchStockDaily({ toss: () => tossCtx as never }, "krx", "005930", 10, { provider: "kis", basis: "krx" }), /한국투자 시세로 만들었는데 그 키가 없습니다/);
+
+		const kisCtx = {
+			creds: { appKey: "k", appSecret: "s", cano: "", prdtCd: "", env: "real" },
+			store: { get: async () => ({ token: "t", expiresAt: Date.now() + 1e9 }), set: async () => {}, delete: async () => {} },
+			owner: "ms",
+		};
+		const urls: string[] = [];
+		const realFetch = globalThis.fetch;
+		let n = 0;
+		globalThis.fetch = (async (u: string | URL) => {
+			urls.push(String(u));
+			// 첫 호출에만 봉 — 이어 받기는 빈 응답으로 끝
+			const rows = n++ === 0 ? [{ stck_bsop_date: "20260923", stck_oprc: "1", stck_hgpr: "2", stck_lwpr: "1", stck_clpr: "286500", acml_vol: "32046681" }] : [];
+			return new Response(JSON.stringify({ rt_cd: "0", msg1: "ok", output1: {}, output2: rows }));
+		}) as typeof fetch;
+		try {
+			const r = await fetchStockDaily({ kis: () => kisCtx as never, toss: () => tossCtx as never }, "krx", "005930", 10, { provider: "kis", basis: "integrated" });
+			assert.equal(r.source, "kis");
+			assert.equal(r.bars[0]?.volume, 32046681);
+			assert.match(urls[0] ?? "", /FID_COND_MRKT_DIV_CODE=UN/);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
 	});
 });

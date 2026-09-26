@@ -10,7 +10,7 @@
  *
  * 봉 시각 t 는 봉 시작 — 주식 일봉은 그날 장 시작, 주봉은 그 주 월요일 장 시작 (월요일이 휴장이어도 같은 값).
  */
-import type { Condition, Interval, Venue } from "./types.ts";
+import type { Condition, Interval, StockFeed, Venue } from "./types.ts";
 
 export const MIN = 60_000;
 export const HOUR = 60 * MIN;
@@ -47,6 +47,15 @@ export const MARKETS: Readonly<Record<Exclude<Venue, "binance">, MarketHours>> =
 };
 
 export const isStock = (v: Venue): v is "krx" | "us" => v !== "binance";
+
+/** 국장 KRX+NXT 통합 시세는 NXT 애프터가 끝나는 20:00 에 일봉이 닫힌다 (종가 = 20시 체결가) */
+export const KRX_INTEGRATED_CLOSE = "20:00";
+
+/** 이 조건의 일봉이 닫히는 현지 시각 — 국장 통합 기준이면 20:00, 그 외 정규장 마감 */
+export function closeOf(c: Pick<Condition, "market">): string {
+	const v = c.market.venue as "krx" | "us";
+	return v === "krx" && c.market.feed?.basis === "integrated" ? KRX_INTEGRATED_CLOSE : MARKETS[v].close;
+}
 
 // ── 시간대 ─────────────────────────────────────────────────────────────
 
@@ -115,8 +124,8 @@ export function barCloseAt(c: Pick<Condition, "market" | "interval">, t: number)
 	if (!isStock(v)) return t + CRYPTO_STEP[c.interval];
 	const m = MARKETS[v];
 	const ymd = localDate(t, m.tz).ymd;
-	if (c.interval === "1w") return zoned(addDays(mondayOf(ymd), 4), m.close, m.tz);
-	return zoned(ymd, m.close, m.tz);
+	if (c.interval === "1w") return zoned(addDays(mondayOf(ymd), 4), closeOf(c), m.tz);
+	return zoned(ymd, closeOf(c), m.tz);
 }
 
 /** 코인 봉 시작 (UTC 시계, 주봉은 월요일 기준) */
@@ -137,11 +146,11 @@ export function lastClosedStart(c: Pick<Condition, "market" | "interval">, now: 
 	let ymd = localDate(now, m.tz).ymd;
 	if (c.interval === "1w") {
 		let mon = mondayOf(ymd);
-		if (now < zoned(addDays(mon, 4), m.close, m.tz)) mon = addDays(mon, -7);
+		if (now < zoned(addDays(mon, 4), closeOf(c), m.tz)) mon = addDays(mon, -7);
 		return zoned(mon, m.open, m.tz);
 	}
 	// 오늘 장이 아직 안 끝났으면 어제, 주말이면 금요일로
-	if (now < zoned(ymd, m.close, m.tz)) ymd = addDays(ymd, -1);
+	if (now < zoned(ymd, closeOf(c), m.tz)) ymd = addDays(ymd, -1);
 	while ([0, 6].includes(weekdayOf(ymd))) ymd = addDays(ymd, -1);
 	return zoned(ymd, m.open, m.tz);
 }
@@ -154,12 +163,12 @@ export function nextCloseAt(c: Pick<Condition, "market" | "interval">, now: numb
 	let ymd = localDate(now, m.tz).ymd;
 	if (c.interval === "1w") {
 		const fri = addDays(mondayOf(ymd), 4);
-		const close = zoned(fri, m.close, m.tz);
-		return now < close ? close : zoned(addDays(fri, 7), m.close, m.tz);
+		const close = zoned(fri, closeOf(c), m.tz);
+		return now < close ? close : zoned(addDays(fri, 7), closeOf(c), m.tz);
 	}
-	if (now >= zoned(ymd, m.close, m.tz)) ymd = addDays(ymd, 1);
+	if (now >= zoned(ymd, closeOf(c), m.tz)) ymd = addDays(ymd, 1);
 	while ([0, 6].includes(weekdayOf(ymd))) ymd = addDays(ymd, 1);
-	return zoned(ymd, m.close, m.tz);
+	return zoned(ymd, closeOf(c), m.tz);
 }
 
 /** 발동이 이만큼 넘게 늦으면 \"늦은 알림\" (재기동으로 놓친 것) */
@@ -171,4 +180,24 @@ export function lateAfter(c: Pick<Condition, "market" | "interval">): number {
 /** 봉 마감 뒤 이만큼 기다렸다 평가 — 거래소가 마감 봉을 확정하는 시간 (주식은 동시호가·체결 집계 여유) */
 export function evalDelay(c: Pick<Condition, "market">): number {
 	return isStock(c.market.venue) ? 10 * MIN : 3_000;
+}
+
+// ── 주식 시세 출처 ──────────────────────────────────────────────────────
+
+export const FEED_LABEL = (venue: "krx" | "us", f: StockFeed): string =>
+	venue === "krx"
+		? f.basis === "integrated"
+			? `KRX+NXT 통합 · ${f.provider === "kis" ? "한국투자" : "토스"} (20:00 마감)`
+			: "KRX 정규장 · 한국투자 (15:30 마감)"
+		: f.provider === "kis"
+			? "한국투자"
+			: "토스";
+
+/** 고정 출처 검증 — 국장 KRX 정규장만은 KIS 로만 받을 수 있다 (토스 캔들은 통합뿐) */
+export function feedErrors(venue: "krx" | "us", f: StockFeed): string[] {
+	if (f.provider !== "kis" && f.provider !== "toss") return ["출처는 kis · toss 입니다"];
+	if (venue === "us") return f.basis ? ["미장은 기준(basis) 이 없습니다"] : [];
+	if (f.basis !== "krx" && f.basis !== "integrated") return ["국장 기준은 krx(정규장만) · integrated(KRX+NXT 통합) 입니다"];
+	if (f.provider === "toss" && f.basis === "krx") return ["토스 시세는 KRX+NXT 통합뿐입니다 — KRX 정규장 기준은 한국투자 키가 필요합니다"];
+	return [];
 }

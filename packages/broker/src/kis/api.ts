@@ -70,7 +70,7 @@ export function domesticChart(
 	ctx: KisContext,
 	symbol: string,
 	period: ChartPeriod,
-	opts?: { from?: string; to?: string },
+	opts?: { from?: string; to?: string; market?: "J" | "UN" },
 ): Promise<KisResponse> {
 	const to = opts?.to ?? ymd(new Date());
 	const spanDays = period === "D" ? 150 : period === "W" ? 900 : 3600;
@@ -81,7 +81,8 @@ export function domesticChart(
 		path: "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
 		trId: "FHKST03010100",
 		query: {
-			FID_COND_MRKT_DIV_CODE: "J",
+			// J = KRX 정규장만, UN = KRX+NXT 통합 (감시 출처 기준, PLAN §40)
+			FID_COND_MRKT_DIV_CODE: opts?.market ?? "J",
 			FID_INPUT_ISCD: symbol,
 			FID_INPUT_DATE_1: from,
 			FID_INPUT_DATE_2: to,

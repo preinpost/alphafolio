@@ -1,7 +1,8 @@
 /**
  * 주식 감시용 봉 (PLAN §40) — 국장·미장 일봉·주봉. 트리거 주인의 증권 키로 조회한다.
  *
- * 출처 순서: KIS → 토스 (둘 다 있으면 KIS — 국장 일봉이 KRX 정규장 기준으로 분명하다).
+ * 출처: 트리거에 고정된 출처(feed)로만 — 국장은 출처마다 거래량·가격 기준이 달라(KRX만 / KRX+NXT 통합) 섞이면 가짜로 울린다.
+ *   고정이 없으면(예전 트리거·미리보기 기본값 계산) KIS → 토스.
  *   KIS 국내 기간별시세 100봉/호출 (날짜 구간으로 이어 받기) · KIS 해외 100행/호출 (기준일로 이어 받기) · 토스 200봉/호출 (nextBefore)
  * 주봉은 KIS 주봉을 쓰지 않고 **일봉을 묶는다** — 봉 시각·마감 규칙(market-time)을 한 곳에서 정하려고.
  * 진행 중인 봉(오늘 장중 일봉, 이번 주 주봉)은 뺀다.
@@ -13,7 +14,9 @@ import { NoBrokerConfiguredError } from "../portfolio.ts";
 import { tossCandles } from "../toss/api.ts";
 import type { Bar } from "../indicators.ts";
 import { addDays, barCloseAt, MARKETS, mondayOf, stockDayStart } from "./market-time.ts";
-import type { Condition, WatchBar } from "./types.ts";
+import type { Condition, StockFeed, WatchBar } from "./types.ts";
+
+export { FEED_LABEL, feedErrors } from "./market-time.ts";
 
 export const MAX_STOCK_PAGES = 6;
 
@@ -21,8 +24,16 @@ const ymdDash = (d: string): string => (d.includes("-") ? d.slice(0, 10) : `${d.
 const ymdCompact = (d: string): string => d.replace(/-/g, "");
 
 /** 일봉 count 개 이상 (가능한 만큼) — 오래된 순 */
-export async function fetchStockDaily(access: BrokerAccess, venue: "krx" | "us", symbol: string, count: number): Promise<{ bars: Bar[]; source: "kis" | "toss" }> {
+export async function fetchStockDaily(
+	access: BrokerAccess,
+	venue: "krx" | "us",
+	symbol: string,
+	count: number,
+	feed?: StockFeed,
+): Promise<{ bars: Bar[]; source: "kis" | "toss" }> {
 	const errors: string[] = [];
+	const allow = (p: "kis" | "toss") => !feed || feed.provider === p;
+	const kisMarket = venue === "krx" && feed?.basis === "integrated" ? "UN" : "J";
 	const merge = (acc: Map<string, Bar>, list: Bar[]): number => {
 		let added = 0;
 		for (const b of list) if (!acc.has(b.date)) (acc.set(b.date, b), added++);
@@ -32,7 +43,7 @@ export async function fetchStockDaily(access: BrokerAccess, venue: "krx" | "us",
 
 	let kis: ReturnType<NonNullable<BrokerAccess["kis"]>> | null = null;
 	try {
-		kis = access.kis?.() ?? null;
+		kis = allow("kis") ? (access.kis?.() ?? null) : null;
 	} catch {
 		kis = null;
 	}
@@ -44,7 +55,7 @@ export async function fetchStockDaily(access: BrokerAccess, venue: "krx" | "us",
 			for (let page = 0; page < MAX_STOCK_PAGES && acc.size < count; page++) {
 				const list =
 					venue === "krx"
-						? toDomesticBars(await domesticChart(kis, symbol, "D", { from: ymdCompact(addDays(to, -145)), to: ymdCompact(to) }))
+						? toDomesticBars(await domesticChart(kis, symbol, "D", { from: ymdCompact(addDays(to, -145)), to: ymdCompact(to), market: kisMarket }))
 						: toOverseasBars(await overseasChart(kis, symbol, excd as string, "D", { bymd: ymdCompact(to) }));
 				if (merge(acc, list) === 0) break;
 				to = addDays(ymdDash((list[0] as Bar).date), -1);
@@ -58,7 +69,8 @@ export async function fetchStockDaily(access: BrokerAccess, venue: "krx" | "us",
 
 	let toss: ReturnType<NonNullable<BrokerAccess["toss"]>> | null = null;
 	try {
-		toss = access.toss?.() ?? null;
+		// 토스 캔들은 국장이면 통합 기준뿐 — 고정 없이 KRX 기준을 원할 일은 없다 (고정이 있으면 feedErrors 가 먼저 막는다)
+		toss = allow("toss") ? (access.toss?.() ?? null) : null;
 	} catch {
 		toss = null;
 	}
@@ -78,7 +90,10 @@ export async function fetchStockDaily(access: BrokerAccess, venue: "krx" | "us",
 		}
 	}
 
-	if (!kis && !toss) throw new NoBrokerConfiguredError();
+	if (!kis && !toss) {
+		if (feed) throw new Error(`이 감시는 ${feed.provider === "kis" ? "한국투자" : "토스"} 시세로 만들었는데 그 키가 없습니다 — 설정 → 연결 → 증권에 다시 넣거나, 감시를 새로 만들어 주세요`);
+		throw new NoBrokerConfiguredError();
+	}
 	throw new Error(`${symbol} 일봉을 가져오지 못했습니다 — ${errors.join(" / ")}`);
 }
 
@@ -114,7 +129,7 @@ export async function fetchStockBars(access: BrokerAccess, c: Condition, limit: 
 	const venue = c.market.venue as "krx" | "us";
 	if (!(venue in MARKETS)) throw new Error(`주식 시장이 아닙니다: ${venue}`);
 	const daysNeeded = c.interval === "1w" ? limit * 5 + 5 : limit + 2;
-	const { bars } = await fetchStockDaily(access, venue, c.market.symbol, daysNeeded);
+	const { bars } = await fetchStockDaily(access, venue, c.market.symbol, daysNeeded, c.market.feed);
 	const watch = c.interval === "1w" ? weeklyFromDaily(venue, bars) : dailyToWatch(venue, bars);
 	return watch.filter((b) => barCloseAt(c, b.t) <= now).slice(-limit);
 }

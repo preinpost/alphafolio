@@ -123,7 +123,8 @@ export function nodeText(n: CondNode, inner = false): string {
 /** \"ETHUSDT · 1시간봉 마감 · 종가 < 2,600 그리고 RSI(14) < 30 · 2봉 연속\" */
 export function conditionText(c: Condition): string {
 	// 코인은 심볼만으로 알아본다 (ETHUSDT), 주식은 시장을 붙인다 (국장 005930)
-	const where = c.market.venue === "binance" ? c.market.symbol : `${VENUE_LABEL[c.market.venue]} ${c.market.symbol}`;
+	const integrated = c.market.venue === "krx" && c.market.feed?.basis === "integrated" ? " (KRX+NXT 통합)" : "";
+	const where = c.market.venue === "binance" ? c.market.symbol : `${VENUE_LABEL[c.market.venue]} ${c.market.symbol}${integrated}`;
 	const session = c.session === "extended" ? " (프리·애프터 포함)" : "";
 	const parts = [`${where} · ${INTERVAL_LABEL[c.interval]}${session} 마감`, c.all.map((n) => nodeText(n, true)).join(" 그리고 ")];
 	if (c.confirmBars > 1) parts.push(`${c.confirmBars}봉 연속`);

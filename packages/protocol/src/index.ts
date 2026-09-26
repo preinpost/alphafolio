@@ -406,6 +406,8 @@ export interface WatchConfirmCard {
 	venue: string;
 	/** 프리셋으로 만들었으면 이름 (\"거래량 급증 돌파\") */
 	preset?: string | null;
+	/** 주식 시세 출처 — 켤 때 고정 (\"KRX 정규장 · 한국투자 (15:30 마감)\") */
+	feed?: string | null;
 	interval: string;
 	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
 	lastClose: number | null;

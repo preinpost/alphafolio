@@ -346,6 +346,18 @@ async function main(): Promise<void> {
 			pauseWatch: (id) => agentOp(() => watchOps.pause(user, id, "agent")),
 			channels: () => notifier.channels(user),
 			fetchBars: (c, limit, at) => watchBars(user, c, limit, at),
+			// 주식 출처 기본값 — 키가 있는 곳 (만들 수 있으면 있다)
+			feeds: () => {
+				const has = (make: (() => unknown) | undefined): boolean => {
+					try {
+						return !!make && !!make();
+					} catch {
+						return false;
+					}
+				};
+				const a = brokerAccess(user);
+				return { kis: has(a.kis), toss: has(a.toss) };
+			},
 		}),
 		idleMinutes: cfg.idleMinutes,
 	});

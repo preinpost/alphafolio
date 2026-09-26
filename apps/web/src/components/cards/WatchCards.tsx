@@ -42,6 +42,12 @@ export function WatchConfirmCardView({ card }: { card: WatchConfirmCard }) {
 				<dd className="text-ink">
 					{preview.count === 0 ? "한 번도 울리지 않았을 조건입니다" : `${preview.count}번 울렸을 것 — 최근 ${preview.recent.map((r) => `${kst(r.at)} (${n(r.close)})`).join(", ")}`}
 				</dd>
+				{card.feed && (
+					<>
+						<dt className="text-faint">시세 기준</dt>
+						<dd className="text-ink">{card.feed}</dd>
+					</>
+				)}
 				<dt className="text-faint">받는 곳</dt>
 				<dd className="text-ink">{["앱 화면", ...card.channels.map((x) => (x === "telegram" ? "텔레그램" : x))].join(" · ")}</dd>
 				<dt className="text-faint">횟수 · 만료</dt>

@@ -223,3 +223,40 @@ describe("Binance 이어 받기", () => {
 		assert.equal((b.at(-1) as WatchBar).t, T0 + (total - 1) * M5);
 	});
 });
+
+describe("툴 — 주식 출처 고정", () => {
+	const setup = (feeds: { kis: boolean; toss: boolean }) => {
+		const prepared: TriggerSpec[] = [];
+		const seen: Condition[] = [];
+		const [tool] = createWatchTools({
+			prepareWatch: (s) => (prepared.push(s), { token: "t", expiresAt: 1 }),
+			listWatches: async () => [],
+			pauseWatch: async () => {
+				throw new Error("x");
+			},
+			channels: () => ["telegram"],
+			feeds: () => feeds,
+			fetchBars: async (c, limit) => (seen.push(c), bars(Array.from({ length: 150 }, (_, i) => 100 + (i % 5)), 86_400_000).slice(-limit)),
+			now: () => T0 + 200 * 86_400_000,
+		});
+		const run = (p: Record<string, unknown>) => tool!.execute("id", { action: "prepare", symbol: "005930", interval: "1d", all: [{ left: "vol_chg_pct", op: ">=", right: 40 }], ...p } as never, undefined, undefined, undefined as never) as Promise<{ details: WatchConfirmCard }>;
+		return { run, prepared, seen };
+	};
+
+	it("KIS 가 있으면 KRX 정규장으로 고정 — 미리보기도 같은 출처, 카드에 표시", async () => {
+		const { run, prepared, seen } = setup({ kis: true, toss: true });
+		const r = await run({});
+		assert.deepEqual(prepared[0]?.condition.market.feed, { provider: "kis", basis: "krx" });
+		assert.deepEqual(seen[0]?.market.feed, { provider: "kis", basis: "krx" });
+		assert.equal(r.details.feed, "KRX 정규장 · 한국투자 (15:30 마감)");
+	});
+
+	it("토스만 있으면 통합, KRX 기준을 고르면 거절", async () => {
+		const { run, prepared } = setup({ kis: false, toss: true });
+		const r = await run({});
+		assert.equal(r.details.feed, "KRX+NXT 통합 · 토스 (20:00 마감)");
+		assert.deepEqual(prepared[0]?.condition.market.feed, { provider: "toss", basis: "integrated" });
+		await assert.rejects(run({ basis: "krx" }), /한국투자 키가 필요/);
+		await assert.rejects(run({ symbol: "AAPL", market: "us", basis: "integrated" }), /basis 는 국장만/);
+	});
+});

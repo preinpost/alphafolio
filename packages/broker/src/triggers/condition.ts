@@ -11,7 +11,7 @@
  * 데이터가 모자라면 null — null 은 \"판정하지 않음\" 이라 발동하지 않는다.
  */
 import { atr, bollinger, ema, rsi, sma } from "../indicators.ts";
-import { CRYPTO_STEP, cryptoBarStart, DAY, isStock, localDate, MARKETS, MIN, stockDayStart } from "./market-time.ts";
+import { CRYPTO_STEP, cryptoBarStart, DAY, feedErrors, isStock, localDate, MARKETS, MIN, stockDayStart } from "./market-time.ts";
 import {
 	FIELDS,
 	INDICATORS,
@@ -377,6 +377,10 @@ export function validateCondition(c: Condition): string[] {
 		else if (c.interval === "1d" || c.interval === "1w") errors.push("일봉·주봉은 정규장 기준입니다 — 프리·애프터는 분봉·시간봉에서만");
 	}
 	if (c.interval === "1m" && isStock(venue)) errors.push("1분봉은 코인만 됩니다");
+	if (c.market.feed) {
+		if (!isStock(venue)) errors.push("코인은 시세 출처를 고르지 않습니다 (Binance 공개 시세)");
+		else errors.push(...feedErrors(venue, c.market.feed));
+	}
 	if (c.when !== "bar_close") errors.push("판정 시점은 봉 마감(bar_close)만 됩니다");
 	if (c.fire !== "on_enter") errors.push("발동 방식은 on_enter 만 됩니다");
 	if (!intIn(c.confirmBars, 1, MAX_CONFIRM_BARS)) errors.push(`연속 봉 수는 1~${MAX_CONFIRM_BARS} 입니다`);

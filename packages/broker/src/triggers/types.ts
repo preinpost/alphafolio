@@ -72,8 +72,19 @@ export type CondNode = Clause | { all: CondNode[] } | { any: CondNode[] } | { wi
 export const VENUES = ["binance", "krx", "us"] as const;
 export type Venue = (typeof VENUES)[number];
 
+/**
+ * 주식 시세 출처 — 켤 때 고정하고 감시기는 이 출처로만 조회한다 (출처마다 거래량·가격 기준이 달라 섞이면 가짜로 울린다).
+ *   krx: basis "krx" = KRX 정규장만 (KIS 만 가능, 15:30 마감) / "integrated" = KRX+NXT 통합 (KIS UN · 토스, NXT 애프터 20:00 마감 — 종가도 20시 체결가)
+ *   us: 두 출처 거래량이 같다 — 출처만 고정
+ * 없으면(예전 트리거) KIS → 토스 순으로 아무거나.
+ */
+export interface StockFeed {
+	provider: "kis" | "toss";
+	basis?: "krx" | "integrated";
+}
+
 export interface Condition {
-	market: { venue: Venue; symbol: string };
+	market: { venue: Venue; symbol: string; feed?: StockFeed };
 	interval: Interval;
 	/** 주식 분봉만 — extended = 프리·애프터(미장)·NXT(국장) 포함. 일봉·주봉은 항상 정규장. 없으면 regular */
 	session?: "regular" | "extended";

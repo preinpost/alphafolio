@@ -12,8 +12,8 @@ import { fetchWatchBars } from "./bars.ts";
 import { fireIndices, holdsNow, maxBarsFor, validateCondition, warmupFor } from "./condition.ts";
 import { presetCatalog, resolvePreset } from "./presets.ts";
 import { conditionText, kstShort, num, VENUE_LABEL } from "./describe.ts";
-import { barCloseAt, CRYPTO_STEP, DAY, isStock } from "./market-time.ts";
-import { INDICATORS, INTERVALS, OPS, SERIES, VENUES, type CondNode, type Condition, type Interval, type TriggerSpec, type TriggerState, type Venue, type WatchBar } from "./types.ts";
+import { barCloseAt, CRYPTO_STEP, DAY, FEED_LABEL, isStock } from "./market-time.ts";
+import { INDICATORS, INTERVALS, OPS, SERIES, VENUES, type CondNode, type Condition, type Interval, type TriggerSpec, type TriggerState, type StockFeed, type Venue, type WatchBar } from "./types.ts";
 
 export const DEFAULT_EXPIRES_DAYS = 30;
 export const MAX_EXPIRES_DAYS = 90;
@@ -26,6 +26,21 @@ export function previewBars(c: Pick<Condition, "market" | "interval">): number {
 }
 
 /** 시장을 말하지 않았을 때 — 6자리(숫자 위주)는 국장, 코인 호가 자산으로 끝나면 Binance, 그 외 미장 */
+/**
+ * 주식 출처 고르기 — 켤 때 고정한다 (감시기는 이 출처로만 조회).
+ * 국장: basis 를 말하지 않으면 KIS 가 있을 때 KRX 정규장, 없으면 토스 통합. 통합이면 KIS(UN) 우선. 미장: KIS 우선.
+ */
+export function chooseFeed(venue: "krx" | "us", has: { kis: boolean; toss: boolean }, basis?: "krx" | "integrated"): StockFeed {
+	if (!has.kis && !has.toss) throw new Error("주식 감시에는 증권 키가 필요합니다 — 설정 → 연결 → 증권 (한국투자 또는 토스)");
+	if (venue === "us") return { provider: has.kis ? "kis" : "toss" };
+	const b = basis ?? (has.kis ? "krx" : "integrated");
+	if (b === "krx") {
+		if (!has.kis) throw new Error("KRX 정규장 기준 시세는 한국투자 키가 필요합니다 — 토스는 KRX+NXT 통합 시세뿐입니다 (basis: 'integrated' 로 준비할 수 있다)");
+		return { provider: "kis", basis: "krx" };
+	}
+	return { provider: has.kis ? "kis" : "toss", basis: "integrated" };
+}
+
 export function guessVenue(symbol: string): Venue {
 	if (/^\d{6}$|^\d{4}[A-Z0-9]\d$/.test(symbol)) return "krx";
 	if (/^[A-Z0-9]{2,}(USDT|USDC|FDUSD|BTC|ETH|BNB|KRW)$/.test(symbol) && symbol.length >= 6) return "binance";
@@ -57,6 +72,8 @@ export interface WatchConfirmCard {
 	venue: string;
 	/** 프리셋으로 만들었으면 이름 */
 	preset: string | null;
+	/** 주식 시세 출처 (\"KRX 정규장 · 한국투자 (15:30 마감)\") — 켤 때 고정된다 */
+	feed: string | null;
 	interval: Interval;
 	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
 	lastClose: number | null;
@@ -78,6 +95,8 @@ export interface WatchToolDeps {
 	channels: () => string[];
 	/** 봉 조회 — 서버가 이 사용자의 증권 키를 묶어 준다 (주식). 없으면 코인만 */
 	fetchBars?: (c: Condition, limit: number, now: number) => Promise<WatchBar[]>;
+	/** 이 사용자에게 있는 증권 키 — 주식 출처 기본값 */
+	feeds?: () => { kis: boolean; toss: boolean };
 	now?: () => number;
 }
 
@@ -123,6 +142,11 @@ export function createWatchTools(deps: WatchToolDeps) {
 			symbol: Type.Optional(Type.String({ description: "코인 ETHUSDT · 국장 005930 · 미장 AAPL" })),
 			interval: Type.Optional(Type.Union(INTERVALS.map((i) => Type.Literal(i)), { description: "봉 간격 — 사용자가 말하지 않으면 되묻는다" })),
 			session: Type.Optional(Type.Union([Type.Literal("regular"), Type.Literal("extended")], { description: "주식 분봉만: extended = 프리·애프터 포함. 일봉·주봉은 정규장" })),
+			basis: Type.Optional(
+				Type.Union([Type.Literal("krx"), Type.Literal("integrated")], {
+					description: "국장만: krx = KRX 정규장 시세(기본, 한국투자 키 필요, 15:30 마감) · integrated = KRX+NXT 통합 시세(거래량·종가에 NXT 포함, 20:00 마감)",
+				}),
+			),
 			preset: Type.Optional(Type.String({ description: "프리셋 id (목록은 툴 설명). all 을 함께 주면 추가 조건으로 AND" })),
 			presetParams: Type.Optional(Type.Record(Type.String(), Type.Number(), { description: "프리셋 매개변수 — 빠진 값은 기본값" })),
 			all: Type.Optional(Type.Array(NodeT, { description: "모두 충족해야 하는 조건들 (예: [{left:'close',op:'<',right:2600}])" })),
@@ -168,8 +192,10 @@ export function createWatchTools(deps: WatchToolDeps) {
 				presetName = r.preset.name;
 				presetMeta = { id: r.preset.id, params: r.params };
 			}
+			const feed = isStock(venue) ? chooseFeed(venue, deps.feeds?.() ?? { kis: true, toss: true }, params.basis) : undefined;
+			if (params.basis && venue !== "krx") throw new Error("basis 는 국장만 고릅니다");
 			const condition: Condition = {
-				market: { venue, symbol },
+				market: { venue, symbol, ...(feed ? { feed } : {}) },
 				...(params.session ? { session: params.session } : {}),
 				interval: params.interval as Interval,
 				when: "bar_close",
@@ -223,6 +249,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 				name,
 				text: conditionText(condition),
 				preset: presetName,
+				feed: feed && isStock(venue) ? FEED_LABEL(venue, feed) : null,
 				venue: VENUE_LABEL[condition.market.venue],
 				interval: condition.interval,
 				limits: spec.limits,
