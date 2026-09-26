@@ -7,6 +7,7 @@ export const SERIES_LABEL: Readonly<Record<SeriesName, string>> = {
 	high: "고가",
 	low: "저가",
 	volume: "거래량",
+	vol_chg_pct: "거래량 증가율(직전 봉 대비 %)",
 	ma5: "5봉 이평",
 	ma20: "20봉 이평",
 	ma60: "60봉 이평",
@@ -20,12 +21,17 @@ export const SERIES_LABEL: Readonly<Record<SeriesName, string>> = {
 export const INTERVAL_LABEL: Readonly<Record<Interval, string>> = {
 	"1m": "1분봉",
 	"5m": "5분봉",
+	"10m": "10분봉",
 	"15m": "15분봉",
 	"30m": "30분봉",
 	"1h": "1시간봉",
+	"2h": "2시간봉",
 	"4h": "4시간봉",
 	"1d": "일봉",
+	"1w": "주봉",
 };
+
+export const VENUE_LABEL: Readonly<Record<Condition["market"]["venue"], string>> = { binance: "Binance", krx: "국장", us: "미장" };
 
 const OP_LABEL: Readonly<Record<Op, string>> = {
 	"<": "<",
@@ -58,7 +64,10 @@ export function clauseText(c: Clause): string {
 
 /** \"ETHUSDT · 1시간봉 마감 · 종가 < 2,600 그리고 RSI(14) < 30 · 2봉 연속\" */
 export function conditionText(c: Condition): string {
-	const parts = [`${c.market.symbol} · ${INTERVAL_LABEL[c.interval]} 마감`, c.all.map(clauseText).join(" 그리고 ")];
+	// 코인은 심볼만으로 알아본다 (ETHUSDT), 주식은 시장을 붙인다 (국장 005930)
+	const where = c.market.venue === "binance" ? c.market.symbol : `${VENUE_LABEL[c.market.venue]} ${c.market.symbol}`;
+	const session = c.session === "extended" ? " (프리·애프터 포함)" : "";
+	const parts = [`${where} · ${INTERVAL_LABEL[c.interval]}${session} 마감`, c.all.map(clauseText).join(" 그리고 ")];
 	if (c.confirmBars > 1) parts.push(`${c.confirmBars}봉 연속`);
 	return parts.join(" · ");
 }

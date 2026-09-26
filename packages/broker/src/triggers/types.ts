@@ -15,24 +15,15 @@ export interface WatchBar {
 	volume: number;
 }
 
-export const INTERVALS = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"] as const;
+/** 봉 간격 — 1m 은 코인만 (1단계 호환). 주식 분봉(5m~4h)은 다음 단계, 지금은 1d·1w */
+export const INTERVALS = ["1m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"] as const;
 export type Interval = (typeof INTERVALS)[number];
-
-export const INTERVAL_MS: Readonly<Record<Interval, number>> = {
-	"1m": 60_000,
-	"5m": 5 * 60_000,
-	"15m": 15 * 60_000,
-	"30m": 30 * 60_000,
-	"1h": 3_600_000,
-	"4h": 4 * 3_600_000,
-	"1d": 86_400_000,
-};
 
 /**
  * 비교할 수 있는 값 — indicators.ts 가 계산하는 것만.
- * vol_ratio20 = 거래량 ÷ 직전 20봉 평균 거래량.
+ * vol_ratio20 = 거래량 ÷ 직전 20봉 평균 거래량. vol_chg_pct = (거래량 ÷ 직전 봉 거래량 − 1) × 100.
  */
-export const SERIES = ["close", "open", "high", "low", "volume", "ma5", "ma20", "ma60", "rsi14", "bb_upper", "bb_lower", "atr14", "vol_ratio20"] as const;
+export const SERIES = ["close", "open", "high", "low", "volume", "vol_chg_pct", "ma5", "ma20", "ma60", "rsi14", "bb_upper", "bb_lower", "atr14", "vol_ratio20"] as const;
 export type SeriesName = (typeof SERIES)[number];
 
 export const OPS = ["<", ">", "<=", ">=", "crosses_above", "crosses_below"] as const;
@@ -45,11 +36,15 @@ export interface Clause {
 	right: number | SeriesName;
 }
 
-export type Venue = "binance";
+/** binance = 코인(24시간), krx = 국장, us = 미장 */
+export const VENUES = ["binance", "krx", "us"] as const;
+export type Venue = (typeof VENUES)[number];
 
 export interface Condition {
 	market: { venue: Venue; symbol: string };
 	interval: Interval;
+	/** 주식 분봉만 — extended = 프리·애프터(미장)·NXT(국장) 포함. 일봉·주봉은 항상 정규장. 없으면 regular */
+	session?: "regular" | "extended";
 	/** 1단계는 봉 마감 판정만 — 꼬리(피뢰침)가 아니라 마감가로 본다 */
 	when: "bar_close";
 	/** 모두 충족 (AND). OR 가 필요하면 트리거를 둘 만든다 */

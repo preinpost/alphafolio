@@ -28,9 +28,9 @@ let ops: WatchOps;
 let watcher: Watcher;
 
 /** closes[i] = T0 + i시간 봉의 종가. 지금 시각 기준 닫힌 봉만 */
-const fakeBars = async (_s: string, _i: string, limit: number, o: { now?: number } = {}): Promise<WatchBar[]> => {
+const fakeBars = async (_user: string, _c: unknown, limit: number, at: number): Promise<WatchBar[]> => {
 	fetches++;
-	const all = closes.map((c, i) => ({ t: T0 + i * H, open: c, high: c, low: c - 50, close: c, volume: 1 })).filter((b) => b.t + H <= (o.now ?? clock));
+	const all = closes.map((c, i) => ({ t: T0 + i * H, open: c, high: c, low: c - 50, close: c, volume: 1 })).filter((b) => b.t + H <= at);
 	return all.slice(-limit);
 };
 
@@ -64,7 +64,7 @@ beforeEach(async () => {
 	await store.load();
 	const deliver = async (ev: WatchEvent, o: { channels?: boolean } = {}) => (delivered.push({ ev, channels: o.channels !== false }), []);
 	ops = new WatchOps({ store, confirm: { secret: watchConfirmSecret("s"), guard: new OrderTokenGuard<WatchTokenPayload>() }, deliver, channels: () => ["telegram"], now: () => clock });
-	watcher = new Watcher({ store, deliver, isActive: (u) => active.has(u), fetchBars: fakeBars as never, now: () => clock });
+	watcher = new Watcher({ store, deliver, isActive: (u) => active.has(u), fetchBars: fakeBars, now: () => clock });
 });
 afterEach(() => d1.restore());
 
@@ -239,5 +239,76 @@ describe("권한", () => {
 		await again.load();
 		assert.deepEqual(again.get("ms", id)?.source, store.get("ms", id)?.source);
 		assert.equal(again.armed().length, 1);
+	});
+});
+
+describe("주식 일봉 감시", () => {
+	const KST = (s: string) => Date.parse(`${s}+09:00`);
+	/** 국장 일봉: ymd → [종가, 거래량]. 휴장일은 넣지 않는다 */
+	let daily: Record<string, [number, number]>;
+	const calls: string[] = [];
+	const stockBars = async (user: string, _c: unknown, limit: number, at: number): Promise<WatchBar[]> => {
+		calls.push(user);
+		return Object.entries(daily)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([d, [close, volume]]) => ({ t: KST(`${d}T09:00:00`), open: close, high: close, low: close, close, volume }))
+			.filter((b) => b.t + 6.5 * H <= at)
+			.slice(-limit);
+	};
+	const stockSpec = (): TriggerSpec => ({
+		...spec(),
+		name: "삼성 거래량 급증",
+		condition: { market: { venue: "krx", symbol: "005930" }, interval: "1d", when: "bar_close", all: [{ left: "vol_chg_pct", op: ">=", right: 40 }], confirmBars: 1, fire: "on_enter" },
+		limits: { maxFires: null, cooldownSec: 0, expiresAt: "2026-12-31T00:00:00Z" },
+	});
+	let w: Watcher;
+
+	beforeEach(() => {
+		daily = { "2026-09-16": [253500, 11_757_106], "2026-09-17": [252500, 11_827_514] };
+		calls.length = 0;
+		clock = KST("2026-09-17T16:00:00");
+		w = new Watcher({ store, deliver: async (ev) => (delivered.push({ ev, channels: true }), []), isActive: () => true, fetchBars: stockBars, now: () => clock });
+	});
+
+	it("장 마감 + 10분 뒤 평가 — 실제 삼성전자 09/18 거래량 +47.9% 에서 발동", async () => {
+		await arm("ms", stockSpec());
+		daily["2026-09-18"] = [261000, 17_489_615];
+		clock = KST("2026-09-18T15:35:00"); // 마감 5분 뒤 — 아직
+		await w.tick();
+		assert.equal(fired().length, 0);
+		clock = KST("2026-09-18T15:41:00");
+		await w.tick();
+		assert.equal(fired().length, 1);
+		assert.match(fired()[0]!.ev.message.lines?.[0] ?? "", /09\/18 15:30 마감 · 종가 261,000 · 거래량 증가율\(직전 봉 대비 %\) 47\.87/);
+	});
+
+	it("휴장일: 닫혔어야 할 봉이 안 오면 10분 동안 다시 조회하지 않는다", async () => {
+		await arm("ms", stockSpec());
+		clock = KST("2026-09-18T15:41:00"); // 18일 봉이 없다 (휴장이라 치자)
+		await w.tick();
+		await w.tick();
+		clock += 5 * 60_000;
+		await w.tick();
+		assert.equal(calls.length, 1);
+		clock += 6 * 60_000;
+		await w.tick();
+		assert.equal(calls.length, 2);
+	});
+
+	it("주식은 사용자별 키로 — 같은 종목도 사람마다 따로 조회", async () => {
+		await arm("ms", stockSpec());
+		await arm("kim", stockSpec());
+		daily["2026-09-18"] = [261000, 17_489_615];
+		clock = KST("2026-09-18T15:41:00");
+		await w.tick();
+		assert.deepEqual([...calls].sort(), ["kim", "ms"]);
+	});
+
+	it("다음 날 아침에야 평가했으면 늦은 알림", async () => {
+		await arm("ms", stockSpec());
+		daily["2026-09-18"] = [261000, 17_489_615];
+		clock = KST("2026-09-19T09:00:00"); // 마감 17.5시간 뒤 (12시간 넘음)
+		await w.tick();
+		assert.equal(fired()[0]?.ev.kind, "missed");
 	});
 });

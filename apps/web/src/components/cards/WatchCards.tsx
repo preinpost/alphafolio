@@ -30,13 +30,13 @@ export function WatchConfirmCardView({ card }: { card: WatchConfirmCard }) {
 		<div className="mt-2 rounded-xl border-2 border-accent/60 bg-inset p-4">
 			<div className="flex items-baseline justify-between gap-3">
 				<div className="min-w-0 text-sm font-semibold text-ink">감시 켜기 — {card.name}</div>
-				<span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">Binance</span>
+				<span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">{card.venue ?? "Binance"}</span>
 			</div>
 			<div className="mt-1 text-sm text-ink">{card.text}</div>
 
 			<dl className="mt-3 grid grid-cols-[minmax(0,6.5rem)_1fr] gap-x-3 gap-y-1.5 border-t border-line pt-3 text-xs">
 				<dt className="text-faint">마지막 마감</dt>
-				<dd className="text-ink tabular-nums">{card.lastClose !== null && card.lastBarAt !== null ? `${n(card.lastClose)} (${kst(card.lastBarAt)} 시작 봉)` : "없음"}</dd>
+				<dd className="text-ink tabular-nums">{card.lastClose !== null && card.lastBarAt !== null ? `${n(card.lastClose)} (${kst(card.lastBarAt)} 시작 봉, KST)` : "없음"}</dd>
 				<dt className="text-faint">지난 {preview.days}일</dt>
 				<dd className="text-ink">
 					{preview.count === 0 ? "한 번도 울리지 않았을 조건입니다" : `${preview.count}번 울렸을 것 — 최근 ${preview.recent.map((r) => `${kst(r.at)} (${n(r.close)})`).join(", ")}`}

@@ -65,7 +65,7 @@ export function tossPrices(ctx: TossContext, symbols: string[]): Promise<TossPri
 export function tossCandles(
 	ctx: TossContext,
 	symbol: string,
-	opts?: { interval?: "1d" | "1m"; count?: number },
+	opts?: { interval?: "1d" | "1m"; count?: number; before?: string },
 ): Promise<{ candles: TossCandle[]; nextBefore: string | null }> {
 	return tossGet<{ candles: TossCandle[]; nextBefore: string | null }>(ctx, "/api/v1/candles", {
 		query: {
@@ -73,6 +73,8 @@ export function tossCandles(
 			interval: opts?.interval ?? "1d",
 			count: Math.min(opts?.count ?? 100, 200),
 			adjusted: true,
+			// 이어 받기 — 이전 응답의 nextBefore 그대로 (감시 예열, PLAN §40)
+			...(opts?.before ? { before: opts.before } : {}),
 		},
 		group: "MARKET_DATA_CHART",
 	});

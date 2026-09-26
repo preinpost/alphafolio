@@ -6,8 +6,10 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fetchBinanceBars, lastClosedBarStart } from "../src/triggers/bars.ts";
-import { evaluate, fireIndices, holdsNow, seriesOf, validateCondition, valuesAt } from "../src/triggers/condition.ts";
+import { aggregate, fetchBinanceBars } from "../src/triggers/bars.ts";
+import { barCloseAt, cryptoBarStart, lastClosedStart, localDate, nextCloseAt, zoned } from "../src/triggers/market-time.ts";
+import { dailyToWatch, fetchStockBars, weeklyFromDaily } from "../src/triggers/stock-bars.ts";
+import { evaluate, fireIndices, holdsNow, seriesOf, validateCondition, valuesAt, warmupFor } from "../src/triggers/condition.ts";
 import { conditionText, subject } from "../src/triggers/describe.ts";
 import type { Condition, TriggerSpec, WatchBar } from "../src/triggers/types.ts";
 import { createWatchTools, type WatchConfirmCard } from "../src/triggers/tool.ts";
@@ -86,7 +88,7 @@ describe("검증 · 표시", () => {
 	it("형식 오류를 사람이 고칠 수 있는 문장으로", () => {
 		assert.deepEqual(validateCondition(cond()), []);
 		const errs = validateCondition(
-			cond({ market: { venue: "binance", symbol: "eth" }, interval: "2h" as never, confirmBars: 0, all: [{ left: "price" as never, op: "==" as never, right: "close" }] }),
+			cond({ market: { venue: "binance", symbol: "eth" }, interval: "3h" as never, confirmBars: 0, all: [{ left: "price" as never, op: "==" as never, right: "close" }] }),
 		);
 		assert.ok(errs.some((e) => /종목 형식/.test(e)));
 		assert.ok(errs.some((e) => /봉 간격/.test(e)));
@@ -118,7 +120,7 @@ describe("Binance 봉", () => {
 		const b = await fetchBinanceBars("ETHUSDT", "1h", 100, { now, fetch: async (u) => ((url = u), new Response(JSON.stringify(raw))) });
 		assert.match(url, /\/api\/v3\/klines\?symbol=ETHUSDT&interval=1h&limit=100$/);
 		assert.deepEqual(b.map((x) => x.close), [10, 11, 12]);
-		assert.equal(lastClosedBarStart(now, "1h"), T0 + 2 * H);
+		assert.equal(lastClosedStart({ market: { venue: "binance", symbol: "X" }, interval: "1h" }, now), T0 + 2 * H);
 	});
 
 	it("없는 종목은 알아볼 수 있는 오류", async () => {
@@ -131,7 +133,7 @@ describe("watch_alert 툴", () => {
 	const now = T0 + 200 * H + 60_000;
 	/** 200봉 — 100·150번째 봉에서 2,600 아래로 */
 	const series = Array.from({ length: 200 }, (_, i) => (i === 120 || i === 170 ? 2590 : 2700));
-	const fakeFetch = (async (_s: string, _i: string, limit: number) => bars(series).slice(-limit)) as never;
+	const fakeFetch = async (_c: Condition, limit: number) => bars(series).slice(-limit);
 	const setup = (channels: string[] = ["telegram"]) => {
 		const prepared: TriggerSpec[] = [];
 		const [tool] = createWatchTools({
@@ -178,5 +180,106 @@ describe("watch_alert 툴", () => {
 		await assert.rejects(run({ action: "prepare", symbol: "ETHUSDT", interval: "1h", all: [] }), /하나 이상/);
 		await assert.rejects(run({ action: "prepare", symbol: "ETHUSDT", interval: "1h", all: [{ left: "close", op: "<", right: 1 }], expiresDays: 365 }), /만료는 1~90일/);
 		assert.equal(prepared.length, 0);
+	});
+});
+
+describe("시장 시계", () => {
+	const krx = { market: { venue: "krx" as const, symbol: "005930" }, interval: "1d" as const };
+	const usd = { market: { venue: "us" as const, symbol: "AAPL" }, interval: "1d" as const };
+	const kst = (s: string) => Date.parse(`${s}+09:00`);
+
+	it("국장 일봉: 15:30 마감 전에는 어제 봉, 주말에는 금요일 봉", () => {
+		// 2026-09-25 (금)
+		assert.equal(lastClosedStart(krx, kst("2026-09-25T15:29:00")), kst("2026-09-24T09:00:00"));
+		assert.equal(lastClosedStart(krx, kst("2026-09-25T15:31:00")), kst("2026-09-25T09:00:00"));
+		assert.equal(lastClosedStart(krx, kst("2026-09-27T12:00:00")), kst("2026-09-25T09:00:00")); // 일요일
+		assert.equal(barCloseAt(krx, kst("2026-09-25T09:00:00")), kst("2026-09-25T15:30:00"));
+		assert.equal(nextCloseAt(krx, kst("2026-09-25T16:00:00")), kst("2026-09-28T15:30:00")); // 금 장 뒤 → 월
+	});
+
+	it("미장 일봉: 뉴욕 16:00 — 서머타임이면 KST 05:00, 끝나면 06:00", () => {
+		assert.equal(barCloseAt(usd, zoned("2026-09-25", "09:30", "America/New_York")), kst("2026-09-26T05:00:00")); // EDT
+		assert.equal(barCloseAt(usd, zoned("2026-12-04", "09:30", "America/New_York")), kst("2026-12-05T06:00:00")); // EST
+		// 한국 토요일 오전 5시 반 = 뉴욕 금요일 장 끝난 뒤 → 금요일 봉이 닫혔다
+		assert.equal(lastClosedStart(usd, kst("2026-09-26T05:30:00")), zoned("2026-09-25", "09:30", "America/New_York"));
+		assert.equal(localDate(kst("2026-09-26T05:30:00"), "America/New_York").ymd, "2026-09-25");
+		// 서머타임 시작일(3/8) 새벽 3:30 은 이미 EDT(−4) — 전환 전 오프셋으로 한 번만 계산하면 1시간 어긋난다
+		assert.equal(zoned("2026-03-08", "03:30", "America/New_York"), Date.parse("2026-03-08T07:30:00Z"));
+		assert.equal(zoned("2026-03-07", "03:30", "America/New_York"), Date.parse("2026-03-07T08:30:00Z"));
+	});
+
+	it("주봉: 금요일 마감에 닫힌다. 코인 주봉은 월요일 00:00 UTC 시작", () => {
+		const wk = { ...krx, interval: "1w" as const };
+		assert.equal(lastClosedStart(wk, kst("2026-09-25T15:00:00")), kst("2026-09-14T09:00:00")); // 이번 주 아직
+		assert.equal(lastClosedStart(wk, kst("2026-09-25T15:31:00")), kst("2026-09-21T09:00:00"));
+		const monday = Date.parse("2026-09-21T00:00:00Z");
+		assert.equal(cryptoBarStart(Date.parse("2026-09-24T13:00:00Z"), "1w"), monday);
+		assert.equal(new Date(cryptoBarStart(Date.parse("2026-09-24T13:00:00Z"), "1w")).getUTCDay(), 1);
+	});
+});
+
+describe("주식 봉", () => {
+	const d = (date: string, close: number, volume: number) => ({ date, open: close, high: close + 1, low: close - 1, close, volume });
+
+	it("일봉 → 주봉 (월~금, 월요일이 휴장이어도 같은 주)", () => {
+		const daily = [d("20260915", 10, 1), d("20260918", 12, 2), d("20260922", 20, 3), d("20260925", 22, 4)];
+		const w = weeklyFromDaily("krx", daily);
+		assert.equal(w.length, 2);
+		assert.deepEqual([w[0]!.open, w[0]!.close, w[0]!.volume], [10, 12, 3]);
+		assert.equal(w[1]!.t, zoned("2026-09-21", "09:00", "Asia/Seoul")); // 21일(월) 휴장이어도 월요일 기준
+		assert.equal(dailyToWatch("krx", [d("20260923", 1, 1)])[0]!.t, zoned("2026-09-23", "09:00", "Asia/Seoul"));
+	});
+
+	it("진행 중 봉은 뺀다 — 장중 오늘 일봉, 이번 주 주봉. KIS 가 없으면 토스로", async () => {
+		const candles = ["2026-09-23", "2026-09-24", "2026-09-25"].map((day, i) => ({
+			timestamp: `${day}T00:00:00.000+09:00`, openPrice: "1", highPrice: "2", lowPrice: "1", closePrice: String(100 + i), volume: String(10 + i), currency: "KRW",
+		}));
+		const toss = { creds: { clientId: "a", clientSecret: "b" }, store: { get: async () => ({ token: "t", expiresAt: Date.now() + 1e9 }), set: async () => {}, delete: async () => {} }, owner: "ms" };
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async () => new Response(JSON.stringify({ result: { candles: [...candles].reverse(), nextBefore: null } }))) as typeof fetch;
+		try {
+			const c: Condition = { market: { venue: "krx", symbol: "005930" }, interval: "1d", when: "bar_close", all: [{ left: "close", op: ">", right: 1 }], confirmBars: 1, fire: "on_enter" };
+			const during = await fetchStockBars({ toss: () => toss as never }, c, 10, Date.parse("2026-09-25T14:00:00+09:00"));
+			assert.deepEqual(during.map((b) => b.close), [100, 101]);
+			const after = await fetchStockBars({ toss: () => toss as never }, c, 10, Date.parse("2026-09-25T15:45:00+09:00"));
+			assert.deepEqual(after.map((b) => b.close), [100, 101, 102]);
+			const weekly = await fetchStockBars({ toss: () => toss as never }, { ...c, interval: "1w" }, 10, Date.parse("2026-09-25T14:00:00+09:00"));
+			assert.equal(weekly.length, 0); // 이번 주는 금요일 마감 전
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
+});
+
+describe("거래량 증가율 · 예열 · 10분봉", () => {
+	it("vol_chg_pct = 직전 봉 대비 %, 직전 봉 거래량이 0 이면 판정 안 함", () => {
+		const b = bars([1, 1, 1, 1]);
+		[100, 150, 0, 50].forEach((v, i) => (b[i]!.volume = v));
+		assert.deepEqual(seriesOf(b, "vol_chg_pct"), [null, 50, -100, null]);
+		const c = cond({ all: [{ left: "vol_chg_pct", op: ">=", right: 40 }] });
+		assert.deepEqual(fireIndices(c, b), [1]);
+	});
+
+	it("예열 봉 수는 조건에 쓰인 값에 맞춘다 (주식 조회량)", () => {
+		assert.equal(warmupFor(cond({ all: [{ left: "vol_chg_pct", op: ">=", right: 40 }] })), 2);
+		assert.equal(warmupFor(cond({ all: [{ left: "rsi14", op: ">", right: 60 }] })), 45);
+		assert.equal(warmupFor(cond({ all: [{ left: "close", op: "crosses_above", right: "ma60" }], confirmBars: 2 })), 62);
+	});
+
+	it("10분봉은 5분봉 두 개를 묶는다 — 앞쪽 잘린 묶음은 버린다", async () => {
+		const M5 = 5 * 60_000;
+		const start = T0 + 5 * 60_000; // 00:05 부터 — 00:00 묶음은 반쪽
+		const raw = Array.from({ length: 5 }, (_, i) => [start + i * M5, "1", String(10 + i), "0.5", String(i), "1", 0]);
+		const now = start + 5 * M5 + 1000;
+		const b = await fetchBinanceBars("ETHUSDT", "10m", 10, { now, fetch: async (u) => (assert.match(u, /interval=5m/), new Response(JSON.stringify(raw))) });
+		assert.deepEqual(b.map((x) => [x.t - T0, x.high, x.close, x.volume]), [[10 * 60_000, 12, 2, 2], [20 * 60_000, 14, 4, 2]]);
+		assert.equal(aggregate([], "10m").length, 0);
+	});
+
+	it("시장별 검증 — 주식 분봉은 아직, 일봉 세션 확장은 안 됨", () => {
+		assert.ok(validateCondition(cond({ market: { venue: "krx", symbol: "005930" }, interval: "1h" })).some((e) => /일봉\(1d\)·주봉\(1w\)만/.test(e)));
+		assert.deepEqual(validateCondition(cond({ market: { venue: "us", symbol: "BRK.B" }, interval: "1w" })), []);
+		assert.ok(validateCondition(cond({ market: { venue: "us", symbol: "AAPL" }, interval: "1d", session: "extended" })).some((e) => /정규장 기준/.test(e)));
+		assert.ok(validateCondition(cond({ market: { venue: "krx", symbol: "AAPL" }, interval: "1d" })).some((e) => /종목 형식/.test(e)));
 	});
 });

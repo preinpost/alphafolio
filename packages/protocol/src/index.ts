@@ -402,6 +402,8 @@ export interface WatchConfirmCard {
 	name: string;
 	/** 조건 한 줄 ("ETHUSDT · 1시간봉 마감 · 종가 < 2,600") */
 	text: string;
+	/** 배지 — Binance · 국장 · 미장 */
+	venue: string;
 	interval: string;
 	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
 	lastClose: number | null;

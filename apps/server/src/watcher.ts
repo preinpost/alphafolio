@@ -9,22 +9,27 @@
  * 비활성화된 계정의 트리거는 끈다. 한 묶음·한 트리거의 실패가 나머지를 멈추지 않는다.
  */
 import {
+	barCloseAt,
 	BarsError,
-	fetchBinanceBars,
+	CRYPTO_STEP,
+	evalDelay,
+	fetchWatchBars,
 	fireIndices,
-	INTERVAL_MS,
+	isStock,
 	kstShort,
-	lastClosedBarStart,
+	lastClosedStart,
+	lateAfter,
 	MAX_BARS,
 	num,
 	SERIES_LABEL,
 	valuesAt,
-	WARMUP_BARS,
+	warmupFor,
+	type Condition,
 	type SeriesName,
 	type WatchBar,
 } from "@alphafolio/broker";
 import type { NotifyMessage } from "./notify/index.ts";
-import { EVAL_DELAY_MS, type TriggerEventKind, type TriggerRecord, type TriggerStore } from "./triggers.ts";
+import type { TriggerEventKind, TriggerRecord, TriggerStore } from "./triggers.ts";
 
 export const TICK_MS = 10_000;
 
@@ -44,9 +49,17 @@ export interface WatcherOptions {
 	deliver: (ev: WatchEvent) => Promise<unknown>;
 	/** 로그인 가능한 계정인가 — 아니면 트리거를 끈다 */
 	isActive: (user: string) => boolean;
-	fetchBars?: typeof fetchBinanceBars;
+	/** 봉 조회 — 주식은 user 의 증권 키로 (서버가 묶는다). 없으면 코인만 */
+	fetchBars?: (user: string, c: Condition, limit: number, now: number) => Promise<WatchBar[]>;
 	now?: () => number;
 }
+
+/** 닫혔어야 할 봉이 아직 안 왔을 때 다시 조회하기까지 (휴장일·거래소 지연 — 10초마다 두드리지 않게) */
+export function recheckAfter(c: Condition): number {
+	return isStock(c.market.venue) ? 10 * 60_000 : 30_000;
+}
+/** 재기동 뒤 소급 평가할 봉 수 상한 */
+const MAX_CATCHUP_BARS = 200;
 
 /** \"종가 2,594.2 · RSI(14) 28.1\" */
 export function valuesText(values: Partial<Record<SeriesName, number>>): string {
@@ -59,6 +72,8 @@ export class Watcher {
 	private readonly opts: WatcherOptions;
 	private timer: ReturnType<typeof setInterval> | undefined;
 	private running = false;
+	/** 묶음별 "이 기준 봉을 찾으러 조회했는데 아직 없었다" — 휴장일에 헛조회를 막는다 */
+	private readonly waiting = new Map<string, { target: number; at: number }>();
 
 	constructor(opts: WatcherOptions) {
 		this.opts = opts;
@@ -94,12 +109,13 @@ export class Watcher {
 					continue;
 				}
 				const c = t.source.condition;
-				const key = `${c.market.venue}:${c.market.symbol}:${c.interval}`;
+				// 코인은 공개 시세라 모두 한 번에, 주식은 각자의 증권 키로 조회하므로 사용자별로 묶는다
+				const key = `${c.market.venue}:${c.market.symbol}:${c.interval}:${c.session ?? "regular"}${isStock(c.market.venue) ? `:${t.member}` : ""}`;
 				groups.set(key, [...(groups.get(key) ?? []), t]);
 			}
-			for (const list of groups.values()) {
+			for (const [key, list] of groups) {
 				try {
-					await this.evalGroup(list, now);
+					await this.evalGroup(key, list, now);
 				} catch (err) {
 					console.warn(`[watch] 묶음 평가 실패: ${err instanceof Error ? err.message : err}`);
 				}
@@ -109,26 +125,35 @@ export class Watcher {
 		}
 	}
 
-	private async evalGroup(list: TriggerRecord[], now: number): Promise<void> {
-		const c0 = (list[0] as TriggerRecord).source.condition;
-		const step = INTERVAL_MS[c0.interval];
-		const target = lastClosedBarStart(now - EVAL_DELAY_MS, c0.interval);
+	private async evalGroup(key: string, list: TriggerRecord[], now: number): Promise<void> {
+		const first = list[0] as TriggerRecord;
+		const c0 = first.source.condition;
+		const target = lastClosedStart(c0, now - evalDelay(c0));
 		const due = list.filter((t) => t.lastBarT === null || t.lastBarT < target);
 		if (due.length === 0) return;
+		const w = this.waiting.get(key);
+		if (w && w.target === target && now - w.at < recheckAfter(c0)) return;
 
-		// 가장 오래 못 본 트리거 기준으로 필요한 만큼 (예열 포함, 상한 1000봉)
+		// 가장 오래 못 본 트리거 기준으로 필요한 만큼 (조건에 맞춘 예열 + 놓친 봉, 상한 1000봉)
+		const step = CRYPTO_STEP[c0.interval]; // 주식은 달력 기준이라 넉넉한 어림 (휴장일만큼 더 받는다)
 		const oldest = Math.min(...due.map((t) => t.lastBarT ?? target - step));
-		const missed = Math.ceil((target - oldest) / step);
+		const missed = Math.min(MAX_CATCHUP_BARS, Math.ceil((target - oldest) / step));
+		const warm = Math.max(...due.map((t) => warmupFor(t.source.condition)));
+		const limit = Math.min(MAX_BARS, warm + missed + 1);
+		const at = now - evalDelay(c0);
 		let bars: WatchBar[];
 		try {
-			bars = await (this.opts.fetchBars ?? fetchBinanceBars)(c0.market.symbol, c0.interval, Math.min(MAX_BARS, WARMUP_BARS + missed + 1), { now: now - EVAL_DELAY_MS });
+			bars = this.opts.fetchBars ? await this.opts.fetchBars(first.member, c0, limit, at) : await fetchWatchBars(c0, limit, { now: at });
 		} catch (err) {
-			const msg = err instanceof BarsError ? err.message : String(err);
+			const msg = err instanceof BarsError ? err.message : err instanceof Error ? err.message : String(err);
 			for (const t of due) await this.opts.store.mark(t.id, { lastError: msg, lastEvalAt: now });
-			console.warn(`[watch] ${c0.market.symbol} ${c0.interval} 조회 실패: ${msg}`);
+			this.waiting.set(key, { target, at: now });
+			console.warn(`[watch] ${c0.market.venue}:${c0.market.symbol} ${c0.interval} 조회 실패: ${msg}`);
 			return;
 		}
 		const newest = bars.at(-1)?.t;
+		if (newest === undefined || newest < target) this.waiting.set(key, { target, at: now });
+		else this.waiting.delete(key);
 		if (newest === undefined) return;
 
 		for (const t of due) {
@@ -142,25 +167,24 @@ export class Watcher {
 
 	private async evalTrigger(t: TriggerRecord, bars: WatchBar[], newest: number, now: number): Promise<void> {
 		const c = t.source.condition;
-		const step = INTERVAL_MS[c.interval];
-		const after = t.lastBarT ?? newest - step;
+		const closeAt = (i: number) => barCloseAt(c, (bars[i] as WatchBar).t);
+		const after = t.lastBarT ?? newest - CRYPTO_STEP[c.interval];
+		if (newest <= after) return;
 		const fires = fireIndices(c, bars).filter((i) => (bars[i] as WatchBar).t > after);
 
 		let rec = t;
 		// 쿨다운 안의 발동은 버린다 (봉 마감 시각 기준)
 		const usable = fires.filter((i, k) => {
-			const closeAt = (bars[i] as WatchBar).t + step;
-			const prev = k > 0 ? (bars[fires[k - 1] as number] as WatchBar).t + step : rec.lastFiredAt;
-			return !prev || closeAt - prev >= rec.cooldownSec * 1000;
+			const prev = k > 0 ? closeAt(fires[k - 1] as number) : rec.lastFiredAt;
+			return !prev || closeAt(i) - prev >= rec.cooldownSec * 1000;
 		});
-		const late = usable.filter((i) => now - ((bars[i] as WatchBar).t + step) > step + EVAL_DELAY_MS);
+		const late = usable.filter((i) => now - closeAt(i) > lateAfter(c) + evalDelay(c));
 		const onTime = usable.filter((i) => !late.includes(i));
 
 		// 놓친 발동은 하나로 묶는다 — 재기동 뒤 알림이 쏟아지지 않게
 		if (late.length > 0) {
 			const last = late.at(-1) as number;
-			const bar = bars[last] as WatchBar;
-			rec = await this.fire(rec, bar, valuesAt(c, bars, last), now, { missed: late.length });
+			rec = await this.fire(rec, bars[last] as WatchBar, valuesAt(c, bars, last), now, { missed: late.length });
 		}
 		for (const i of onTime) {
 			if (rec.state !== "armed") break;
@@ -172,12 +196,12 @@ export class Watcher {
 	}
 
 	private async fire(t: TriggerRecord, bar: WatchBar, values: Partial<Record<SeriesName, number>>, now: number, opt: { missed?: number } = {}): Promise<TriggerRecord> {
-		const step = INTERVAL_MS[t.source.condition.interval];
+		const closeAt = barCloseAt(t.source.condition, bar.t);
 		const fires = t.fires + 1;
 		const done = t.maxFires !== null && fires >= t.maxFires;
 		const kind: TriggerEventKind = opt.missed ? "missed" : "fired";
 		const lines = [
-			`${kstShort(bar.t + step)} 마감 · ${valuesText(values)}`,
+			`${kstShort(closeAt)} 마감 · ${valuesText(values)}`,
 			...(opt.missed ? [`⚠ 늦은 알림 — 서버가 멈춰 있던 동안 조건을 ${opt.missed}번 충족했습니다 (마지막 기준)`] : []),
 			...(done ? [`최대 발동 ${t.maxFires}회를 채워 감시를 끝냈습니다.`] : []),
 		];

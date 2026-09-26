@@ -6,12 +6,10 @@
  */
 import { randomBytes } from "node:crypto";
 import { d1Query, ulid, type D1Config } from "@alphafolio/ledger";
-import { conditionText, type Condition, type TriggerAction, type TriggerSpec, type TriggerState, lastClosedBarStart, INTERVAL_MS } from "@alphafolio/broker";
+import { conditionText, evalDelay, lastClosedStart, nextCloseAt, type Condition, type TriggerAction, type TriggerSpec, type TriggerState } from "@alphafolio/broker";
 import type { WatchSummary } from "@alphafolio/broker/watch-tools";
 
 export const MAX_ACTIVE_PER_USER = 20;
-/** 봉 마감 뒤 이만큼 기다렸다 평가한다 (거래소가 마감 봉을 확정하는 시간) */
-export const EVAL_DELAY_MS = 3_000;
 
 export interface TriggerRecord {
 	id: string;
@@ -94,11 +92,16 @@ const fromRow = (r: Row): TriggerRecord => ({
 	updatedAt: r.updated_at,
 });
 
-/** 켜진 트리거의 다음 평가 시각 = 다음 봉 마감 + 지연 */
+/** 켜진 트리거의 다음 평가 시각 = 다음 봉 마감 + 지연 (시장 시계 — 주식은 장 마감) */
 export function nextEvalAt(rec: TriggerRecord, now: number): number | null {
 	if (rec.state !== "armed") return null;
-	const iv = rec.source.condition.interval;
-	return lastClosedBarStart(now, iv) + 2 * INTERVAL_MS[iv] + EVAL_DELAY_MS;
+	const c = rec.source.condition;
+	return nextCloseAt(c, now - evalDelay(c)) + evalDelay(c);
+}
+
+/** 기준 봉 — 켜기·다시 켜기 때. 이 봉까지는 평가한 것으로 친다 */
+function baseline(c: Condition, now: number): number {
+	return lastClosedStart(c, now - evalDelay(c));
 }
 
 export function toSummary(rec: TriggerRecord, now: number): WatchSummary {
@@ -188,7 +191,7 @@ export class TriggerStore {
 			expiresAt: spec.limits.expiresAt,
 			state: "armed",
 			fires: 0,
-			lastBarT: lastClosedBarStart(this.now() - EVAL_DELAY_MS, spec.condition.interval),
+			lastBarT: baseline(spec.condition, this.now()),
 			lastFiredAt: null,
 			lastEvalAt: null,
 			lastError: null,
@@ -233,7 +236,7 @@ export class TriggerStore {
 		if (!rec) throw new TriggerError(404, `없는 감시입니다: ${id}`);
 		if (rec.state !== "paused") throw new TriggerError(400, `일시정지된 감시가 아닙니다 (${rec.state})`);
 		if (Date.parse(rec.expiresAt) <= this.now()) throw new TriggerError(400, "이미 만료된 감시입니다 — 새로 만들어 주세요");
-		return this.update(rec, { state: "armed", lastError: null, lastBarT: lastClosedBarStart(this.now() - EVAL_DELAY_MS, rec.source.condition.interval) });
+		return this.update(rec, { state: "armed", lastError: null, lastBarT: baseline(rec.source.condition, this.now()) });
 	}
 
 	async remove(user: string, id: string): Promise<TriggerRecord> {

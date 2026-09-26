@@ -33,6 +33,8 @@ import {
 	executeOrderAction,
 	type OrderAction,
 	type DataCreds,
+	fetchWatchBars,
+	type Condition,
 } from "@alphafolio/broker";
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
@@ -343,6 +345,7 @@ async function main(): Promise<void> {
 			listWatches: async () => watchOps.list(user),
 			pauseWatch: (id) => agentOp(() => watchOps.pause(user, id, "agent")),
 			channels: () => notifier.channels(user),
+			fetchBars: (c, limit, at) => watchBars(user, c, limit, at),
 		}),
 		idleMinutes: cfg.idleMinutes,
 	});
@@ -366,7 +369,9 @@ async function main(): Promise<void> {
 		brokerAccess,
 	});
 
-	const watcher = new Watcher({ store: triggerStore, deliver: (ev) => deliverWatch(ev), isActive: (u) => accounts.has(u) });
+	// 주식 봉은 트리거 주인의 증권 키로 (코인은 공개 시세)
+	const watchBars = (user: string, c: Condition, limit: number, at: number) => fetchWatchBars(c, limit, { now: at, access: brokerAccess(user) });
+	const watcher = new Watcher({ store: triggerStore, deliver: (ev) => deliverWatch(ev), isActive: (u) => accounts.has(u), fetchBars: watchBars });
 
 	const loginLimiter = new LoginRateLimiter(cfg.login);
 	// 초대 코드 추측 방지 — 로그인과 따로 센다 (가입 실패가 로그인을 막지 않게)
