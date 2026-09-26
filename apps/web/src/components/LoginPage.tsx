@@ -5,6 +5,7 @@
 import { useState, type FormEvent } from "react";
 import { login, signup } from "../lib/api.ts";
 import { setToken } from "../lib/auth.ts";
+import { Logo } from "./Logo.tsx";
 
 const field = "w-full rounded-xl border border-line bg-card px-4 py-3 text-ink outline-none focus:border-accent";
 const NAME_RE = /^[a-z0-9_]{3,20}$/;
@@ -60,9 +61,7 @@ export function LoginPage({ onSuccess }: { onSuccess: () => void }) {
 		<div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-canvas px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
 			<form onSubmit={submit} className="w-full max-w-sm space-y-5">
 				<div className="flex flex-col items-center gap-3">
-					<div className="flex size-12 items-center justify-center rounded-2xl bg-accent text-2xl font-semibold text-accent-ink">
-						α
-					</div>
+					<Logo className="size-12 rounded-2xl" />
 					<div className="text-center">
 						<h1 className="text-lg font-semibold text-ink">AlphaFolio</h1>
 						<p className="text-sm text-muted">{mode === "login" ? "개인 금융 에이전트" : "초대 코드로 가입"}</p>

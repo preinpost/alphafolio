@@ -10,6 +10,7 @@ import { ChatPage } from "./components/ChatPage.tsx";
 import { LedgerPage } from "./components/LedgerPage.tsx";
 import { PortfolioPage } from "./components/PortfolioPage.tsx";
 import { LoginPage } from "./components/LoginPage.tsx";
+import { Logo } from "./components/Logo.tsx";
 import { SettingsPage } from "./components/SettingsPage.tsx";
 import {
 	ChatIcon,
@@ -225,9 +226,7 @@ function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClos
 					className="-mx-1.5 flex items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-hover active:bg-selected"
 					aria-label="홈(챗)으로"
 				>
-					<div className="flex size-7 items-center justify-center rounded-lg bg-accent text-sm font-semibold text-accent-ink">
-						α
-					</div>
+					<Logo className="size-7 rounded-lg" />
 					<span className="text-sm font-semibold text-ink">AlphaFolio</span>
 				</button>
 				<button

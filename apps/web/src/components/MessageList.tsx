@@ -3,6 +3,7 @@ import type { UIContentBlock, UIMessage } from "@alphafolio/protocol";
 import { pickThinkingLine, pickToolFlavorLine, type ToolFlavorState } from "../lib/toolFlavor.ts";
 import { CardView } from "./cards/index.tsx";
 import { AlertIcon, ArrowDownIcon, CheckIcon, CopyIcon } from "./icons.tsx";
+import { Logo } from "./Logo.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { PixelLoader } from "./PixelLoader.tsx";
 import type { RunningTool } from "../lib/chat.ts";
@@ -176,9 +177,7 @@ function Welcome({ onSuggest, canSuggest }: { onSuggest: (text: string) => void;
 	return (
 		<div className="mx-auto flex min-h-full max-w-3xl flex-col px-4 pb-4">
 			<div className="flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center">
-				<div className="fade-up flex size-14 items-center justify-center rounded-2xl bg-accent text-3xl font-semibold text-accent-ink shadow-lg shadow-accent/20">
-					α
-				</div>
+				<Logo className="fade-up size-14 rounded-2xl shadow-lg shadow-accent/20" />
 				<div className="fade-up" style={{ animationDelay: "60ms" }}>
 					<h2 className="text-2xl font-semibold tracking-tight text-ink">무엇을 도와드릴까요?</h2>
 					<p className="mt-1.5 text-sm text-muted">시세·차트 분석부터 가계부 기록까지, 말로 물어보세요.</p>
@@ -250,9 +249,7 @@ function AssistantTurn({ messages, live, isLast, busy }: AssistantTurnProps) {
 
 	return (
 		<div className="group fade-up flex gap-3">
-			<div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-ink">
-				α
-			</div>
+			<Logo className="mt-0.5 size-7 rounded-full" />
 			<div className="min-w-0 flex-1 space-y-3 text-ink">
 				{messages.map((m, mi) => (
 					<div key={mi} className="space-y-3">
