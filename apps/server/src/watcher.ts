@@ -15,6 +15,7 @@ import {
 	evalDelay,
 	fetchWatchBars,
 	fireIndices,
+	isIntraday,
 	isStock,
 	kstShort,
 	lastClosedStart,
@@ -53,9 +54,13 @@ export interface WatcherOptions {
 	now?: () => number;
 }
 
-/** 닫혔어야 할 봉이 아직 안 왔을 때 다시 조회하기까지 (휴장일·거래소 지연 — 10초마다 두드리지 않게) */
+/**
+ * 닫혔어야 할 봉이 아직 안 왔을 때 다시 조회하기까지 (휴장일·거래소 지연 — 10초마다 두드리지 않게).
+ * 주식 분봉은 1분 — 종가 단일가를 기다리는 마지막 봉, 거래가 없어 비는 봉(거래 한산 종목)이 있다. 휴장일에는 1분에 한 번 헛조회한다
+ */
 export function recheckAfter(c: Condition): number {
-	return isStock(c.market.venue) ? 10 * 60_000 : 30_000;
+	if (!isStock(c.market.venue)) return 30_000;
+	return isIntraday(c.interval) ? 60_000 : 10 * 60_000;
 }
 /** 재기동 뒤 소급 평가할 봉 수 상한 */
 const MAX_CATCHUP_BARS = 200;

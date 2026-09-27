@@ -11,7 +11,7 @@
  * 데이터가 모자라면 null — null 은 \"판정하지 않음\" 이라 발동하지 않는다.
  */
 import { atr, bollinger, ema, rsi, sma } from "../indicators.ts";
-import { CRYPTO_STEP, cryptoBarStart, DAY, feedErrors, isStock, localDate, MARKETS, MIN, stockDayStart } from "./market-time.ts";
+import { CRYPTO_STEP, cryptoBarStart, DAY, feedErrors, isIntraday, isStock, localDate, MARKETS, MIN, stockDayStart } from "./market-time.ts";
 import {
 	FIELDS,
 	INDICATORS,
@@ -39,9 +39,13 @@ export const MAX_RVOL_LENGTH = 30;
 /** 예전 고정 예열 — 이름 값만 쓰는 조건의 상한 (ma60 + 여유) */
 export const WARMUP_BARS = 80;
 
-/** 시장별로 한 번에 받을 수 있는 봉 수 — 예열·미리보기의 상한 (코인은 Binance 이어 받기 5번, 주식은 일봉 이어 받기) */
-export function maxBarsFor(c: Pick<Condition, "market" | "interval">): number {
+/** 주식 분·시간봉은 최근 이만큼의 거래일까지만 받는다 (KIS 해외 분봉 보관 약 1개월 · 첫 조회 이어 받기 횟수) */
+export const MAX_INTRADAY_DAYS = 15;
+
+/** 시장별로 한 번에 받을 수 있는 봉 수 — 예열·미리보기의 상한 (코인은 Binance 이어 받기 5번, 주식은 일봉 이어 받기 · 분봉 최근 15거래일) */
+export function maxBarsFor(c: Pick<Condition, "market" | "interval" | "session">): number {
 	if (!isStock(c.market.venue)) return 5000;
+	if (isIntraday(c.interval)) return barsPerDay(c) * MAX_INTRADAY_DAYS;
 	return c.interval === "1w" ? 110 : 550;
 }
 
@@ -54,11 +58,12 @@ const NAMED: Readonly<Partial<Record<SeriesName, IndicatorRef>>> = {
 	vol_ratio20: { ind: "vol_ratio", period: 20 },
 };
 
-/** 시장별로 지금 되는 봉 간격 */
+/** 시장별로 되는 봉 간격 — 주식 1분봉은 받지 않는다 (증권사 분봉 반영 지연에 비해 봉이 너무 짧다) */
+const STOCK_INTERVALS: readonly Interval[] = INTERVALS.filter((i) => i !== "1m");
 export const SUPPORTED: Readonly<Record<Condition["market"]["venue"], readonly Interval[]>> = {
 	binance: INTERVALS,
-	krx: ["1d", "1w"],
-	us: ["1d", "1w"],
+	krx: STOCK_INTERVALS,
+	us: STOCK_INTERVALS,
 };
 
 const SYMBOL_RE: Readonly<Record<Condition["market"]["venue"], RegExp>> = {
@@ -69,7 +74,7 @@ const SYMBOL_RE: Readonly<Record<Condition["market"]["venue"], RegExp>> = {
 const SYMBOL_EXAMPLE = { binance: "ETHUSDT", krx: "005930", us: "AAPL" } as const;
 
 export type Series = Array<number | null>;
-type Ctx = Pick<Condition, "market" | "interval">;
+type Ctx = Pick<Condition, "market" | "interval" | "session">;
 
 // ── 트리 도우미 ────────────────────────────────────────────────────────
 
@@ -262,15 +267,15 @@ const NAMED_WARMUP: Readonly<Record<SeriesName, number>> = {
 	vol_ratio20: 21,
 };
 
-/** 기준 구간(그날) 하나에 봉이 몇 개인가 — rvol 예열 */
-function barsPerAnchor(ctx: Ctx): number {
-	if (ctx.interval === "1d" || ctx.interval === "1w") return 1;
+/** 하루(기준 구간) 봉 수 — rvol 예열 · 주식 분봉 상한. 주식은 평소 세션 길이 (확장이면 프리~애프터) */
+export function barsPerDay(ctx: Ctx): number {
+	if (!isIntraday(ctx.interval)) return 1;
 	const v = ctx.market.venue;
 	if (!isStock(v)) return Math.ceil(DAY / CRYPTO_STEP[ctx.interval]);
 	const m = MARKETS[v];
-	const [oh, om] = m.open.split(":").map(Number) as [number, number];
-	const [ch, cm] = m.close.split(":").map(Number) as [number, number];
-	return Math.ceil(((ch - oh) * 60 + (cm - om)) * MIN / CRYPTO_STEP[ctx.interval]);
+	const mins = (hhmm: string) => (hhmm.split(":").map(Number) as [number, number]).reduce((h, mi) => h * 60 + mi);
+	const [open, close] = ctx.session === "extended" ? [m.extOpen, m.extClose] : [m.open, m.close];
+	return Math.ceil(((mins(close) - mins(open)) * MIN) / CRYPTO_STEP[ctx.interval]);
 }
 
 export function refWarmup(ref: ValueRef, ctx: Ctx): number {
@@ -288,7 +293,7 @@ export function refWarmup(ref: ValueRef, ctx: Ctx): number {
 		case "vol_ratio":
 			return ref.period + 1;
 		case "rvol":
-			return ((ref.length ?? 10) + 1) * barsPerAnchor(ctx);
+			return ((ref.length ?? 10) + 1) * barsPerDay(ctx);
 		case "value":
 			return refWarmup(ref.of, ctx) + (ref.offset ?? 0);
 	}
@@ -369,14 +374,14 @@ export function validateCondition(c: Condition): string[] {
 	}
 	if (!SYMBOL_RE[venue].test(c.market.symbol ?? "")) errors.push(`종목 형식이 아닙니다: ${c.market.symbol} (예: ${SYMBOL_EXAMPLE[venue]})`);
 	if (!INTERVALS.includes(c.interval)) errors.push(`봉 간격은 ${INTERVALS.join(" · ")} 중 하나입니다`);
-	else if (!SUPPORTED[venue].includes(c.interval)) {
-		errors.push(`${venue === "krx" ? "국장" : "미장"}은 지금 일봉(1d)·주봉(1w)만 됩니다 — 분봉·시간봉(5분~4시간)은 다음 단계`);
-	}
+	else if (c.interval === "1m" && isStock(venue)) errors.push("1분봉은 코인만 됩니다 — 주식은 3분봉부터");
+	else if (!SUPPORTED[venue].includes(c.interval)) errors.push(`이 시장에서 되는 봉 간격은 ${SUPPORTED[venue].join(" · ")} 입니다`);
+	if (c.session !== undefined && c.session !== "regular" && c.session !== "extended") errors.push("세션은 regular · extended 입니다");
 	if (c.session === "extended") {
 		if (!isStock(venue)) errors.push("코인은 24시간이라 세션 구분이 없습니다");
-		else if (c.interval === "1d" || c.interval === "1w") errors.push("일봉·주봉은 정규장 기준입니다 — 프리·애프터는 분봉·시간봉에서만");
+		else if (!isIntraday(c.interval)) errors.push("일봉·주봉은 정규장 기준입니다 — 프리·애프터는 분봉·시간봉에서만");
+		else if (venue === "krx" && c.market.feed?.basis !== "integrated") errors.push("국장 확장 세션(NXT 08:00–20:00)은 KRX+NXT 통합 기준(basis: integrated)에서만 됩니다");
 	}
-	if (c.interval === "1m" && isStock(venue)) errors.push("1분봉은 코인만 됩니다");
 	if (c.market.feed) {
 		if (!isStock(venue)) errors.push("코인은 시세 출처를 고르지 않습니다 (Binance 공개 시세)");
 		else errors.push(...feedErrors(venue, c.market.feed));

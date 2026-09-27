@@ -1,5 +1,5 @@
 /**
- * 주식 감시용 봉 (PLAN §40) — 국장·미장 일봉·주봉. 트리거 주인의 증권 키로 조회한다.
+ * 주식 감시용 봉 (PLAN §40) — 국장·미장 일봉·주봉. 트리거 주인의 증권 키로 조회한다. 분·시간봉은 stock-intraday.ts
  *
  * 출처: 트리거에 고정된 출처(feed)로만 — 국장은 출처마다 거래량·가격 기준이 달라(KRX만 / KRX+NXT 통합) 섞이면 가짜로 울린다.
  *   고정이 없으면(예전 트리거·미리보기 기본값 계산) KIS → 토스.
@@ -13,7 +13,8 @@ import type { BrokerAccess } from "../portfolio.ts";
 import { NoBrokerConfiguredError } from "../portfolio.ts";
 import { tossCandles } from "../toss/api.ts";
 import type { Bar } from "../indicators.ts";
-import { addDays, barCloseAt, MARKETS, mondayOf, stockDayStart } from "./market-time.ts";
+import { addDays, barCloseAt, isIntraday, MARKETS, mondayOf, stockDayStart } from "./market-time.ts";
+import { fetchStockIntraday } from "./stock-intraday.ts";
 import type { Condition, StockFeed, WatchBar } from "./types.ts";
 
 export { FEED_LABEL, feedErrors } from "./market-time.ts";
@@ -124,10 +125,11 @@ export function weeklyFromDaily(venue: "krx" | "us", bars: Bar[]): WatchBar[] {
 	return out;
 }
 
-/** 감시 조건의 봉 (일봉·주봉) — 닫힌 봉만, 최근 limit 개 */
+/** 감시 조건의 봉 (분·시간봉 · 일봉 · 주봉) — 닫힌 봉만, 최근 limit 개 */
 export async function fetchStockBars(access: BrokerAccess, c: Condition, limit: number, now: number): Promise<WatchBar[]> {
 	const venue = c.market.venue as "krx" | "us";
 	if (!(venue in MARKETS)) throw new Error(`주식 시장이 아닙니다: ${venue}`);
+	if (isIntraday(c.interval)) return fetchStockIntraday(access, c, limit, now);
 	const daysNeeded = c.interval === "1w" ? limit * 5 + 5 : limit + 2;
 	const { bars } = await fetchStockDaily(access, venue, c.market.symbol, daysNeeded, c.market.feed);
 	const watch = c.interval === "1w" ? weeklyFromDaily(venue, bars) : dailyToWatch(venue, bars);

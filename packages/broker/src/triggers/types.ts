@@ -15,8 +15,8 @@ export interface WatchBar {
 	volume: number;
 }
 
-/** 봉 간격 — 1m 은 코인만 (1단계 호환). 주식 분봉(5m~4h)은 다음 단계, 지금은 1d·1w */
-export const INTERVALS = ["1m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"] as const;
+/** 봉 간격 — 1m 은 코인만 (1단계 호환). 주식은 3분봉부터 (분·시간봉은 장 기준으로 묶는다) */
+export const INTERVALS = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"] as const;
 export type Interval = (typeof INTERVALS)[number];
 
 /**
@@ -86,7 +86,10 @@ export interface StockFeed {
 export interface Condition {
 	market: { venue: Venue; symbol: string; feed?: StockFeed };
 	interval: Interval;
-	/** 주식 분봉만 — extended = 프리·애프터(미장)·NXT(국장) 포함. 일봉·주봉은 항상 정규장. 없으면 regular */
+	/**
+	 * 주식 분·시간봉만 — extended = 미장 프리·애프터(뉴욕 04:00–20:00) · 국장 NXT 포함(08:00–20:00, 통합 기준만).
+	 * 일봉·주봉은 항상 정규장. 없으면 regular
+	 */
 	session?: "regular" | "extended";
 	/** 1단계는 봉 마감 판정만 — 꼬리(피뢰침)가 아니라 마감가로 본다 */
 	when: "bar_close";

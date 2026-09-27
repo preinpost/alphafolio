@@ -21,6 +21,7 @@ export const SERIES_LABEL: Readonly<Record<SeriesName, string>> = {
 
 export const INTERVAL_LABEL: Readonly<Record<Interval, string>> = {
 	"1m": "1분봉",
+	"3m": "3분봉",
 	"5m": "5분봉",
 	"10m": "10분봉",
 	"15m": "15분봉",
@@ -125,7 +126,7 @@ export function conditionText(c: Condition): string {
 	// 코인은 심볼만으로 알아본다 (ETHUSDT), 주식은 시장을 붙인다 (국장 005930)
 	const integrated = c.market.venue === "krx" && c.market.feed?.basis === "integrated" ? " (KRX+NXT 통합)" : "";
 	const where = c.market.venue === "binance" ? c.market.symbol : `${VENUE_LABEL[c.market.venue]} ${c.market.symbol}${integrated}`;
-	const session = c.session === "extended" ? " (프리·애프터 포함)" : "";
+	const session = c.session === "extended" ? (c.market.venue === "krx" ? " (NXT 프리·애프터 포함)" : " (프리·애프터 포함)") : "";
 	const parts = [`${where} · ${INTERVAL_LABEL[c.interval]}${session} 마감`, c.all.map((n) => nodeText(n, true)).join(" 그리고 ")];
 	if (c.confirmBars > 1) parts.push(`${c.confirmBars}봉 연속`);
 	return parts.join(" · ");

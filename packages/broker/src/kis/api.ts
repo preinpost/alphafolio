@@ -116,6 +116,61 @@ export function overseasChart(
 	});
 }
 
+// ── 분봉 (감시, PLAN §40) ─────────────────────────────────────────────────
+
+/**
+ * 국내주식 일별분봉 (FHKST03010230) — 1분봉 최대 120개, date·hour(그 시각 포함)부터 과거로. 최대 1년 보관, 실전 키만.
+ * 과거 데이터 포함(Y)이면 그날이 모자라거나 휴장일일 때 이전 거래일로 이어진다. 봉 시각(stck_cntg_hour) = 봉 시작.
+ */
+export function domesticMinuteChart(
+	ctx: KisContext,
+	symbol: string,
+	opts: { date: string; hour: string; market: "J" | "UN" },
+): Promise<KisResponse> {
+	return kisGet(ctx, {
+		label: `국내 분봉 ${symbol}`,
+		path: "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
+		trId: "FHKST03010230",
+		query: {
+			FID_COND_MRKT_DIV_CODE: opts.market,
+			FID_INPUT_ISCD: symbol,
+			FID_INPUT_HOUR_1: opts.hour,
+			FID_INPUT_DATE_1: opts.date,
+			FID_PW_DATA_INCU_YN: "Y",
+			FID_FAKE_TICK_INCU_YN: "",
+		},
+	});
+}
+
+/**
+ * 해외주식 분봉 (HHDFS76950200) — NMIN 분 간격, 최근 120개. 미장은 프리·애프터(04:00–20:00 뉴욕)까지 준다.
+ * keyb(현지 YYYYMMDDHHMMSS, 그 시각 포함)를 주면 그보다 이전으로 이어 받는다 (약 1개월). 봉 시각(xymd·xhms) = 현지 봉 시작.
+ */
+export function overseasMinuteChart(
+	ctx: KisContext,
+	symbol: string,
+	excd: string,
+	nmin: number,
+	keyb?: string,
+): Promise<KisResponse> {
+	return kisGet(ctx, {
+		label: `해외 분봉 ${symbol}@${excd}`,
+		path: "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice",
+		trId: "HHDFS76950200",
+		query: {
+			AUTH: "",
+			EXCD: excd,
+			SYMB: symbol,
+			NMIN: String(nmin),
+			PINC: "1",
+			NEXT: keyb ? "1" : "",
+			NREC: "120",
+			FILL: "",
+			KEYB: keyb ?? "",
+		},
+	});
+}
+
 // ── 잔고 ────────────────────────────────────────────────────────────────
 
 /** 국내 주식잔고 (TTTC8434R / 모의 VTTC8434R). */

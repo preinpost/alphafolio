@@ -2,10 +2,10 @@
  * 감시용 봉 조회 (PLAN §40) — 시장별로 나눠 부른다. **닫힌 봉만** 돌려준다 (봉 마감 판정의 전제).
  *
  *   binance  공개 klines (키 없음). 10분봉은 Binance 에 없어 5분봉 두 개를 묶는다
- *   krx · us 트리거 주인의 증권 키로 일봉 → 일봉·주봉 (stock-bars.ts)
+ *   krx · us 트리거 주인의 증권 키로 — 일봉 → 일봉·주봉 (stock-bars.ts), 분봉 → 장 기준 분·시간봉 (stock-intraday.ts)
  */
 import type { BrokerAccess } from "../portfolio.ts";
-import { barCloseAt, CRYPTO_STEP, cryptoBarStart, isStock } from "./market-time.ts";
+import { CRYPTO_STEP, cryptoBarStart, isStock, settledAt } from "./market-time.ts";
 import { fetchStockBars } from "./stock-bars.ts";
 import type { Condition, Interval, WatchBar } from "./types.ts";
 
@@ -93,7 +93,7 @@ export async function fetchWatchBars(c: Condition, limit: number, opts: WatchBar
 	if (!isStock(c.market.venue)) return fetchBinanceBars(c.market.symbol, c.interval, limit, { now, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
 	if (!opts.access) throw new BarsError("주식 감시에는 증권 키가 필요합니다 (설정 → 연결 → 증권)");
 	try {
-		return (await fetchStockBars(opts.access, c, limit, now)).filter((b) => barCloseAt(c, b.t) <= now);
+		return (await fetchStockBars(opts.access, c, limit, now)).filter((b) => settledAt(c, b.t) <= now);
 	} catch (err) {
 		throw new BarsError(err instanceof Error ? err.message : String(err));
 	}

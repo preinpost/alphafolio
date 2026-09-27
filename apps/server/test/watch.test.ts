@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { migrate } from "@alphafolio/ledger";
-import type { TriggerSpec, WatchBar } from "@alphafolio/broker";
+import { bucketStock, settledAt, type Condition, type TriggerSpec, type WatchBar } from "@alphafolio/broker";
 import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d1.ts";
 import { OrderTokenGuard } from "../src/order-tokens.ts";
 import { TriggerStore } from "../src/triggers.ts";
@@ -310,5 +310,61 @@ describe("주식 일봉 감시", () => {
 		clock = KST("2026-09-19T09:00:00"); // 마감 17.5시간 뒤 (12시간 넘음)
 		await w.tick();
 		assert.equal(fired()[0]?.ev.kind, "missed");
+	});
+});
+
+describe("주식 분봉 감시", () => {
+	const KST = (s: string) => Date.parse(`${s}+09:00`);
+	const M = 60_000;
+	/** 2026-09-23 KRX 1분봉 — 09:00–15:19 종가 100, 15:30 종가 단일가 105 (랜덤 엔드로 15:30:30 에야 보인다) */
+	const minuteBars = (at: number): WatchBar[] => {
+		const out: WatchBar[] = [];
+		for (let t = KST("2026-09-23T09:00:00"); t < KST("2026-09-23T15:20:00"); t += M) if (t + M <= at) out.push({ t, open: 100, high: 100, low: 100, close: 100, volume: 10 });
+		if (at >= KST("2026-09-23T15:30:30")) out.push({ t: KST("2026-09-23T15:30:00"), open: 105, high: 105, low: 105, close: 105, volume: 5000 });
+		return out;
+	};
+	let calls: number;
+	const intradayBars = async (_user: string, c: Condition, limit: number, at: number): Promise<WatchBar[]> => {
+		calls++;
+		return bucketStock(c, minuteBars(at))
+			.filter((b) => settledAt(c, b.t) <= at)
+			.slice(-limit);
+	};
+	const hourSpec = (): TriggerSpec => ({
+		...spec(),
+		name: "삼성 1시간봉 104 돌파",
+		condition: {
+			market: { venue: "krx", symbol: "005930", feed: { provider: "kis", basis: "krx" } },
+			interval: "1h",
+			when: "bar_close",
+			all: [{ left: "close", op: ">", right: 104 }],
+			confirmBars: 1,
+			fire: "on_enter",
+		},
+		limits: { maxFires: null, cooldownSec: 0, expiresAt: "2026-12-31T00:00:00Z" },
+	});
+	let w: Watcher;
+
+	beforeEach(() => {
+		calls = 0;
+		clock = KST("2026-09-23T14:10:00");
+		w = new Watcher({ store, deliver: async (ev) => (delivered.push({ ev, channels: true }), []), isActive: () => true, fetchBars: intradayBars, now: () => clock });
+	});
+
+	it("1시간봉: 봉 마감 20초 뒤 평가, 마지막 봉(15:00–15:30)은 종가 단일가가 들어온 뒤에", async () => {
+		await arm("ms", hourSpec());
+		clock = KST("2026-09-23T15:00:30"); // 14:00 봉 (종가 100)
+		await w.tick();
+		assert.equal(calls, 1);
+		assert.equal(fired().length, 0);
+		clock = KST("2026-09-23T15:31:10"); // 마감은 지났지만 단일가 확정 전 — 조회도 하지 않는다
+		await w.tick();
+		assert.equal(calls, 1);
+		clock = KST("2026-09-23T15:31:30");
+		await w.tick();
+		assert.equal(fired().length, 1);
+		assert.match(fired()[0]!.ev.message.lines?.[0] ?? "", /09\/23 15:30 마감 · 종가 105/);
+		await w.tick();
+		assert.equal(calls, 2); // 같은 봉을 다시 보지 않는다
 	});
 });

@@ -4,24 +4,26 @@
  * 켜기는 사람만 한다: 준비하면 확인 카드(서명 토큰)를 띄우고, 사용자가 [켜기] 를 눌러야 서버가 감시를 시작한다.
  * 에이전트가 할 수 있는 건 위험을 줄이는 쪽(목록·일시정지)뿐이다. 다시 켜기·삭제는 앱·텔레그램에서.
  *
- * 시장: Binance 코인(모든 간격) · 국장·미장(지금은 일봉·주봉). 봉 마감 판정 · 동작은 알림만.
+ * 시장: Binance 코인(모든 간격) · 국장·미장(3분봉~주봉, 분·시간봉은 장 기준). 봉 마감 판정 · 동작은 알림만.
  */
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { fetchWatchBars } from "./bars.ts";
-import { fireIndices, holdsNow, maxBarsFor, validateCondition, warmupFor } from "./condition.ts";
+import { barsPerDay, fireIndices, holdsNow, maxBarsFor, validateCondition, warmupFor } from "./condition.ts";
 import { presetCatalog, resolvePreset } from "./presets.ts";
 import { conditionText, kstShort, num, VENUE_LABEL } from "./describe.ts";
-import { barCloseAt, CRYPTO_STEP, DAY, FEED_LABEL, isStock } from "./market-time.ts";
+import { barCloseAt, CRYPTO_STEP, DAY, FEED_LABEL, isIntraday, isStock } from "./market-time.ts";
 import { INDICATORS, INTERVALS, OPS, SERIES, VENUES, type CondNode, type Condition, type Interval, type TriggerSpec, type TriggerState, type StockFeed, type Venue, type WatchBar } from "./types.ts";
 
 export const DEFAULT_EXPIRES_DAYS = 30;
 export const MAX_EXPIRES_DAYS = 90;
-/** 미리보기 기간 — 코인 분·시간봉은 30일, 일봉은 약 6개월, 주봉은 약 1년 (봉이 모자라면 받은 만큼) */
+/** 미리보기 기간 — 코인 분·시간봉은 30일, 주식 분·시간봉은 5거래일, 일봉은 약 6개월, 주봉은 약 1년 (봉이 모자라면 받은 만큼) */
 export const PREVIEW_DAYS = 30;
-export function previewBars(c: Pick<Condition, "market" | "interval">): number {
+export const PREVIEW_STOCK_INTRADAY_DAYS = 5;
+export function previewBars(c: Pick<Condition, "market" | "interval" | "session">): number {
 	if (c.interval === "1w") return 52;
 	if (c.interval === "1d") return isStock(c.market.venue) ? 120 : 180;
+	if (isStock(c.market.venue)) return barsPerDay(c) * PREVIEW_STOCK_INTRADAY_DAYS;
 	return Math.ceil((PREVIEW_DAYS * DAY) / CRYPTO_STEP[c.interval]);
 }
 
@@ -126,8 +128,9 @@ export function createWatchTools(deps: WatchToolDeps) {
 		description:
 			"프리셋(preset + presetParams, 숫자는 바꿀 수 있는 기본값): " + presetCatalog() + ". 프리셋이 맞으면 프리셋을 쓴다 (조건이 매번 달라지지 않게). " +
 			"AlphaFolio 자체 감시 — **봉 마감가**로 조건을 판정해 알린다 (순간 꼬리에 울리지 않는다). TradingView 와 무관. 알림만 (자동 주문은 아직 없다). " +
-			"시장: binance(코인, 5분~주봉 전부) · krx(국장) · us(미장) — 주식은 지금 일봉(1d)·주봉(1w)만, 사용자의 증권 키로 조회한다. " +
-			"action=prepare: 조건을 준비하고 확인 카드를 띄운다 — **켜는 건 사용자가 카드에서** [켜기] 를 눌러야 한다. 지난 30일에 몇 번 울렸을지 미리보기가 함께 나온다. " +
+			"시장: binance(코인, 1분~주봉 전부) · krx(국장) · us(미장) — 주식은 3분봉~주봉, 사용자의 증권 키로 조회한다. " +
+			"주식 분·시간봉은 장 기준으로 자른다 (국장 09:00, 미장 09:30 시작 — 1시간봉 마지막 봉은 마감에서 잘린다). session: 'extended' = 미장 프리·애프터 · 국장 NXT(통합 기준). " +
+			"action=prepare: 조건을 준비하고 확인 카드를 띄운다 — **켜는 건 사용자가 카드에서** [켜기] 를 눌러야 한다. 지난 기간(코인 분봉 30일 · 주식 분봉 5거래일 · 일봉 약 6개월)에 몇 번 울렸을지 미리보기가 함께 나온다. " +
 			"action=list: 내 감시 목록. action=pause: 일시정지 (다시 켜기·삭제는 사용자가 앱·텔레그램에서). " +
 			"직접 조건(all): 이름 값 close·open·high·low·volume·vol_chg_pct(직전 봉 대비 거래량 %)·ma5·ma20·ma60·rsi14·bb_upper·bb_lower·atr14·vol_ratio20, " +
 			"또는 매개변수 값 { ind: 'sma'|'ema', period, of?, mul? } · { ind: 'rsi', period } · { ind: 'highest'|'lowest', period, of?, offset?(기본 1 = 지금 봉 제외) } · " +
@@ -141,7 +144,11 @@ export function createWatchTools(deps: WatchToolDeps) {
 			market: Type.Optional(Type.Union(VENUES.map((v) => Type.Literal(v)), { description: "binance=코인 · krx=국장 · us=미장. 비우면 심볼로 추정 (6자리=국장)" })),
 			symbol: Type.Optional(Type.String({ description: "코인 ETHUSDT · 국장 005930 · 미장 AAPL" })),
 			interval: Type.Optional(Type.Union(INTERVALS.map((i) => Type.Literal(i)), { description: "봉 간격 — 사용자가 말하지 않으면 되묻는다" })),
-			session: Type.Optional(Type.Union([Type.Literal("regular"), Type.Literal("extended")], { description: "주식 분봉만: extended = 프리·애프터 포함. 일봉·주봉은 정규장" })),
+			session: Type.Optional(
+				Type.Union([Type.Literal("regular"), Type.Literal("extended")], {
+					description: "주식 분·시간봉만: extended = 미장 프리·애프터(뉴욕 04:00–20:00) · 국장 NXT 포함(08:00–20:00, 통합 기준으로 준비된다). 기본 정규장. 일봉·주봉은 정규장",
+				}),
+			),
 			basis: Type.Optional(
 				Type.Union([Type.Literal("krx"), Type.Literal("integrated")], {
 					description: "국장만: krx = KRX 정규장 시세(기본, 한국투자 키 필요, 15:30 마감) · integrated = KRX+NXT 통합 시세(거래량·종가에 NXT 포함, 20:00 마감)",
@@ -192,7 +199,9 @@ export function createWatchTools(deps: WatchToolDeps) {
 				presetName = r.preset.name;
 				presetMeta = { id: r.preset.id, params: r.params };
 			}
-			const feed = isStock(venue) ? chooseFeed(venue, deps.feeds?.() ?? { kis: true, toss: true }, params.basis) : undefined;
+			// 국장 확장 세션(NXT)은 통합 시세로만 볼 수 있다 — basis 를 말하지 않았으면 통합으로
+			const basis = params.basis ?? (venue === "krx" && params.session === "extended" && isIntraday(params.interval as Interval) ? "integrated" : undefined);
+			const feed = isStock(venue) ? chooseFeed(venue, deps.feeds?.() ?? { kis: true, toss: true }, basis) : undefined;
 			if (params.basis && venue !== "krx") throw new Error("basis 는 국장만 고릅니다");
 			const condition: Condition = {
 				market: { venue, symbol, ...(feed ? { feed } : {}) },
