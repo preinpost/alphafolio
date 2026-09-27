@@ -58,12 +58,11 @@ const NAMED: Readonly<Partial<Record<SeriesName, IndicatorRef>>> = {
 	vol_ratio20: { ind: "vol_ratio", period: 20 },
 };
 
-/** 시장별로 되는 봉 간격 — 주식 1분봉은 받지 않는다 (증권사 분봉 반영 지연에 비해 봉이 너무 짧다) */
-const STOCK_INTERVALS: readonly Interval[] = INTERVALS.filter((i) => i !== "1m");
+/** 시장별로 되는 봉 간격 — 지금은 모든 시장이 전부 (주식 분·시간봉은 장 기준) */
 export const SUPPORTED: Readonly<Record<Condition["market"]["venue"], readonly Interval[]>> = {
 	binance: INTERVALS,
-	krx: STOCK_INTERVALS,
-	us: STOCK_INTERVALS,
+	krx: INTERVALS,
+	us: INTERVALS,
 };
 
 const SYMBOL_RE: Readonly<Record<Condition["market"]["venue"], RegExp>> = {
@@ -374,7 +373,6 @@ export function validateCondition(c: Condition): string[] {
 	}
 	if (!SYMBOL_RE[venue].test(c.market.symbol ?? "")) errors.push(`종목 형식이 아닙니다: ${c.market.symbol} (예: ${SYMBOL_EXAMPLE[venue]})`);
 	if (!INTERVALS.includes(c.interval)) errors.push(`봉 간격은 ${INTERVALS.join(" · ")} 중 하나입니다`);
-	else if (c.interval === "1m" && isStock(venue)) errors.push("1분봉은 코인만 됩니다 — 주식은 3분봉부터");
 	else if (!SUPPORTED[venue].includes(c.interval)) errors.push(`이 시장에서 되는 봉 간격은 ${SUPPORTED[venue].join(" · ")} 입니다`);
 	if (c.session !== undefined && c.session !== "regular" && c.session !== "extended") errors.push("세션은 regular · extended 입니다");
 	if (c.session === "extended") {

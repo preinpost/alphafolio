@@ -277,9 +277,9 @@ describe("거래량 증가율 · 예열 · 10분봉", () => {
 		assert.equal(aggregate([], "10m").length, 0);
 	});
 
-	it("시장별 검증 — 주식은 3분봉부터, 일봉 세션 확장은 안 됨", () => {
+	it("시장별 검증 — 주식도 분·시간봉, 일봉 세션 확장은 안 됨", () => {
 		assert.deepEqual(validateCondition(cond({ market: { venue: "krx", symbol: "005930" }, interval: "1h" })), []);
-		assert.ok(validateCondition(cond({ market: { venue: "krx", symbol: "005930" }, interval: "1m" })).some((e) => /1분봉은 코인만/.test(e)));
+		assert.deepEqual(validateCondition(cond({ market: { venue: "us", symbol: "AAPL" }, interval: "1m" })), []);
 		assert.deepEqual(validateCondition(cond({ market: { venue: "us", symbol: "BRK.B" }, interval: "1w" })), []);
 		assert.ok(validateCondition(cond({ market: { venue: "us", symbol: "AAPL" }, interval: "1d", session: "extended" })).some((e) => /정규장 기준/.test(e)));
 		assert.ok(validateCondition(cond({ market: { venue: "krx", symbol: "AAPL" }, interval: "1d" })).some((e) => /종목 형식/.test(e)));

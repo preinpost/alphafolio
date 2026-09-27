@@ -22,11 +22,14 @@ import type { TossContext } from "../toss/client.ts";
 import { addDays, CRYPTO_STEP, localClock, MARKETS, MIN, sessionOf, settledAt, stockBucket, zoned } from "./market-time.ts";
 import type { Condition, WatchBar } from "./types.ts";
 
-/** 한 번 조회에 이어 받는 최대 횟수 — 처음(예열)만 많고, 평소는 캐시와 겹치는 첫 쪽 하나 */
-export const MAX_INTRADAY_PAGES = 100;
-/** 캐시 — 출처·종목 수, 하나당 원본 봉 수 (국장 통합 1분봉 약 16거래일) */
-const CACHE_KEYS = 64;
-const CACHE_BARS = 12_000;
+/**
+ * 한 번 조회에 이어 받는 최대 횟수 — 처음(예열)만 많고, 평소는 캐시와 겹치는 첫 쪽 하나.
+ * 가장 무거운 경우: 미장 1분봉 15거래일 — KIS 가 프리·애프터까지 주므로 하루 960개 × 15 ÷ 120 = 120번
+ */
+export const MAX_INTRADAY_PAGES = 130;
+/** 캐시 — 출처·종목 수, 하나당 원본 봉 수 (미장 1분봉 15거래일 = 14,400) */
+const CACHE_KEYS = 48;
+const CACHE_BARS = 16_000;
 
 interface Page {
 	bars: WatchBar[];

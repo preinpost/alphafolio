@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { validateCondition, maxBarsFor } from "../src/triggers/condition.ts";
-import { barCloseAt, lastClosedStart, nextCloseAt, sessionOf, settledAt, stockBucket, zoned } from "../src/triggers/market-time.ts";
+import { barCloseAt, lastClosedStart, lateAfter, nextCloseAt, sessionOf, settledAt, stockBucket, zoned } from "../src/triggers/market-time.ts";
 import { bucketStock, clearIntradayCache, collectMinutes, fetchStockIntraday, type MinuteSource } from "../src/triggers/stock-intraday.ts";
 import { chooseFeed, createWatchTools, type WatchConfirmCard } from "../src/triggers/tool.ts";
 import type { Condition, TriggerSpec, WatchBar } from "../src/triggers/types.ts";
@@ -38,6 +38,17 @@ describe("장 기준 분·시간봉 시계", () => {
 		assert.equal(lastClosedStart(krx("5m"), kst("2026-09-28T08:59:00")), kst("2026-09-25T15:25:00")); // 월요일 장 전 → 금요일
 		assert.equal(nextCloseAt(krx("5m"), kst("2026-09-23T10:07:00")), kst("2026-09-23T10:10:00"));
 		assert.equal(nextCloseAt(krx("5m"), kst("2026-09-25T16:00:00")), kst("2026-09-28T09:05:00"));
+	});
+
+	it("1분봉: 원본 그대로, 단일가는 15:29 봉에. 늦은 알림은 최소 2분", () => {
+		const m = krx("1m");
+		assert.equal(lastClosedStart(m, kst("2026-09-23T10:07:30")), kst("2026-09-23T10:06:00"));
+		assert.equal(stockBucket(m, kst("2026-09-23T15:30:00")), kst("2026-09-23T15:29:00"));
+		assert.equal(settledAt(m, kst("2026-09-23T15:29:00")), kst("2026-09-23T15:31:00"));
+		assert.equal(lastClosedStart(m, kst("2026-09-23T15:30:40")), kst("2026-09-23T15:28:00"));
+		assert.equal(lastClosedStart(us("1m"), ny("2026-09-25", "16:00")), ny("2026-09-25", "15:59"));
+		assert.equal(lateAfter(m), 2 * MIN);
+		assert.equal(lateAfter(krx("5m")), 5 * MIN);
 	});
 
 	it("국장 마지막 봉은 종가 단일가를 기다린다 — 마감 1분 뒤에 확정", () => {
@@ -269,8 +280,12 @@ describe("KIS 미장 · 토스 분봉", () => {
 });
 
 describe("검증 · 툴", () => {
-	it("주식 3분봉~4시간봉, 국장 확장 세션은 통합 기준만, 예열 상한은 최근 15거래일", () => {
+	it("주식 1분봉~4시간봉, 국장 확장 세션은 통합 기준만, 예열 상한은 최근 15거래일", () => {
+		assert.deepEqual(validateCondition(cond({ interval: "1m" })), []);
 		assert.deepEqual(validateCondition(cond({ interval: "3m" })), []);
+		assert.equal(maxBarsFor(cond({ interval: "1m" })), 390 * 15);
+		// 1분봉 rvol 기본(10일)도 된다 — 예열 11 × 390 = 4,290 < 5,850
+		assert.deepEqual(validateCondition(cond({ interval: "1m", all: [{ left: { ind: "rvol" }, op: ">=", right: 2 }] })), []);
 		assert.deepEqual(validateCondition(cond({ interval: "4h", market: { venue: "us", symbol: "AAPL", feed: { provider: "kis" } }, session: "extended" })), []);
 		assert.deepEqual(validateCondition(cond({ interval: "3m", market: { venue: "binance", symbol: "ETHUSDT" } })), []);
 		assert.ok(validateCondition(cond({ session: "extended" })).some((e) => /통합 기준\(basis: integrated\)에서만/.test(e)));

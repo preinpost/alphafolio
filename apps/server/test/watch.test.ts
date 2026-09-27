@@ -367,4 +367,20 @@ describe("주식 분봉 감시", () => {
 		await w.tick();
 		assert.equal(calls, 2); // 같은 봉을 다시 보지 않는다
 	});
+
+	it("1분봉: 매분 20초 뒤 평가, 동시호가 동안 빈 봉은 넘기고 단일가 봉(15:29)에서 발동", async () => {
+		const s = hourSpec();
+		await arm("ms", { ...s, name: "삼성 1분봉 104 돌파", condition: { ...s.condition, interval: "1m" } });
+		clock = KST("2026-09-23T14:11:20");
+		await w.tick();
+		assert.equal(calls, 1);
+		clock = KST("2026-09-23T14:11:40"); // 같은 분 — 조회하지 않는다
+		await w.tick();
+		assert.equal(calls, 1);
+		clock = KST("2026-09-23T15:31:20");
+		await w.tick();
+		assert.equal(fired().length, 1);
+		assert.equal(fired()[0]!.ev.kind, "fired");
+		assert.match(fired()[0]!.ev.message.lines?.[0] ?? "", /09\/23 15:30 마감 · 종가 105/);
+	});
 });

@@ -15,7 +15,7 @@ export interface WatchBar {
 	volume: number;
 }
 
-/** 봉 간격 — 1m 은 코인만 (1단계 호환). 주식은 3분봉부터 (분·시간봉은 장 기준으로 묶는다) */
+/** 봉 간격 — 코인·주식 모두. 주식 분·시간봉은 장 기준으로 묶는다 */
 export const INTERVALS = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"] as const;
 export type Interval = (typeof INTERVALS)[number];
 

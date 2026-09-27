@@ -1,8 +1,8 @@
 /**
  * 주식 분·시간봉 감시 실측 (PLAN §40 ②③) — 실제 KIS 키로 감시기와 같은 경로(fetchWatchBars)를 돌린다.
  *
- *   1. 국장 005930 — KRX(J) 5분·1시간봉, 통합(UN) 확장 5분봉. 하루 봉 거래량 합 ↔ KIS 일봉 거래량, 마지막 봉 종가 ↔ 일봉 종가(종가 단일가)
- *   2. 미장 AAPL — 정규장 3분·5분·1시간봉, 확장 5분봉. 거래량 합 ↔ KIS 일봉 거래량
+ *   1. 국장 005930 — KRX(J) 1분·3분·5분·1시간봉, 통합(UN) 확장 5분봉. 하루 봉 거래량 합 ↔ KIS 일봉 거래량, 마지막 봉 종가 ↔ 일봉 종가(종가 단일가)
+ *   2. 미장 AAPL — 정규장 1분·3분·5분·1시간봉, 확장 5분봉. 거래량 합 ↔ KIS 일봉 거래량
  *   3. 캐시 — 같은 조건을 다시 부르면 호출이 1번인가
  *
  * 실행: node spike/12-watch-intraday.ts   (토큰은 서버와 같은 D1 저장소 — 캐시가 살아 있으면 새로 발급하지 않는다)
@@ -82,7 +82,7 @@ async function run(label: string, c: Condition, limit: number): Promise<WatchBar
 	const last = bars.at(-1);
 	const fires = fireIndices(c, bars).filter((i) => i >= warmupFor(c));
 	console.log(
-		`${label}: ${bars.length}봉 · KIS ${kisCalls - before}번 · ${Date.now() - t0}ms · ${first ? kstShort(first.t) : "-"} ~ ${last ? `${kstShort(last.t)} (마감 ${kstShort(barCloseAt(c, last.t))})` : "-"} · 마지막 종가 ${fmt(last?.close)} · rvol≥2 발동 ${fires.length}번`,
+		`${label}: ${bars.length}봉 · KIS ${kisCalls - before}번 · ${Date.now() - t0}ms · ${first ? kstShort(first.t) : "-"} ~ ${last ? `${kstShort(last.t)} (마감 ${kstShort(barCloseAt(c, last.t))})` : "-"} · 마지막 종가 ${fmt(last?.close)} · 조건 발동 ${fires.length}번`,
 	);
 	return bars;
 }
@@ -109,6 +109,8 @@ function compare(label: string, ours: Map<string, { volume: number; close: numbe
 
 // ── 국장 ──
 console.log("\n══ 국장 005930");
+const krx1 = await run("KRX 1분봉 (rvol 10일 예열)", base({ interval: "1m", all: [{ left: { ind: "rvol" }, op: ">=", right: 3 }] }), 4400);
+await run("KRX 1분봉 (다시 — 캐시)", base({ interval: "1m", all: [{ left: { ind: "rvol" }, op: ">=", right: 3 }] }), 4400);
 const krx5 = await run("KRX 5분봉", base({}), 400);
 await run("KRX 5분봉 (다시 — 캐시)", base({}), 400);
 const krx1h = await run("KRX 1시간봉", base({ interval: "1h" }), 40);
@@ -120,6 +122,7 @@ const un5 = await run(
 );
 const dJ = toDomesticBars(await domesticChart(kis, "005930", "D", { market: "J" }));
 const dUN = toDomesticBars(await domesticChart(kis, "005930", "D", { market: "UN" }));
+compare("KRX 1분봉 ↔ KIS 일봉(J)", byDay(krx1, "Asia/Seoul"), dJ);
 compare("KRX 5분봉 ↔ KIS 일봉(J)", byDay(krx5, "Asia/Seoul"), dJ);
 compare("KRX 1시간봉 ↔ KIS 일봉(J)", byDay(krx1h, "Asia/Seoul"), dJ);
 compare("통합 확장 5분봉 ↔ KIS 일봉(UN)", byDay(un5, "Asia/Seoul"), dUN);
@@ -127,12 +130,15 @@ compare("통합 확장 5분봉 ↔ KIS 일봉(UN)", byDay(un5, "Asia/Seoul"), dU
 // ── 미장 ──
 console.log("\n══ 미장 AAPL");
 const us = (over: Partial<Condition>) => base({ market: { venue: "us", symbol: "AAPL", feed: { provider: "kis" } }, ...over });
+const us1 = await run("정규장 1분봉", us({ interval: "1m" }), 1200);
+await run("정규장 1분봉 (다시 — 캐시)", us({ interval: "1m" }), 1200);
 const us5 = await run("정규장 5분봉", us({}), 300);
 await run("정규장 5분봉 (다시 — 캐시)", us({}), 300);
 const us3 = await run("정규장 3분봉", us({ interval: "3m" }), 300);
 const us1h = await run("정규장 1시간봉", us({ interval: "1h" }), 30);
 const usx = await run("확장 5분봉 (04:00–20:00)", us({ session: "extended" }), 600);
 const dUS = toOverseasBars(await overseasChart(kis, "AAPL", "NAS", "D"));
+compare("정규장 1분봉 ↔ KIS 일봉", byDay(us1, "America/New_York"), dUS);
 compare("정규장 5분봉 ↔ KIS 일봉", byDay(us5, "America/New_York"), dUS);
 compare("정규장 3분봉 ↔ KIS 일봉", byDay(us3, "America/New_York"), dUS);
 compare("정규장 1시간봉 ↔ KIS 일봉", byDay(us1h, "America/New_York"), dUS);

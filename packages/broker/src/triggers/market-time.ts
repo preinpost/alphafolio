@@ -282,9 +282,13 @@ export function nextCloseAt(c: Ctx, now: number): number {
 	return zoned(ymd, closeOf(c, ymd), m.tz);
 }
 
-/** 발동이 이만큼 넘게 늦으면 \"늦은 알림\" (재기동으로 놓친 것) */
+/**
+ * 발동이 이만큼 넘게 늦으면 \"늦은 알림\" (재기동으로 놓친 것). 주식 분봉은 최소 2분 —
+ * 첫 조회(예열 이어 받기)나 단일가 대기로 1분봉이 조금 밀려도 늦은 알림으로 찍히지 않게
+ */
 export function lateAfter(c: Pick<Condition, "market" | "interval">): number {
-	if (!isStock(c.market.venue) || isIntraday(c.interval)) return CRYPTO_STEP[c.interval];
+	if (!isStock(c.market.venue)) return CRYPTO_STEP[c.interval];
+	if (isIntraday(c.interval)) return Math.max(CRYPTO_STEP[c.interval], 2 * MIN);
 	return c.interval === "1w" ? 2 * DAY : 12 * HOUR;
 }
 
