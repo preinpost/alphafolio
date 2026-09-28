@@ -62,7 +62,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 		onWatchEvent: (ev) => {
 			void qc.invalidateQueries({ queryKey: ["watch"] });
 			// 상태 변경(일시정지 등)은 목록만 갱신 — 발동·만료·비상 정지만 띄운다
-			if (["fired", "missed", "expired", "stopped"].includes(ev.kind)) setToast(ev);
+			if (["fired", "missed", "expired", "stopped", "ordered", "skipped"].includes(ev.kind)) setToast(ev);
 		},
 		onMissing: () => {
 			lastSession.set(null);

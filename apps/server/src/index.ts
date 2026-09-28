@@ -35,6 +35,13 @@ import {
 	type DataCreds,
 	fetchWatchBars,
 	type Condition,
+	currencyOf,
+	isStock,
+	orderTarget,
+	targetSellable,
+	targetVenue,
+	type OrderTarget,
+	type TriggerSpec,
 } from "@alphafolio/broker";
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
@@ -51,6 +58,8 @@ import { handleAccounts } from "./accounts-api.ts";
 import { attachWebSocket, type WsHub } from "./ws.ts";
 import { TriggerError, TriggerStore } from "./triggers.ts";
 import { Watcher, type WatchEvent } from "./watcher.ts";
+import { OrderRunner } from "./order-runner.ts";
+import { TradeStore } from "./trade-store.ts";
 import { TelegramBots } from "./notify/telegram-bot.ts";
 import { handleWatch, watchConfirmSecret, WatchOps, type WatchTokenPayload } from "./watch-api.ts";
 import { createSafeFetch } from "@alphafolio/mcp";
@@ -162,12 +171,45 @@ async function main(): Promise<void> {
 		});
 		return opts.channels === false ? [] : notifier.notify(ev.user, ev.message);
 	};
+	// 자동 매매 (PLAN §40 2단계) — 주문 트리거의 신호를 자체 체결기로. 증권사 조건주문은 쓰지 않는다
+	const tradeStore = new TradeStore(ledgerConfig);
+	const autoTradeOff = (): string | null => (process.env.AF_AUTO_TRADE_DISABLED === "1" ? "서버에서 자동 매매를 껐습니다 (AF_AUTO_TRADE_DISABLED=1)" : null);
+	let orderRunner: OrderRunner | undefined;
+	/** 주문 트리거를 켜도 되는가 — 켜기·다시 켜기 때 (신호 때는 실행기가 다시 본다) */
+	const tradeArmProblem = async (user: string, spec: TriggerSpec): Promise<string | null> => {
+		if (spec.action.kind !== "order") return null;
+		const off = autoTradeOff();
+		if (off) return off;
+		const venue = spec.condition.market.venue;
+		if (!isStock(venue)) return "코인 자동 매매는 아직 없습니다";
+		// 보호 트리거는 횟수가 아니라 남은 수량으로 끝난다
+		if (spec.limits.maxFires === null && !spec.action.position) return "자동 매매 감시는 최대 횟수가 필요합니다";
+		if (spec.action.position && spec.action.order.side !== "SELL") return "보호는 매도만 합니다";
+		try {
+			const now = await orderTarget(brokerAccess(user), spec.action.target.broker);
+			if (now.account !== spec.action.target.account) return `주문 계좌가 준비 때(${spec.action.target.accountLabel})와 다릅니다 — 다시 준비해 주세요`;
+		} catch (err) {
+			return err instanceof Error ? err.message : String(err);
+		}
+		if (spec.action.order.side === "BUY") {
+			const cur = currencyOf(venue);
+			if (!(await tradeStore.limits(user))[cur]) return `하루 매수 한도(${cur})를 먼저 정해 주세요 — 설정 → 감시 → 자동 매매 한도. 정한 뒤 같은 카드에서 다시 켜면 됩니다`;
+		}
+		return null;
+	};
 	const watchOps: WatchOps = new WatchOps({
 		store: triggerStore,
 		confirm: { secret: watchConfirmSecret(cfg.auth.secret), guard: new OrderTokenGuard<WatchTokenPayload>() },
 		deliver: deliverWatch,
 		channels: (user) => notifier.channels(user),
 		commandStatus: (user) => telegramBots.status(user),
+		trading: {
+			armProblem: tradeArmProblem,
+			stop: (user) => orderRunner?.stop(user),
+			limits: (user) => tradeStore.limits(user),
+			setLimit: (user, currency, v) => tradeStore.setLimit(user, currency, v),
+			recent: (user) => tradeStore.recent(user),
+		},
 	});
 	// 텔레그램에서 감시 보기·멈추기·지우기 — 사용자 봇마다 롱 폴링 (PLAN §40)
 	const telegramBots: TelegramBots = new TelegramBots({
@@ -346,6 +388,28 @@ async function main(): Promise<void> {
 			pauseWatch: (id) => agentOp(() => watchOps.pause(user, id, "agent")),
 			channels: () => notifier.channels(user),
 			fetchBars: (c, limit, at) => watchBars(user, c, limit, at),
+			// 자동 매매 — 주문 계좌(키가 있는 곳)·하루 한도·서버 설정
+			orderTargets: async () => {
+				const out: OrderTarget[] = [];
+				for (const b of ["kis", "toss"] as const) {
+					try {
+						out.push(await orderTarget(brokerAccess(user), b));
+					} catch {
+						/* 키·계좌 없음 */
+					}
+				}
+				return out;
+			},
+			tradeLimits: () => tradeStore.limits(user),
+			// 보유 종목 보호 — 매도 가능 수량(그 계좌) + 평단(잔고)
+			position: async (symbol, target) => {
+				const a = brokerAccess(user);
+				const sellable = await targetSellable(a, target, symbol);
+				const pf = await fetchPortfolio(a).catch(() => null);
+				const h = pf?.holdings.find((x) => x.symbol.toUpperCase() === symbol.toUpperCase() && x.broker === target.broker);
+				return { sellable, avgPrice: h && h.avgPrice > 0 ? h.avgPrice : null };
+			},
+			autoTradeOff,
 			// 주식 출처 기본값 — 키가 있는 곳 (만들 수 있으면 있다)
 			feeds: () => {
 				const has = (make: (() => unknown) | undefined): boolean => {
@@ -383,7 +447,22 @@ async function main(): Promise<void> {
 
 	// 주식 봉은 트리거 주인의 증권 키로 (코인은 공개 시세)
 	const watchBars = (user: string, c: Condition, limit: number, at: number) => fetchWatchBars(c, limit, { now: at, access: brokerAccess(user) });
-	const watcher = new Watcher({ store: triggerStore, deliver: (ev) => deliverWatch(ev), isActive: (u) => accounts.has(u), fetchBars: watchBars });
+	orderRunner = new OrderRunner({
+		store: triggerStore,
+		trades: tradeStore,
+		venue: (user, target, symbol) => targetVenue(brokerAccess(user), target, symbol),
+		sellable: (user, target, symbol) => targetSellable(brokerAccess(user), target, symbol),
+		deliver: (ev) => deliverWatch(ev),
+		disabled: autoTradeOff,
+	});
+	const runner = orderRunner;
+	const watcher = new Watcher({
+		store: triggerStore,
+		deliver: (ev) => deliverWatch(ev),
+		isActive: (u) => accounts.has(u),
+		fetchBars: watchBars,
+		onOrder: (t, bar, closeAt) => void runner.submit({ trigger: t, bar, closeAt }),
+	});
 
 	const loginLimiter = new LoginRateLimiter(cfg.login);
 	// 초대 코드 추측 방지 — 로그인과 따로 센다 (가입 실패가 로그인을 막지 않게)
@@ -799,8 +878,14 @@ async function main(): Promise<void> {
 		// 감시 — 저장소가 적재됐을 때만 (D1 미설정이면 켤 트리거도 없다)
 		if (process.env.AF_WATCH_DISABLED === "1") console.log("  감시 비활성 (AF_WATCH_DISABLED=1)");
 		else if (triggerStore.ready) {
-			watcher.start();
+			// 끝나지 못한 자동 매매부터 정리한 뒤 감시를 시작한다 (새 주문은 내지 않는다 — 걸린 주문 취소·결과 모름 알림)
+			void runner
+				.recover()
+				.then((n) => n > 0 && console.log(`  자동 매매 복구: 끝나지 못한 신호 ${n}건 정리`))
+				.catch((err: unknown) => console.warn("[trade] 기동 복구 실패:", err instanceof Error ? err.message : err))
+				.finally(() => watcher.start());
 			telegramBots.start();
+			if (autoTradeOff()) console.log("  자동 매매 비활성 (AF_AUTO_TRADE_DISABLED=1) — 주문 트리거는 알림만");
 		}
 	});
 

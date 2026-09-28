@@ -13,6 +13,7 @@ import type { TriggerSpec } from "@alphafolio/broker";
 import type { WatchSummary } from "@alphafolio/broker/watch-tools";
 import { HttpError, readJson } from "./ledger-api.ts";
 import { createOrderToken, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
+import type { Currency, ExecRecord } from "./trade-store.ts";
 import { toSummary, TriggerError, type TriggerRecord, type TriggerStore } from "./triggers.ts";
 import type { WatchEvent } from "./watcher.ts";
 
@@ -42,6 +43,16 @@ export interface WatchOpsDeps {
 	channels: (user: string) => string[];
 	/** 텔레그램 명령 수신 상태 (설정 화면 표시용) */
 	commandStatus?: (user: string) => { listening: boolean; problem: string | null };
+	/** 자동 매매 (PLAN §40 2단계) — 없으면 주문 트리거를 켤 수 없다 */
+	trading?: {
+		/** 주문 트리거를 켜도 되는가 — 안 되면 이유 (자동 매매 꺼짐·한도 없음·키 없음) */
+		armProblem: (user: string, spec: TriggerSpec) => Promise<string | null>;
+		/** 비상 정지 — 진행 중인 체결을 멈춘다 */
+		stop: (user: string) => void;
+		limits: (user: string) => Promise<Record<Currency, number | null>>;
+		setLimit: (user: string, currency: Currency, dailyBuy: number | null) => Promise<void>;
+		recent: (user: string) => Promise<ExecRecord[]>;
+	};
 	now?: () => number;
 }
 
@@ -88,6 +99,8 @@ export class WatchOps {
 	async arm(user: string, token: string): Promise<WatchSummary> {
 		const v = this.d.confirm.guard.verify(token, this.d.confirm.secret, user, this.now());
 		if (!v.ok) throw new HttpError(400, failure(v.reason));
+		// 주문 트리거는 켜기 전에 한 번 더 — 소비 전이라 한도를 정하고 같은 카드로 다시 누를 수 있다
+		await this.checkOrder(user, v.payload.watch);
 		// 저장 전에 소비 — 더블클릭으로 두 개가 켜지지 않게 (실패해도 재사용 없음, 다시 준비하면 된다)
 		this.d.confirm.guard.consume(v.payload.nonce, this.now(), WATCH_TOKEN_TTL_MS);
 		const rec = await this.d.store.create(user, v.payload.watch);
@@ -104,6 +117,8 @@ export class WatchOps {
 
 	async resume(user: string, id: string, by: Actor): Promise<WatchSummary> {
 		if (by !== "app") throw new TriggerError(403, "다시 켜기는 앱 화면에서만 할 수 있습니다");
+		const cur = this.d.store.get(user, id);
+		if (cur) await this.checkOrder(user, { name: cur.name, condition: cur.source.condition, action: cur.action, limits: { maxFires: cur.maxFires, cooldownSec: cur.cooldownSec, expiresAt: cur.expiresAt }, conversationId: cur.conversationId });
 		const rec = await this.d.store.resume(user, id);
 		await this.log(rec, "resumed", by, "다시 켰습니다");
 		return this.summary(rec);
@@ -118,15 +133,33 @@ export class WatchOps {
 
 	async stopAll(user: string, by: Actor): Promise<number> {
 		if (by === "agent") throw new TriggerError(403, "비상 정지는 사용자가 앱·텔레그램에서 합니다");
+		// 진행 중인 체결부터 — 걸린 주문을 취소하고 새로 내지 않는다
+		this.d.trading?.stop(user);
 		const n = await this.d.store.stopAll(user);
 		const at = this.now();
 		await this.d.store.addEvent({ triggerId: "*", member: user, at, kind: "stopped", barT: null, detail: { name: "전체", count: n, by }, notified: null });
 		await this.d.deliver(
-			{ user, triggerId: "*", name: "전체", kind: "stopped", at, message: { level: "important", title: "감시 비상 정지", lines: [`켜져 있던 감시 ${n}개를 일시정지했습니다 (${ACTOR_LABEL[by]}).`], path: "/settings/watch" } },
+			{ user, triggerId: "*", name: "전체", kind: "stopped", at, message: { level: "important", title: "감시 비상 정지", lines: [`켜져 있던 감시 ${n}개를 일시정지했습니다 (${ACTOR_LABEL[by]}).`, ...(this.d.trading ? ["진행 중이던 자동 매매는 걸린 주문을 취소하고 멈췄습니다."] : [])], path: "/settings/watch" } },
 			{ channels: by !== "telegram" },
 		);
 		console.log(`[watch] 비상 정지 user=${user} ${n}개 by=${by}`);
 		return n;
+	}
+
+	private async checkOrder(user: string, spec: TriggerSpec): Promise<void> {
+		if (spec.action.kind !== "order") return;
+		if (!this.d.trading) throw new TriggerError(400, "이 서버에서는 자동 매매를 켤 수 없습니다");
+		const problem = await this.d.trading.armProblem(user, spec);
+		if (problem) throw new TriggerError(400, problem);
+	}
+
+	/** 하루 매수 한도 — 앱 화면에서만 (자동 매매를 허용하는 쪽이라) */
+	async setLimit(user: string, currency: Currency, dailyBuy: number | null): Promise<Record<Currency, number | null>> {
+		if (!this.d.trading) throw new TriggerError(400, "이 서버에서는 자동 매매를 쓸 수 없습니다");
+		if (dailyBuy !== null && !(Number.isFinite(dailyBuy) && dailyBuy > 0)) throw new TriggerError(400, "한도는 0보다 큰 숫자입니다 (지우려면 비워 두기)");
+		await this.d.trading.setLimit(user, currency, dailyBuy);
+		console.log(`[trade] 하루 매수 한도 user=${user} ${currency} ${dailyBuy ?? "없음"}`);
+		return this.d.trading.limits(user);
 	}
 
 	private async log(rec: TriggerRecord, kind: "armed" | "paused" | "resumed" | "removed", by: Actor, text: string): Promise<void> {
@@ -149,8 +182,30 @@ export class WatchOps {
 			channels: this.d.channels(user),
 			telegram: this.d.commandStatus?.(user) ?? { listening: false, problem: null },
 			storageReady: this.d.store.ready,
+			trading: this.d.trading && this.d.store.ready ? { limits: await this.d.trading.limits(user), execs: (await this.d.trading.recent(user)).map(execView) } : null,
 		};
 	}
+}
+
+/** 화면용 — 자식 주문 id·계좌 지문은 빼고 */
+function execView(e: ExecRecord) {
+	return {
+		id: e.id,
+		triggerId: e.triggerId,
+		symbol: e.symbol,
+		side: e.side,
+		currency: e.currency,
+		state: e.state,
+		quantity: e.plan.quantity,
+		worstPrice: e.plan.worstPrice,
+		filledQty: e.filledQty,
+		avgPrice: e.report?.avgPrice ?? null,
+		slippageBps: e.report?.slippageBps ?? null,
+		reason: e.report?.reason ?? null,
+		account: e.plan.target.accountLabel,
+		orders: e.children.length,
+		at: e.createdAt,
+	};
 }
 
 function asHttp(err: unknown): never {
@@ -168,6 +223,13 @@ export async function handleWatch(req: IncomingMessage, path: string, user: stri
 			return { ok: true, watch: await ops.arm(user, String(body.token ?? "")) };
 		}
 		if (path === "/api/watch/stop-all" && req.method === "POST") return { stopped: await ops.stopAll(user, "app") };
+		if (path === "/api/watch/limits" && req.method === "PUT") {
+			const body = await readJson(req);
+			const currency = body.currency === "USD" ? "USD" : body.currency === "KRW" ? "KRW" : null;
+			if (!currency) throw new HttpError(400, "currency 는 KRW 또는 USD");
+			const v = body.dailyBuy === null || body.dailyBuy === "" || body.dailyBuy === undefined ? null : Number(body.dailyBuy);
+			return { limits: await ops.setLimit(user, currency, v) };
+		}
 		const m = /^\/api\/watch\/(w[0-9a-f]{8})(\/pause|\/resume)?$/.exec(path);
 		if (!m) return undefined;
 		const id = m[1] as string;

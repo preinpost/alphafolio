@@ -99,8 +99,11 @@ export interface Condition {
 	preset?: { id: string; params: Record<string, number | string> };
 	/** N봉 연속 충족해야 발동 (기본 1) */
 	confirmBars: number;
-	/** 거짓 → 참이 될 때만 (조건이 유지되는 동안 매 봉 울리지 않는다) */
-	fire: "on_enter";
+	/**
+	 * on_enter = 거짓 → 참이 될 때만 (조건이 유지되는 동안 매 봉 울리지 않는다).
+	 * while_true = 참인 봉마다 — **보호(손절·익절) 트리거 전용**: 못 판 잔량을 다음 봉에도 조건이 참이면 다시 판다
+	 */
+	fire: "on_enter" | "while_true";
 }
 
 export interface TriggerLimits {
@@ -112,7 +115,65 @@ export interface TriggerLimits {
 	expiresAt: string;
 }
 
-export type TriggerAction = { kind: "notify" };
+/**
+ * 주문 대상 — 켤 때 고정하고 실행할 때 다시 확인한다 (키를 바꿨거나 계좌가 달라졌으면 주문하지 않는다).
+ * account: 토스 = accountSeq, KIS = 계좌번호 지문(해시 앞 12자리 — 계좌번호를 트리거에 남기지 않는다)
+ */
+export interface OrderTarget {
+	broker: "kis" | "toss";
+	account: string;
+	/** 표시용 ("한국투자 ****-01") */
+	accountLabel: string;
+}
+
+/** 수량 — 정수 주 · 금액(시장 통화, 최악 허용가로 나눠 내림 — 이 금액을 넘지 않는다) · 매도 가능 수량의 % (매도만) */
+export type OrderSize = { shares: number } | { amount: number } | { holdingPct: number };
+
+export interface OrderRule {
+	side: "BUY" | "SELL";
+	size: OrderSize;
+	/** 신호 때 기준가(중간가) 대비 최악 허용가 % — 매수는 위로, 매도는 아래로 */
+	worstPct: number;
+	urgency: "immediate" | "patient";
+	/** 체결 제한 시간 (초) */
+	deadlineSec: number;
+}
+
+/** 보호 가격 — 평단 대비 % (손절은 아래, 익절은 위) 또는 고정가 */
+export type ProtectLevel = { pct: number } | { price: number };
+
+/** 매수 체결 뒤 자동으로 걸 손절·익절 (연계주문, PLAN §40 2-C). 둘 중 하나는 있어야 한다 */
+export interface ProtectRule {
+	stop?: ProtectLevel;
+	take?: ProtectLevel;
+	/** 판정 봉 — 기본 1분봉 */
+	interval: Interval;
+}
+
+/**
+ * 보호 트리거가 지키는 포지션 — 손절·익절이 **한 트리거**라 하나가 팔면 다른 쪽도 끝난다 (OCO 를 우리 쪽에서).
+ * shares 는 남은 수량 — 팔 때마다 줄고, 0 이 되면 트리거가 끝난다.
+ */
+export interface Position {
+	shares: number;
+	avgPrice: number;
+	stopPrice: number | null;
+	takePrice: number | null;
+	/** 매수 트리거가 만들었으면 그 id (보유 종목 보호면 null) */
+	parentId: string | null;
+}
+
+export type TriggerAction =
+	| { kind: "notify" }
+	| {
+			kind: "order";
+			target: OrderTarget;
+			order: OrderRule;
+			/** 매수 체결 뒤 보호를 건다 (매수만) */
+			protect?: ProtectRule;
+			/** 보호 트리거 — 이 포지션을 판다 (매도만, fire = while_true) */
+			position?: Position;
+	  };
 
 /** 켜기 전 사람이 확인하는 내용 전부 — 확인 토큰에 이대로 서명된다 */
 export interface TriggerSpec {

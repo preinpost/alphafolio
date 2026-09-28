@@ -125,6 +125,8 @@ export interface WatchItem {
 	id: string;
 	name: string;
 	text: string;
+	/** 자동 매매면 동작 한 줄 ("매수 5,000,000원어치 · 한국투자 ****78-01 · …") */
+	order: string | null;
 	state: "armed" | "paused" | "done" | "expired" | "off";
 	fires: number;
 	maxFires: number | null;
@@ -143,7 +145,39 @@ export interface WatchEventItem {
 	at: number;
 	kind: string;
 	barT: number | null;
-	detail: { name?: string; values?: Record<string, number>; missed?: number; by?: string; count?: number };
+	detail: {
+		name?: string;
+		values?: Record<string, number>;
+		missed?: number;
+		by?: string;
+		count?: number;
+		reason?: string | null;
+		// 자동 매매 결과 (kind "ordered")
+		side?: "BUY" | "SELL";
+		status?: "filled" | "partial" | "none" | "unknown";
+		quantity?: number;
+		filledQty?: number;
+		avgPrice?: number | null;
+	};
+}
+
+/** 자동 매매 한 번 (신호 하나) — 서버 execView */
+export interface TradeExecItem {
+	id: string;
+	triggerId: string;
+	symbol: string;
+	side: "BUY" | "SELL";
+	currency: "KRW" | "USD";
+	state: "running" | "filled" | "partial" | "none" | "unknown";
+	quantity: number;
+	worstPrice: number;
+	filledQty: number;
+	avgPrice: number | null;
+	slippageBps: number | null;
+	reason: string | null;
+	account: string;
+	orders: number;
+	at: number;
 }
 
 export interface WatchView {
@@ -152,6 +186,8 @@ export interface WatchView {
 	channels: string[];
 	telegram: { listening: boolean; problem: string | null };
 	storageReady: boolean;
+	/** 자동 매매 — 서버가 지원하지 않으면 null */
+	trading: { limits: { KRW: number | null; USD: number | null }; execs: TradeExecItem[] } | null;
 }
 
 export const api = {
@@ -235,6 +271,8 @@ export const api = {
 	resumeWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}/resume`, { method: "POST" }),
 	deleteWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}`, { method: "DELETE" }),
 	stopAllWatches: () => request<{ stopped: number }>("/api/watch/stop-all", { method: "POST" }),
+	setTradeLimit: (currency: "KRW" | "USD", dailyBuy: number | null) =>
+		request<{ limits: { KRW: number | null; USD: number | null } }>("/api/watch/limits", { method: "PUT", body: JSON.stringify({ currency, dailyBuy }) }),
 
 	// ── 원격 MCP 서버 (설정 화면 전용 — 에이전트는 추가·연결할 수 없다) ───────
 	mcpServers: () => request<McpListing>("/api/mcp/servers"),

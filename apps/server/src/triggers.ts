@@ -6,7 +6,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { d1Query, ulid, type D1Config } from "@alphafolio/ledger";
-import { conditionText, evalDelay, lastClosedStart, nextCloseAt, type Condition, type TriggerAction, type TriggerSpec, type TriggerState } from "@alphafolio/broker";
+import { conditionText, evalDelay, isStock, lastClosedStart, nextCloseAt, orderText, type Condition, type TriggerAction, type TriggerSpec, type TriggerState } from "@alphafolio/broker";
 import type { WatchSummary } from "@alphafolio/broker/watch-tools";
 
 export const MAX_ACTIVE_PER_USER = 20;
@@ -31,7 +31,8 @@ export interface TriggerRecord {
 	updatedAt: string;
 }
 
-export type TriggerEventKind = "armed" | "fired" | "missed" | "expired" | "done" | "error" | "paused" | "resumed" | "removed" | "stopped";
+/** ordered = 자동 매매 결과(체결·미체결·결과 모름), skipped = 조건은 맞았지만 주문하지 않음(장 밖·한도·잔고) */
+export type TriggerEventKind = "armed" | "fired" | "missed" | "expired" | "done" | "error" | "paused" | "resumed" | "removed" | "stopped" | "ordered" | "skipped";
 
 export interface TriggerEvent {
 	id: string;
@@ -109,6 +110,7 @@ export function toSummary(rec: TriggerRecord, now: number): WatchSummary {
 		id: rec.id,
 		name: rec.name,
 		text: conditionText(rec.source.condition),
+		order: rec.action.kind === "order" && isStock(rec.source.condition.market.venue) ? orderText(rec.action, rec.source.condition.market.venue) : null,
 		state: rec.state,
 		fires: rec.fires,
 		maxFires: rec.maxFires,
@@ -252,6 +254,16 @@ export class TriggerStore {
 		const armed = this.list(user).filter((t) => t.state === "armed");
 		for (const t of armed) await this.update(t, { state: "paused" });
 		return armed.length;
+	}
+
+	/** 보호 트리거의 남은 수량 — 주문 실행기가 판 만큼 줄인다 */
+	async setAction(id: string, action: TriggerAction): Promise<TriggerRecord | undefined> {
+		const rec = this.cache.get(id);
+		if (!rec) return undefined;
+		const next = { ...rec, action, updatedAt: new Date(this.now()).toISOString() };
+		await d1Query(this.d1(), "UPDATE triggers SET action = ?, updated_at = ? WHERE id = ?", [JSON.stringify(action), next.updatedAt, id]);
+		this.cache.set(id, next);
+		return next;
 	}
 
 	/** 감시기 전용 — 상태·평가 결과 반영 */

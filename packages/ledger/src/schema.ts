@@ -243,6 +243,46 @@ CREATE TABLE IF NOT EXISTS trigger_events (
 CREATE INDEX IF NOT EXISTS idx_trigger_events_member ON trigger_events(member, at);
 `.trim(),
 	},
+	{
+		// 자동 매매 (PLAN §40 2단계). trigger_execs: 신호 하나 = 한 줄. (trigger_id, bar_t) 유니크 — 같은 봉으로 두 번 주문하지 않는다.
+		// children 은 체결기의 자식 주문 전부(JSON) — **보내기 전에** 기록된다. state 가 running 인 채로 남아 있으면 기동 복구가 본다.
+		// amount = 체결 금액 (하루 매수 한도 합산), day = 시장 현지 날짜.
+		// trade_limits: 사용자·통화별 하루 매수 한도 — 없으면 매수 트리거를 켤 수 없다.
+		id: "0010_trigger_execs",
+		sql: `
+CREATE TABLE IF NOT EXISTS trigger_execs (
+  id          TEXT PRIMARY KEY,
+  trigger_id  TEXT NOT NULL,
+  member      TEXT NOT NULL,
+  bar_t       INTEGER NOT NULL,
+  broker      TEXT NOT NULL,
+  symbol      TEXT NOT NULL,
+  side        TEXT NOT NULL,
+  currency    TEXT NOT NULL,
+  day         TEXT NOT NULL,
+  state       TEXT NOT NULL,
+  intent      TEXT NOT NULL,
+  children    TEXT NOT NULL,
+  report      TEXT,
+  filled_qty  INTEGER NOT NULL DEFAULT 0,
+  amount      REAL NOT NULL DEFAULT 0,
+  reserved    REAL NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  UNIQUE (trigger_id, bar_t)
+);
+CREATE INDEX IF NOT EXISTS idx_trigger_execs_member ON trigger_execs(member, day);
+CREATE INDEX IF NOT EXISTS idx_trigger_execs_state ON trigger_execs(state);
+
+CREATE TABLE IF NOT EXISTS trade_limits (
+  member      TEXT NOT NULL,
+  currency    TEXT NOT NULL,
+  daily_buy   REAL NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (member, currency)
+);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

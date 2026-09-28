@@ -417,6 +417,26 @@ export interface WatchConfirmCard {
 	preview: { days: number; count: number; recent: Array<{ at: number; close: number }> };
 	channels: string[];
 	warnings: string[];
+	/** 자동 매매 (PLAN §40 2단계) — 켜면 조건이 맞을 때 확인 없이 주문이 나간다. 알림만이면 null */
+	order?: WatchOrderView | null;
+}
+
+export interface WatchOrderView {
+	side: "BUY" | "SELL";
+	/** "한국투자 ****01-01" */
+	account: string;
+	/** "5,000,000원어치" · "10주" · "매도 가능 수량의 50%" */
+	size: string;
+	/** "마지막 종가 기준 약 69주" — 모르면 null */
+	estimate: string | null;
+	/** "신호 때 중간가 +1% 까지" */
+	worst: string;
+	/** "60초 동안 기다리며 한 호가씩, 남으면 취소" */
+	how: string;
+	/** "1,000만원 (오늘 남은 1,000만원)" — 매도는 null */
+	dailyLimit: string | null;
+	/** 연계주문 — 매수면 "체결 후 자동: 손절 평단 −5% · 익절 +10% (1분봉 종가)", 보유 종목 보호면 손절·익절 가격 */
+	protect?: string | null;
 }
 
 export type UICard =

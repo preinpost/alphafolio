@@ -1,5 +1,5 @@
 /**
- * 주문 변경·조건주문 툴 — order_change (정정·취소), order_conditional (토스 조건주문) (PLAN §34).
+ * 주문 변경·조건주문 툴 — order_change (정정·취소), order_conditional (토스 조건주문 **취소만**, PLAN §40 2단계) (PLAN §34).
  *
  * order_prepare 와 같은 원칙: **준비만** 한다. 서명된 확인 토큰이 담긴 카드를 띄우고, 사람이 [확인] 을 눌러야
  * 서버(execute.ts)가 실행한다.
@@ -13,11 +13,11 @@ import type { CancelAction, ConditionalLeg, ConditionalSpec, ModifyAction, Order
 import { kisOpenOrders, kisSellable, type KisOpenOrder } from "./kis/orders.ts";
 import type { KisContext } from "./kis/client.ts";
 import { isOnTick, marketOf, roundToTick, validateOrder, type OrderSide, type OrderType } from "./orders.ts";
-import { fetchPortfolio, type BrokerAccess } from "./portfolio.ts";
+import type { BrokerAccess } from "./portfolio.ts";
 import { fetchQuote } from "./quote.ts";
-import { defaultAccountSeq, tossBuyingPower } from "./toss/api.ts";
+import { defaultAccountSeq } from "./toss/api.ts";
 import type { TossContext } from "./toss/client.ts";
-import { getConditionalOrder, listOrders, sellableQuantity, type TossOrder } from "./toss/orders.ts";
+import { getConditionalOrder, listOrders, type TossOrder } from "./toss/orders.ts";
 import { createBinanceOrderTool } from "./binance/order-tool.ts";
 
 // ── details 계약 — UI 렌더러가 이 모양에 의존한다 (protocol/src/orders.ts 와 같은 모양) ──
@@ -224,12 +224,6 @@ export function validateConditional(
 
 // ── 툴 ──────────────────────────────────────────────────────
 
-const Leg = Type.Object({
-	side: Type.Union([Type.Literal("BUY"), Type.Literal("SELL")]),
-	triggerPrice: Type.Number({ description: "감시가 — 현재가가 여기 닿으면 주문을 낸다" }),
-	orderPrice: Type.Optional(Type.Number({ description: "지정가 주문가 (orderType=LIMIT 일 때 필수)" })),
-});
-
 export function createOrderTools(deps: OrderToolDeps) {
 	const orderChange = defineTool({
 		name: "order_change",
@@ -339,113 +333,40 @@ export function createOrderTools(deps: OrderToolDeps) {
 		},
 	});
 
+	/**
+	 * 토스 조건주문 — **취소만** (PLAN §40 2단계 결정). 새로 만들기·수정은 에이전트 툴에서 뺐다:
+	 * 주문은 자체 감시 + 자체 체결기 한 길로만 (watch_alert order). 증권사 조건주문은 가격이 한 번만 닿아도 발동해 꼬리에 걸리고,
+	 * 무엇이 걸려 있는지 한 곳에서 보이지 않는다. 이미 걸린 것을 정리하는 취소만 남긴다.
+	 */
 	const orderConditional = defineTool({
 		name: "order_conditional",
-		label: "조건주문 준비",
+		label: "조건주문 취소 준비",
 		description:
-			"토스증권 **조건주문**(감시가 도달 시 자동 주문)의 등록·수정·취소를 준비한다. 실행하지 않는다 — 확인 카드에서 사용자가 [확인] 해야 등록된다. " +
-			"type: SINGLE(한 조건) / OCO(익절·손절 — 두 조건 모두 매도, 익절 감시가 > 현재가 > 손절 감시가, 지정가만) / " +
-			"OTO(first 매수 체결 뒤 second 매도 감시, 지정가만). 지정가면 각 조건에 orderPrice 필수. " +
-			"만료일은 YYYY-MM-DD 또는 'today+30'. 국내는 정규장에서만 발동된다. " +
-			"수정은 기존 조건주문을 취소하고 새로 만들어 번호가 바뀐다. 사용자가 명시적으로 요청했을 때만 호출한다.",
+			"이미 걸려 있는 토스증권 조건주문의 **취소만** 준비한다 (확인 카드에서 사용자가 [확인] 해야 취소된다). " +
+			"새 조건주문·수정은 하지 않는다 — 자동 매매·손절·익절·OCO·OTO 는 watch_alert(order / action: protect)로 준비한다. " +
+			"conditionalOrderId 는 toss_query getConditionalOrders 로 확인. 사용자가 명시적으로 요청했을 때만 호출한다.",
 		parameters: Type.Object({
-			action: Type.Union([Type.Literal("create"), Type.Literal("modify"), Type.Literal("cancel")]),
-			conditionalOrderId: Type.Optional(Type.String({ description: "modify·cancel 대상 (toss_query getConditionalOrders 로 확인)" })),
-			symbol: Type.Optional(Type.String({ description: "create 필수 — 종목 코드·티커" })),
-			type: Type.Optional(Type.Union([Type.Literal("SINGLE"), Type.Literal("OCO"), Type.Literal("OTO")])),
-			quantity: Type.Optional(Type.Number()),
-			orderType: Type.Optional(Type.Union([Type.Literal("LIMIT"), Type.Literal("MARKET")])),
-			expireDate: Type.Optional(Type.String({ description: "YYYY-MM-DD 또는 today+N" })),
-			first: Type.Optional(Leg),
-			second: Type.Optional(Leg),
+			action: Type.Literal("cancel"),
+			conditionalOrderId: Type.String({ description: "취소 대상 (toss_query getConditionalOrders 로 확인)" }),
 		}),
 		execute: async (_id, params) => {
 			if (!deps.prepareOrder) throw new Error("주문 기능이 비활성 상태입니다.");
 			const toss = connected(deps.brokers.toss);
 			if (!toss) throw new Error("조건주문은 토스증권 연결이 필요합니다.");
 			const seq = await defaultAccountSeq(toss);
-
-			if (params.action === "cancel") {
-				if (!params.conditionalOrderId) throw new Error("취소할 conditionalOrderId 가 필요합니다 (toss_query getConditionalOrders).");
-				const existing = await getConditionalOrder(toss, seq, params.conditionalOrderId);
-				const { token, expiresAt } = deps.prepareOrder({ kind: "conditional-cancel", broker: "toss", symbol: existing.symbol, conditionalOrderId: params.conditionalOrderId });
-				const market = marketOf(existing.symbol);
-				const card: ConditionalOrderCard = {
-					kind: "conditional-order-card", ok: true, token, expiresAt, broker: "toss", action: "cancel",
-					symbol: existing.symbol, name: existing.symbol, currency: market === "KR" ? "KRW" : "USD",
-					conditionalOrderId: params.conditionalOrderId, type: (existing.type as ConditionalOrderCard["type"]) ?? "SINGLE",
-					quantity: Number(existing.quantity), orderType: (existing.orderType as OrderType) ?? "LIMIT", expireDate: existing.expireDate,
-					first: legView(existing.first), second: existing.second ? legView(existing.second) : null,
-					currentPrice: null, avgPrice: null, warnings: [], errors: [],
-				};
-				return { content: [{ type: "text" as const, text: `조건주문 취소 확인이 필요합니다 — ${existing.symbol} ${existing.type}. 화면의 확인 버튼을 눌러야 취소됩니다 (2분 내).` }], details: card };
-			}
-
-			let symbol = params.symbol?.trim().toUpperCase();
-			if (params.action === "modify") {
-				if (!params.conditionalOrderId) throw new Error("수정할 conditionalOrderId 가 필요합니다.");
-				const existing = await getConditionalOrder(toss, seq, params.conditionalOrderId);
-				symbol = existing.symbol;
-			}
-			if (!symbol) throw new Error("symbol 이 필요합니다.");
-			if (!params.type || !params.quantity || !params.orderType || !params.expireDate || !params.first) {
-				throw new Error("type·quantity·orderType·expireDate·first 가 모두 필요합니다 (OCO·OTO 는 second 도).");
-			}
-			const market = marketOf(symbol);
-			const quote = await fetchQuote(deps.brokers, symbol);
-			const draft: ConditionalSpec = {
-				symbol, market, currency: quote.currency, type: params.type, quantity: params.quantity, orderType: params.orderType,
-				expireDate: resolveExpireDate(params.expireDate), first: params.first as ConditionalLeg,
-				...(params.second ? { second: params.second as ConditionalLeg } : {}),
-			};
-			const v = validateConditional(draft, quote.price);
-			const errors = [...v.errors];
-			const warnings = [...v.warnings];
-
-			// 잔고 — 매도 조건은 매도 가능 수량, 매수 조건은 매수 가능 금액 (조회 실패는 경고만)
-			const sells = [v.spec.first, v.spec.second].filter((l): l is ConditionalLeg => !!l && l.side === "SELL");
-			if (sells.length > 0 && v.spec.type !== "OTO") {
-				const s = Number((await sellableQuantity(toss, seq, symbol).catch(() => null))?.sellableQuantity);
-				if (Number.isFinite(s) && v.spec.quantity > s) errors.push(`매도 가능 수량(${s})보다 많습니다.`);
-			}
-			if (v.spec.first.side === "BUY") {
-				const bp = Number((await tossBuyingPower(toss, seq, quote.currency).catch(() => null))?.cashBuyingPower);
-				const need = (v.spec.first.orderPrice ?? v.spec.first.triggerPrice) * v.spec.quantity;
-				if (Number.isFinite(bp) && need > bp) warnings.push(`지금 매수 가능 금액(${money(bp, quote.currency)})이 필요 금액(${money(need, quote.currency)})보다 적습니다 — 발동 시점에 부족하면 주문이 거절됩니다.`);
-			}
-			const pf = await fetchPortfolio(deps.brokers).catch(() => null);
-			const holding = pf?.holdings.find((h) => h.symbol === symbol && h.broker === "toss");
-
+			if (!params.conditionalOrderId) throw new Error("취소할 conditionalOrderId 가 필요합니다 (toss_query getConditionalOrders).");
+			const existing = await getConditionalOrder(toss, seq, params.conditionalOrderId);
+			const { token, expiresAt } = deps.prepareOrder({ kind: "conditional-cancel", broker: "toss", symbol: existing.symbol, conditionalOrderId: params.conditionalOrderId });
+			const market = marketOf(existing.symbol);
 			const card: ConditionalOrderCard = {
-				kind: "conditional-order-card", ok: errors.length === 0, token: null, expiresAt: null, broker: "toss", action: params.action,
-				symbol, name: quote.name, currency: quote.currency, conditionalOrderId: params.conditionalOrderId ?? null,
-				type: v.spec.type, quantity: v.spec.quantity, orderType: v.spec.orderType, expireDate: v.spec.expireDate,
-				first: legView(v.spec.first), second: v.spec.second ? legView(v.spec.second) : null,
-				currentPrice: quote.price, avgPrice: holding?.avgPrice ?? null, warnings, errors,
+				kind: "conditional-order-card", ok: true, token, expiresAt, broker: "toss", action: "cancel",
+				symbol: existing.symbol, name: existing.symbol, currency: market === "KR" ? "KRW" : "USD",
+				conditionalOrderId: params.conditionalOrderId, type: (existing.type as ConditionalOrderCard["type"]) ?? "SINGLE",
+				quantity: Number(existing.quantity), orderType: (existing.orderType as OrderType) ?? "LIMIT", expireDate: existing.expireDate,
+				first: legView(existing.first), second: existing.second ? legView(existing.second) : null,
+				currentPrice: null, avgPrice: null, warnings: [], errors: [],
 			};
-			if (errors.length > 0) {
-				return { content: [{ type: "text" as const, text: `조건주문을 준비하지 못했습니다.\n${errors.map((e) => `- ${e}`).join("\n")}` }], details: card };
-			}
-			const action: OrderAction =
-				params.action === "modify"
-					? { kind: "conditional-modify", broker: "toss", conditionalOrderId: params.conditionalOrderId!, ...v.spec }
-					: { kind: "conditional-create", broker: "toss", ...v.spec };
-			const { token, expiresAt } = deps.prepareOrder(action);
-			card.token = token;
-			card.expiresAt = expiresAt;
-			const legText = (l: ConditionalLeg) => `${l.side === "BUY" ? "매수" : "매도"} 감시 ${money(l.triggerPrice, quote.currency)}${l.orderPrice !== undefined ? ` → 지정가 ${money(l.orderPrice, quote.currency)}` : " → 시장가"}`;
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text:
-							`조건주문 확인이 필요합니다 — [토스] ${quote.name}(${symbol}) ${v.spec.type} ${v.spec.quantity}주, 만료 ${v.spec.expireDate}\n` +
-							`- ${legText(v.spec.first)}${v.spec.second ? `\n- ${legText(v.spec.second)}` : ""}\n` +
-							`화면의 확인 버튼을 눌러야 등록됩니다 (2분 내).${warnings.length ? `\n⚠️ ${warnings.join("\n⚠️ ")}` : ""}`,
-					},
-				],
-				details: card,
-			};
+			return { content: [{ type: "text" as const, text: `조건주문 취소 확인이 필요합니다 — ${existing.symbol} ${existing.type}. 화면의 확인 버튼을 눌러야 취소됩니다 (2분 내).` }], details: card };
 		},
 	});
 

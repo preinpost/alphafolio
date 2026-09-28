@@ -86,10 +86,21 @@ export function useConfirm<D = never>(
 			if (err instanceof ConfirmError) setDetail(err.detail as D);
 		}
 	}
-	return { phase, message, detail, remain, confirm, dismiss: () => setPhase("expired") };
+	/** 실패 뒤 같은 토큰으로 다시 (서버가 토큰을 소비하지 않은 실패만 의미가 있다 — 감시 켜기의 한도 확인 등) */
+	const retry = () => setPhase(secondsLeft(expiresAt) > 0 ? "idle" : "expired");
+	return { phase, message, detail, remain, confirm, retry, dismiss: () => setPhase("expired") };
 }
 
-export function ConfirmBar({ c, verb }: { c: Pick<ReturnType<typeof useConfirm>, "phase" | "message" | "remain" | "confirm" | "dismiss">; verb: string }) {
+export function ConfirmBar({
+	c,
+	verb,
+	onRetry,
+}: {
+	c: Pick<ReturnType<typeof useConfirm>, "phase" | "message" | "remain" | "confirm" | "dismiss">;
+	verb: string;
+	/** 있으면 실패 뒤 [다시 시도] — 같은 카드로 (감시 켜기: 한도를 정한 뒤) */
+	onRetry?: () => void;
+}) {
 	return (
 		<div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
 			{c.phase === "idle" && (
@@ -111,7 +122,13 @@ export function ConfirmBar({ c, verb }: { c: Pick<ReturnType<typeof useConfirm>,
 			{c.phase === "failed" && (
 				<div className="text-sm text-danger">
 					{c.message}
-					<div className="mt-1 text-[11px] text-faint">다시 하려면 챗에서 새로 요청하세요.</div>
+					{onRetry ? (
+						<button onClick={onRetry} className="mt-2 block rounded-lg border border-line px-3 py-1.5 text-xs text-ink">
+							다시 시도
+						</button>
+					) : (
+						<div className="mt-1 text-[11px] text-faint">다시 하려면 챗에서 새로 요청하세요.</div>
+					)}
 				</div>
 			)}
 			{c.phase === "expired" && <span className="text-sm text-muted">확인이 취소되었습니다. 필요하면 다시 요청하세요.</span>}

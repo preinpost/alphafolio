@@ -51,6 +51,11 @@ export interface WatcherOptions {
 	isActive: (user: string) => boolean;
 	/** 봉 조회 — 주식은 user 의 증권 키로 (서버가 묶는다). 없으면 코인만 */
 	fetchBars?: (user: string, c: Condition, limit: number, now: number) => Promise<WatchBar[]>;
+	/**
+	 * 주문 트리거의 제때 발동 — 주문 실행기로 넘긴다 (기다리지 않는다). 발동 횟수·결과 알림은 실행기가 한다.
+	 * 없으면 주문 트리거도 알림만 (자동 매매 비활성).
+	 */
+	onOrder?: (t: TriggerRecord, bar: WatchBar, closeAt: number) => void;
 	now?: () => number;
 }
 
@@ -194,6 +199,7 @@ export class Watcher {
 
 	private async fire(t: TriggerRecord, bar: WatchBar, values: Record<string, number>, now: number, opt: { missed?: number } = {}): Promise<TriggerRecord> {
 		const closeAt = barCloseAt(t.source.condition, bar.t);
+		if (t.action.kind === "order") return this.fireOrder(t, bar, values, now, closeAt, opt);
 		const fires = t.fires + 1;
 		const done = t.maxFires !== null && fires >= t.maxFires;
 		const kind: TriggerEventKind = opt.missed ? "missed" : "fired";
@@ -212,6 +218,34 @@ export class Watcher {
 		const notified = await this.opts.deliver({ user: t.member, triggerId: t.id, name: t.name, kind, at: now, message });
 		await this.opts.store.addEvent({ triggerId: t.id, member: t.member, at: now, kind, barT: bar.t, detail: { name: t.name, values, ...(opt.missed ? { missed: opt.missed } : {}) }, notified });
 		console.log(`[watch] ${kind} user=${t.member} ${t.id} ${t.name} bar=${kstShort(bar.t)}`);
+		return rec;
+	}
+
+	/**
+	 * 주문 트리거 — 제때 발동은 실행기로 (횟수는 실행기가 체결·결과 모름일 때만 센다).
+	 * **1봉 넘게 늦은 발동으로는 주문하지 않는다** — 알림만 (서버가 멈춰 있던 동안의 신호).
+	 */
+	private async fireOrder(t: TriggerRecord, bar: WatchBar, values: Record<string, number>, now: number, closeAt: number, opt: { missed?: number }): Promise<TriggerRecord> {
+		const rec = (await this.opts.store.mark(t.id, { lastFiredAt: now })) ?? t;
+		const c = t.source.condition;
+		if (opt.missed || !this.opts.onOrder) {
+			const message: NotifyMessage = {
+				level: "important",
+				title: `${t.name} — 주문하지 않았습니다`,
+				lines: [
+					`${kstShort(closeAt)} 마감 · ${valuesText(c, values)}`,
+					opt.missed ? `⚠ 늦은 신호 — 서버가 멈춰 있던 동안 조건을 ${opt.missed}번 충족했습니다. 늦은 신호로는 주문하지 않습니다.` : "자동 매매가 꺼져 있어 알림만 보냅니다.",
+				],
+				path: t.conversationId ? `/c/${t.conversationId}` : "/settings/watch",
+			};
+			const kind: TriggerEventKind = opt.missed ? "missed" : "skipped";
+			const notified = await this.opts.deliver({ user: t.member, triggerId: t.id, name: t.name, kind, at: now, message });
+			await this.opts.store.addEvent({ triggerId: t.id, member: t.member, at: now, kind, barT: bar.t, detail: { name: t.name, values, ...(opt.missed ? { missed: opt.missed } : {}), reason: opt.missed ? "늦은 신호" : "자동 매매 꺼짐" }, notified });
+			return rec;
+		}
+		await this.opts.store.addEvent({ triggerId: t.id, member: t.member, at: now, kind: "fired", barT: bar.t, detail: { name: t.name, values }, notified: null });
+		console.log(`[watch] fired(order) user=${t.member} ${t.id} ${t.name} bar=${kstShort(bar.t)}`);
+		this.opts.onOrder({ ...rec }, bar, closeAt);
 		return rec;
 	}
 

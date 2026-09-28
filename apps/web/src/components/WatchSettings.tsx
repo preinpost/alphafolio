@@ -1,9 +1,11 @@
 /**
  * 설정 → 감시 (PLAN §40). 만들기는 챗에서 (에이전트가 준비하고 카드에서 켠다), 여기는 보기·멈추기·다시 켜기·지우기.
  * 다시 켜기는 **여기서만** 된다 (에이전트·텔레그램은 못 한다 — 자동 동작을 허용하는 쪽이라 켜기와 같은 무게).
+ * 자동 매매 하루 매수 한도도 여기서만 정한다 (없으면 매수 감시를 켤 수 없다).
  */
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type WatchEventItem, type WatchItem } from "../lib/api.ts";
+import { api, type TradeExecItem, type WatchEventItem, type WatchItem } from "../lib/api.ts";
 import { kst } from "./cards/WatchCards.tsx";
 
 const btn = "shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink disabled:opacity-40";
@@ -26,7 +28,19 @@ const EVENT: Record<string, string> = {
 	removed: "삭제",
 	stopped: "비상 정지",
 	error: "오류",
+	ordered: "자동 매매",
+	skipped: "주문 안 함",
 };
+
+const EXEC_STATE: Record<TradeExecItem["state"], { label: string; tone: string }> = {
+	running: { label: "체결 중", tone: "text-accent" },
+	filled: { label: "체결", tone: "text-success" },
+	partial: { label: "일부 체결", tone: "text-ink" },
+	none: { label: "미체결", tone: "text-muted" },
+	unknown: { label: "결과 모름", tone: "text-danger" },
+};
+
+const money = (v: number, c: "KRW" | "USD") => (c === "KRW" ? `${Math.round(v).toLocaleString("en-US")}원` : `$${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}`);
 
 const BY: Record<string, string> = { app: "앱", agent: "에이전트", telegram: "텔레그램" };
 
@@ -36,7 +50,35 @@ function eventText(e: WatchEventItem): string {
 	if (e.detail.missed) bits.push(`놓친 ${e.detail.missed}번`);
 	if (e.detail.count !== undefined) bits.push(`${e.detail.count}개`);
 	if (e.detail.by) bits.push(`(${BY[e.detail.by] ?? e.detail.by})`);
+	if (e.kind === "ordered" && e.detail.side) {
+		bits.push(`${e.detail.side === "BUY" ? "매수" : "매도"} ${e.detail.filledQty ?? 0}/${e.detail.quantity ?? 0}주${e.detail.avgPrice ? ` @${e.detail.avgPrice.toLocaleString("en-US")}` : ""}`);
+		if (e.detail.status) bits.push(EXEC_STATE[e.detail.status].label);
+	}
+	if (e.detail.reason && e.kind !== "ordered") bits.push(e.detail.reason);
 	return bits.filter(Boolean).join(" · ");
+}
+
+/** 하루 매수 한도 — 통화별. 비우고 저장하면 지운다 */
+function LimitRow({ currency, value, onSave, busy }: { currency: "KRW" | "USD"; value: number | null; onSave: (v: number | null) => void; busy: boolean }) {
+	const [draft, setDraft] = useState<string>(value === null ? "" : String(value));
+	const parsed = draft.trim() === "" ? null : Number(draft.replace(/,/g, ""));
+	const invalid = parsed !== null && !(Number.isFinite(parsed) && parsed > 0);
+	const changed = parsed !== value;
+	return (
+		<div className="flex items-center gap-2">
+			<span className="w-16 shrink-0 text-xs text-muted">{currency === "KRW" ? "국장 (원)" : "미장 ($)"}</span>
+			<input
+				className="min-w-0 flex-1 rounded-lg border border-line bg-card px-2 py-1.5 text-sm text-ink tabular-nums"
+				inputMode="decimal"
+				placeholder="없음 — 매수 감시를 켤 수 없음"
+				value={draft}
+				onChange={(e) => setDraft(e.target.value)}
+			/>
+			<button className={btn} disabled={busy || invalid || !changed} onClick={() => onSave(parsed)}>
+				저장
+			</button>
+		</div>
+	);
 }
 
 export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id: string) => void }) {
@@ -69,7 +111,7 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 							className="rounded-lg border border-danger/50 px-3 py-1.5 text-xs text-danger disabled:opacity-40"
 							disabled={act.isPending}
 							onClick={() => {
-								if (confirm(`켜진 감시 ${armed}개를 모두 일시정지할까요?`)) act.mutate(() => api.stopAllWatches());
+								if (confirm(`켜진 감시 ${armed}개를 모두 일시정지할까요? 진행 중인 자동 매매도 걸린 주문을 취소하고 멈춥니다.`)) act.mutate(() => api.stopAllWatches());
 							}}
 						>
 							비상 정지
@@ -89,6 +131,12 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 								<span className={`shrink-0 text-[11px] ${STATE[w.state].tone}`}>{STATE[w.state].label}</span>
 							</div>
 							<div className="text-xs text-muted">{w.text}</div>
+							{w.order && (
+								<div className="text-xs text-ink">
+									<span className="mr-1 rounded border border-accent/50 px-1 text-[10px] text-accent">자동 매매</span>
+									{w.order}
+								</div>
+							)}
 							<div className="text-[11px] text-faint">
 								발동 {w.fires}
 								{w.maxFires ? `/${w.maxFires}` : ""}회 · 만료 {w.expiresAt.slice(0, 10)}
@@ -132,6 +180,43 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 				</p>
 			</section>
 
+			{d?.trading && (
+				<section>
+					<h2 className="mb-2 text-sm font-medium text-muted">자동 매매 한도</h2>
+					<div className="space-y-2 rounded-xl border border-line p-3">
+						<LimitRow key={`KRW-${d.trading.limits.KRW}`} currency="KRW" value={d.trading.limits.KRW} busy={act.isPending} onSave={(v) => act.mutate(() => api.setTradeLimit("KRW", v))} />
+						<LimitRow key={`USD-${d.trading.limits.USD}`} currency="USD" value={d.trading.limits.USD} busy={act.isPending} onSave={(v) => act.mutate(() => api.setTradeLimit("USD", v))} />
+						<p className="text-[11px] text-faint">
+							하루(시장 현지 날짜) 동안 자동 매수에 쓸 수 있는 최대 금액입니다. 한도가 없으면 매수 감시를 켤 수 없고, 넘으면 신호가 와도 주문하지 않습니다. 매도(손절·익절)는 보유 수량으로만 제한합니다.
+						</p>
+					</div>
+				</section>
+			)}
+
+			{d?.trading && d.trading.execs.length > 0 && (
+				<section>
+					<h2 className="mb-2 text-sm font-medium text-muted">최근 자동 매매</h2>
+					<ul className="space-y-2 rounded-xl border border-line p-3">
+						{d.trading.execs.map((x) => (
+							<li key={x.id} className="space-y-0.5 border-b border-line pb-2 text-xs last:border-0 last:pb-0">
+								<div className="flex items-baseline gap-2">
+									<span className="shrink-0 text-faint tabular-nums">{kst(x.at)}</span>
+									<span className={x.side === "BUY" ? "text-up" : "text-down"}>{x.side === "BUY" ? "매수" : "매도"}</span>
+									<span className="text-ink">
+										{x.symbol} {x.filledQty}/{x.quantity}주{x.avgPrice !== null ? ` · 평균 ${money(x.avgPrice, x.currency)}` : ""}
+									</span>
+									<span className={`ml-auto shrink-0 ${EXEC_STATE[x.state].tone}`}>{EXEC_STATE[x.state].label}</span>
+								</div>
+								<div className="text-[11px] text-faint">
+									{x.account} · 최악 {money(x.worstPrice, x.currency)} · 주문 {x.orders}건{x.slippageBps !== null ? ` · 슬리피지 ${x.slippageBps}bp` : ""}
+								</div>
+								{x.reason && <div className={`text-[11px] ${x.state === "unknown" ? "text-danger" : "text-muted"}`}>{x.reason}</div>}
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+
 			{d && d.events.length > 0 && (
 				<section>
 					<h2 className="mb-2 text-sm font-medium text-muted">최근 기록</h2>
@@ -139,7 +224,7 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 						{d.events.map((e) => (
 							<li key={e.id} className="flex gap-3 text-xs">
 								<span className="shrink-0 text-faint tabular-nums">{kst(e.at)}</span>
-								<span className={`min-w-0 ${e.kind === "fired" || e.kind === "missed" ? "text-ink" : "text-muted"}`}>{eventText(e)}</span>
+								<span className={`min-w-0 ${e.kind === "fired" || e.kind === "missed" || e.kind === "ordered" ? "text-ink" : "text-muted"}`}>{eventText(e)}</span>
 							</li>
 						))}
 					</ul>

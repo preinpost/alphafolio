@@ -385,7 +385,7 @@ export function validateCondition(c: Condition): string[] {
 		else errors.push(...feedErrors(venue, c.market.feed));
 	}
 	if (c.when !== "bar_close") errors.push("판정 시점은 봉 마감(bar_close)만 됩니다");
-	if (c.fire !== "on_enter") errors.push("발동 방식은 on_enter 만 됩니다");
+	if (c.fire !== "on_enter" && c.fire !== "while_true") errors.push("발동 방식은 on_enter · while_true 만 됩니다");
 	if (!intIn(c.confirmBars, 1, MAX_CONFIRM_BARS)) errors.push(`연속 봉 수는 1~${MAX_CONFIRM_BARS} 입니다`);
 	if (!Array.isArray(c.all) || c.all.length === 0) {
 		errors.push("조건이 하나 이상 필요합니다");
@@ -493,14 +493,14 @@ export function evaluate(c: Condition, bars: WatchBar[]): Hits {
 	return nodeHits({ all: c.all }, bars, c, new Map());
 }
 
-/** 발동한 봉의 인덱스 — streak(i) === confirmBars */
+/** 발동한 봉의 인덱스 — streak(i) === confirmBars (while_true 는 그 뒤로도 참인 봉마다) */
 export function fireIndices(c: Condition, bars: WatchBar[]): number[] {
 	const hits = evaluate(c, bars);
 	const out: number[] = [];
 	let streak = 0;
 	for (const [i, h] of hits.entries()) {
 		streak = h ? streak + 1 : 0;
-		if (h && streak === c.confirmBars) out.push(i);
+		if (h && (streak === c.confirmBars || (c.fire === "while_true" && streak > c.confirmBars))) out.push(i);
 	}
 	return out;
 }
