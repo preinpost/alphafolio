@@ -3,7 +3,8 @@
  *
  * 설계 규칙 (PLAN.md §7.2, §7.4):
  *   1. raw SQL 툴을 만들지 않는다. 툴은 구조화된 인자만 받고 SQL은 repo에 있는 리터럴만 쓴다.
- *   2. content(LLM이 읽는 텍스트)에는 집계·요약만 넣고, 원시 내역은 details로 UI에만 보낸다.
+ *   2. content(LLM이 읽는 텍스트)에는 집계·요약과 앞쪽 일부만 넣는다 — 채팅에는 조회 카드가 없으므로
+ *      (확인 다이얼로그만 카드) 사용자는 모델의 답으로만 본다. 전체 내역은 가계부 탭에서 본다.
  *      → 토큰 절약 + 거래 내역이 프롬프트에 통째로 올라가는 것을 막는다.
  */
 import { Type } from "typebox";
@@ -24,8 +25,11 @@ import {
 import { resolveLedger, type MyLedger } from "./ledgers.ts";
 import type { BudgetStatus, SummaryRow, Transaction, TxType } from "./types.ts";
 
+/** ledger_list 가 content 에 싣는 최대 건수 (채팅에 카드가 없어 사용자는 이만큼만 답으로 본다) */
+const LIST_PREVIEW = 30;
+
 /**
- * details 페이로드 계약 — 웹/모바일 카드 렌더러가 이 모양에 의존한다.
+ * details 페이로드 계약 — 세션 기록에 남는 구조화된 결과 (채팅 카드로는 그리지 않는다).
  * 분기마다 모양이 달라지면 defineTool의 추론이 깨지므로 키를 고정하고
  * 비어 있는 값은 null/[]로 채운다.
  */
@@ -278,10 +282,10 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 				limit: params.limit,
 			});
 
-			// content에는 건수와 합계만. 원시 내역은 details로 UI에만 전달한다.
+			// content에는 건수·합계와 앞쪽 일부만 — 전체 내역은 가계부 탭에서 본다
 			const expense = rows.filter((r) => r.amount < 0).reduce((s, r) => s - r.amount, 0);
 			const preview = rows
-				.slice(0, 10)
+				.slice(0, LIST_PREVIEW)
 				.map((r) => `- ${r.date} ${r.amount < 0 ? "-" : "+"}${won(Math.abs(r.amount))} ${r.category ?? ""} ${r.merchant ?? ""} [${r.id}]`.trimEnd());
 
 			return {
@@ -291,7 +295,9 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 						text:
 							`[${ledger.name}] ${rows.length}건 (지출 합계 ${won(expense)})` +
 							(preview.length > 0 ? `\n\n${preview.join("\n")}` : "") +
-							(rows.length > preview.length ? `\n… 외 ${rows.length - preview.length}건 (화면에 표시됨)` : ""),
+							(rows.length > preview.length
+								? `\n… 외 ${rows.length - preview.length}건 (여기엔 없음 — 전체는 가계부 탭에서 보거나 기간·카테고리를 좁혀 다시 조회)`
+								: ""),
 					},
 				],
 				details: { kind: "ledger-table", ledgerName: ledger.name, rows },

@@ -7,9 +7,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
-import { usdCash } from "./cards/BrokerCards.tsx";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
+
+/** 예수금 — 센트까지 ($1,234.50). 원화로 환산하지 않는다 (미국 주식은 달러로 주문) */
+function usdCash(value: number): string {
+	return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function moveClass(n: number): string {
 	if (n > 0) return "text-up";

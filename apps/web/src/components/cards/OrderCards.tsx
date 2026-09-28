@@ -6,7 +6,7 @@
  *    (외부 웹·뉴스 본문에 심긴 지시문이 주문으로 이어지지 않게 하는 장치)
  */
 import { useEffect, useState } from "react";
-import type { BinanceOrderCard, ConditionalOrderCard, OrderChangeCard, OrderListCard, OrderPreviewCard } from "@alphafolio/protocol";
+import type { BinanceOrderCard, ConditionalOrderCard, OrderChangeCard, OrderPreviewCard } from "@alphafolio/protocol";
 import { api } from "../../lib/api.ts";
 
 function money(value: number, currency: "KRW" | "USD"): string {
@@ -393,39 +393,4 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 function secondsLeft(expiresAt: number | null): number {
 	if (!expiresAt) return 0;
 	return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
-}
-
-// ── 주문 목록 ───────────────────────────────────────────────────────────
-
-export function OrderListCardView({ card }: { card: OrderListCard }) {
-	if (card.orders.length === 0) {
-		return (
-			<div className="mt-2 rounded-xl border border-line bg-inset px-4 py-3 text-xs text-muted">
-				{card.status === "OPEN" ? "미체결 주문이 없습니다." : "주문 내역이 없습니다."}
-			</div>
-		);
-	}
-
-	return (
-		<div className="mt-2 overflow-hidden rounded-xl border border-line bg-inset">
-			<div className="px-4 py-2.5 text-xs text-muted">
-				{card.status === "OPEN" ? "미체결" : "종료"} 주문 {card.orders.length}건
-			</div>
-			{card.orders.map((o) => (
-				<div key={o.orderId} className="flex items-center justify-between border-t border-line px-4 py-2">
-					<div className="min-w-0">
-						<div className="truncate text-sm text-ink">
-							{o.symbol} <span className={o.side === "BUY" ? "text-up" : "text-down"}>{o.side === "BUY" ? "매수" : "매도"}</span>
-						</div>
-						<div className="text-[11px] text-faint">
-							{o.quantity}주 · {o.price ? Number(o.price).toLocaleString("ko-KR") : "시장가"} · {o.status}
-						</div>
-					</div>
-					<div className="shrink-0 text-right text-[11px] text-muted">
-						체결 {o.execution?.filledQuantity ?? "0"}
-					</div>
-				</div>
-			))}
-		</div>
-	);
 }

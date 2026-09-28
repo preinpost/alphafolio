@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { serializeMessages } from "../src/serialize.ts";
+import { parseCard, serializeMessages } from "../src/serialize.ts";
 
 const user = (text: string) => ({ role: "user", content: text });
 const fail = (msg = "Request timed out.") => ({ role: "assistant", content: [], stopReason: "error", errorMessage: msg });
@@ -31,5 +31,24 @@ describe("재시도된 실패", () => {
 		const cut = { role: "assistant", content: [{ type: "text", text: "쓰다가" }], stopReason: "error", errorMessage: "끊김" };
 		const out = serializeMessages([user("1"), cut, ok("다시")]);
 		assert.equal(out.length, 3);
+	});
+});
+
+describe("카드는 확인 다이얼로그만", () => {
+	it("확인·취소가 있는 카드는 남긴다", () => {
+		for (const kind of ["order-preview-card", "order-change-card", "conditional-order-card", "binance-order-card", "mcp-confirm-card", "watch-confirm-card"]) {
+			assert.equal(parseCard({ kind })?.kind, kind);
+		}
+	});
+
+	it("조회 결과는 카드로 보내지 않는다 (예전 대화에 남은 것도)", () => {
+		for (const kind of ["quote-card", "technical-card", "holdings-card", "news-card", "order-list-card", "overview-card", "ledger-table", "ledger-summary"]) {
+			assert.equal(parseCard({ kind }), undefined, kind);
+		}
+		const call = { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "market_price", arguments: {} }], stopReason: "toolUse" };
+		const result = { role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "삼성전자 70,000원" }], details: { kind: "quote-card" } };
+		const block = serializeMessages([user("삼성전자"), call, result]).at(-1)!.content[0];
+		assert.equal(block?.type, "toolCall");
+		assert.equal(block?.type === "toolCall" ? block.result?.card : "x", undefined);
 	});
 });

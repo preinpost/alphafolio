@@ -3,7 +3,8 @@
  *
  * 설계 규칙 (가계부 툴과 동일):
  *   1. 자격증명은 **호출 시점에** 해석한다 — 설정 화면에서 키를 넣으면 재시작 없이 동작해야 한다.
- *   2. content(LLM이 읽는 텍스트)에는 집계·요약만, 원시 목록은 details 로 UI 에만 보낸다.
+ *   2. content(LLM이 읽는 텍스트)가 사용자가 보는 전부다 — 채팅에 조회 카드가 없다 (확인 다이얼로그만 카드).
+ *      답에 필요한 숫자는 content 에 싣고, "화면에 표시됨" 으로 미루지 않는다. details 는 세션 기록용.
  *   3. 주문 툴은 없다. 조회 전용이다.
  *   4. 날짜는 모델이 계산하지 않는다 (period 상대 표현 — ledger/dates.ts 와 동일 원칙).
  */
@@ -104,17 +105,16 @@ export interface BrokerToolDeps {
 	prepareOrder?: (action: OrderAction) => { token: string; expiresAt: number };
 }
 
-// ── details 계약 (UI 렌더러가 이 모양에 의존한다) ──────────────────────
+// ── details 계약 ─────────────────────────────────────────────────────
+// 조회 툴의 details 는 세션 기록용이다 — 채팅 카드로 그리지 않는다 (serialize.ts 가 확인 카드만 보낸다).
+// 주문 확인(OrderPreviewDetails)만 UI 렌더러가 이 모양에 의존한다.
 
 export interface QuoteDetails {
 	kind: "quote-card";
 	quote: Quote & { source: "kis" | "toss" };
 }
 
-/**
- * 기술적 지표 카드. 캔들을 그리지 않고 **숫자와 라벨**만 담는다
- * (이 앱은 차트 UI 를 두지 않기로 했다 — PLAN.md §19).
- */
+/** 기술적 지표 — 캔들 없이 **숫자와 라벨**만 (이 앱은 차트 UI 를 두지 않기로 했다 — PLAN.md §19). */
 export interface TechnicalDetails {
 	kind: "technical-card";
 	symbol: string;
@@ -134,9 +134,7 @@ export interface FinancialsDetails {
 	yoy: { revenue: number | null; operatingProfit: number | null; netIncome: number | null } | null;
 }
 
-/**
- * 타점 판정 카드. 판정은 **규칙 기반**이며 매매 권유가 아니다 — 카드에 고정 표시한다.
- */
+/** 타점 판정. 판정은 **규칙 기반**이며 매매 권유가 아니다 — 텍스트에 고정 표시한다. */
 type TimingCardResult = Omit<TimingResult, "snapshot"> & {
 	snapshot: Pick<IndicatorSnapshot, "lastDate" | "bars" | "rsi" | "trend" | "ma20" | "support" | "resistance">;
 };
@@ -148,7 +146,7 @@ export interface TimingDetails {
 	currency: "KRW" | "USD";
 	/** 먼저 보여줄 판정 */
 	result: TimingCardResult;
-	/** 기간을 정하지 않아 두 모드를 다 돌렸을 때 나머지 하나 (카드에서 전환) */
+	/** 기간을 정하지 않아 두 모드를 다 돌렸을 때 나머지 하나 */
 	alt?: TimingCardResult;
 	/** 판정에 쓰지 못한 입력 (재무 조회 실패 등) */
 	notes: string[];
@@ -364,8 +362,8 @@ async function loadFinancials(
 }
 
 /**
- * market_timing 출력 — 텍스트(모델용)와 카드(details). 순수 함수라 조회 없이 테스트한다.
- * results 가 둘이면 먼저 보여줄 쪽을 고르고 나머지는 카드의 alt 로 보낸다.
+ * market_timing 출력 — 텍스트(모델용)와 details(기록용). 순수 함수라 조회 없이 테스트한다.
+ * results 가 둘이면 먼저 보여줄 쪽을 고르고 나머지는 details 의 alt 로 둔다 (텍스트에는 둘 다).
  */
 export function renderTiming(opts: {
 	symbol: string;
@@ -542,12 +540,13 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 				};
 			}
 
-			// content 에는 상위 몇 개와 합계만 — 전체 목록은 화면에 표시된다
+			// 채팅에 카드가 없으니 목록을 싣는다 — 너무 많으면 평가금액 상위만 (나머지는 투자 탭)
 			const top = p.holdings
-				.slice(0, 8)
+				.slice(0, 30)
 				.map(
 					(h) =>
-						`- ${h.name} ${h.quantity}주 ${won(h.valueKrw)} (${h.profitPct >= 0 ? "+" : ""}${h.profitPct}%)`,
+						`- ${h.name} (${h.symbol}) ${h.quantity}주 · 평단 ${money(h.avgPrice, h.currency)} · 현재 ${money(h.price, h.currency)} · ` +
+						`평가 ${won(h.valueKrw)} (${h.profitPct >= 0 ? "+" : ""}${h.profitPct}%)`,
 				);
 
 			return {
@@ -559,7 +558,7 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 							`평가손익 ${signed(p.profitKrw, "KRW")} · 예수금 ${cashText(p.cashKrw, p.cashUsd)}` +
 							(p.usdKrw > 0 ? ` (환율 ${p.usdKrw.toLocaleString("ko-KR")}원)` : "") +
 							`\n\n${top.join("\n")}` +
-							(p.holdings.length > top.length ? `\n… 외 ${p.holdings.length - top.length}종목 (화면에 표시됨)` : "") +
+							(p.holdings.length > top.length ? `\n… 외 ${p.holdings.length - top.length}종목 (여기엔 없음 — 전체는 투자 탭에서)` : "") +
 							(p.warnings.length > 0 ? `\n\n⚠️ ${p.warnings.join("\n⚠️ ")}` : ""),
 					},
 				],
@@ -840,6 +839,12 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 					: consensus.error
 						? `애널리스트 컨센서스: 조회 실패 (${consensus.error}) — 커버 여부는 알 수 없습니다.`
 						: "애널리스트 컨센서스: 한국투자 리서치 커버 종목이 아닙니다 (데이터 없음이 아니라 미커버).",
+				`기간별 (연 누적 — 직전 분기와 빼서 비교하지 않는다):`,
+				...periods.map(
+					(p) =>
+						`- ${p.period.slice(0, 4)}.${p.period.slice(4)} 매출 ${formatEok(p.revenue)} · 영업익 ${formatEok(p.operatingProfit)} · 순익 ${formatEok(p.netIncome)}` +
+						` · ROE ${p.roe ?? "—"}% · 부채비율 ${p.debtRatio ?? "—"}%`,
+				),
 				`※ 분기 수치는 연단위 누적 기준입니다 (${periods.length}개 기간 조회).`,
 			];
 

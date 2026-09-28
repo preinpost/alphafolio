@@ -5,7 +5,7 @@
  * 저비용 모델에게 맡기면 층별 판단을 건너뛰거나 손절가를 틀리게 계산하고, 틀려도
  * 그럴듯해서 발견이 늦다. 여기서 판정·가격까지 만들고 모델은 해석(이벤트 리스크·문장)만 한다.
  *
- * 판정은 "규칙 기반"이지 예측이 아니다 — 카드와 텍스트에 그렇게 표시한다.
+ * 판정은 "규칙 기반"이지 예측이 아니다 — 텍스트에 그렇게 표시한다.
  */
 import { analyze, rsi, type Bar, type IndicatorSnapshot } from "./indicators.ts";
 import { roundToTick, tickSize, type Market } from "./orders.ts";

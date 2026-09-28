@@ -12,7 +12,7 @@ import type {
 	LedgerSummaryRow,
 	LedgerTransaction,
 	MyLedgerDto,
-	QuoteCard,
+	QuoteDto,
 } from "@alphafolio/protocol";
 import { API_BASE, clearToken, getToken } from "./auth.ts";
 
@@ -231,7 +231,7 @@ export const api = {
 			warnings: string[];
 		}>("/api/portfolio"),
 
-	quote: (symbol: string) => request<QuoteCard["quote"]>(`/api/quote?symbol=${encodeURIComponent(symbol)}`),
+	quote: (symbol: string) => request<QuoteDto>(`/api/quote?symbol=${encodeURIComponent(symbol)}`),
 
 	// ⚠️ 실제 주문이 나가는 유일한 클라이언트 경로. 확인 카드의 버튼에서만 호출한다.
 	executeOrder: (token: string) =>

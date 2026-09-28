@@ -21,28 +21,18 @@ type AnyMessage = {
 	[key: string]: unknown;
 };
 
+/**
+ * 카드로 그리는 것은 **확인 다이얼로그뿐**이다 — 사람이 [확인]·[취소] 를 눌러야 하는 것.
+ * 조회 결과(시세·지표·보유·가계부 등)는 카드 없이 답변 텍스트로만 보인다 (카드가 많아 읽기 어렵다는 피드백).
+ * 조회 툴은 여전히 details 를 남기지만 여기서 버린다 — 예전 대화의 조회 카드도 더는 뜨지 않는다.
+ */
 const CARD_KINDS = new Set([
-	"ledger-tx",
-	"ledger-summary",
-	"ledger-table",
-	"ledger-budget",
-	"technical-card",
-	"portfolio-signals-card",
-	"timing-card",
-	"research-card",
-	"financials-card",
-	"quote-card",
-	"holdings-card",
-	"movers-card",
-	"news-card",
 	"order-preview-card",
-	"order-list-card",
 	"order-change-card",
 	"conditional-order-card",
 	"binance-order-card",
 	"mcp-confirm-card",
 	"watch-confirm-card",
-	"overview-card",
 ]);
 
 /**
