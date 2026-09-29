@@ -9,7 +9,7 @@
  */
 import { copyFileSync, createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { d1ConfigFromEnv, d1Ping, ensureMigrated, LedgerAccessError, type D1Config } from "@alphafolio/ledger";
@@ -68,6 +68,7 @@ import { CALLBACK_PATH, McpAuthManager } from "./mcp-auth.ts";
 import { Notifier, TELEGRAM_CHAT, TELEGRAM_TOKEN } from "./notify/index.ts";
 import { botIdOf, findPrivateChat, getBotName, isBotToken, sendMessage, TelegramError } from "./notify/telegram.ts";
 import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpWritePayload } from "./mcp-api.ts";
+import { staticCacheControl } from "./static-cache.ts";
 
 const MIME: Record<string, string> = {
 	".html": "text/html; charset=utf-8",
@@ -922,7 +923,11 @@ function serveStatic(res: ServerResponse, webDir: string, path: string): void {
 		return;
 	}
 
-	res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+	const cacheControl = staticCacheControl(relative(webDir, file));
+	res.writeHead(200, {
+		"content-type": MIME[extname(file)] ?? "application/octet-stream",
+		...(cacheControl ? { "cache-control": cacheControl } : {}),
+	});
 	createReadStream(file).pipe(res);
 }
 

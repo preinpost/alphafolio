@@ -6,6 +6,7 @@ import { clearToken, getToken, isNativeApp } from "./lib/auth.ts";
 import { useChat, type ChatState } from "./lib/chat.ts";
 import { navigate, parseRoute, type View } from "./lib/route.ts";
 import { forgetSeen, isUnread, lastSession, markSeen } from "./lib/seen.ts";
+import { applyUpdate, reportServerVersion } from "./lib/update.ts";
 import { ChatPage } from "./components/ChatPage.tsx";
 import { LedgerPage } from "./components/LedgerPage.tsx";
 import { PortfolioPage } from "./components/PortfolioPage.tsx";
@@ -342,16 +343,17 @@ function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClos
 /**
  * 이 화면(번들)의 버전 + 서버 버전이 다르면 새로고침 안내.
  * 배포 직후 서비스워커가 옛 번들을 주면 새 카드가 안 보인다 (PLAN §39) — 여기서 바로 드러난다.
- * 서버 버전은 소켓이 다시 붙을 때(= 배포로 서버가 재시작) 다시 읽는다.
+ * 서버 버전은 소켓이 다시 붙을 때(= 배포로 서버가 재시작) 다시 읽는다. 상단 배너도 이 버전을 본다 (lib/update.ts).
  */
 function AppVersion({ connected }: { connected: boolean }) {
 	const health = useQuery({ queryKey: ["health", connected], queryFn: api.health, staleTime: Infinity, retry: false });
 	const server = health.data?.version;
+	useEffect(() => reportServerVersion(server), [server]);
 	const stale = !!server && server !== "unknown" && server !== __APP_VERSION__;
 	if (!stale) return <div className="px-3 pl-[1.625rem] text-[11px] text-faint">v{__APP_VERSION__}</div>;
 	return (
 		<button
-			onClick={() => location.reload()}
+			onClick={() => void applyUpdate()}
 			className="block w-full px-3 pl-[1.625rem] text-left text-[11px] text-danger"
 			title="서버가 새 버전입니다. 새로고침하면 새 화면을 받습니다."
 		>
