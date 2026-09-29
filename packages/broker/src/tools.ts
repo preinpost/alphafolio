@@ -20,10 +20,12 @@ import {
 } from "@alphafolio/ledger";
 import { fetchMovers, type Mover, type MoverType } from "./movers.ts";
 import { NaverCredentialsMissingError, searchNews, type NaverCredentials, type NewsItem } from "./news.ts";
+import { collectOverseasNews, type OverseasNewsItem } from "./overseas-news.ts";
 import {
 	domesticConsensus,
 	domesticFinancialRatios,
 	domesticIncomeStatement,
+	overseasNews,
 } from "./kis/api.ts";
 import {
 	consensusError,
@@ -289,6 +291,13 @@ export interface NewsDetails {
 	kind: "news-card";
 	query: string;
 	items: NewsItem[];
+}
+
+export interface OverseasNewsDetails {
+	kind: "overseas-news";
+	symbol: string | null;
+	excd: string | null;
+	items: OverseasNewsItem[];
 }
 
 /**
@@ -779,6 +788,72 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			const lines = items.map((n) => `- [${n.date}] ${n.title}\n  ${n.summary}\n  ${n.link}`);
 			return {
 				content: [{ type: "text" as const, text: `"${params.query}" 뉴스 ${items.length}건\n\n${lines.join("\n")}` }],
+				details,
+			};
+		},
+	});
+
+	const marketOverseasNews = defineTool({
+		name: "market_overseas_news",
+		label: "해외 종목 뉴스",
+		description:
+			"한국투자증권 해외뉴스종합에서 해외 종목 뉴스 제목을 최신순으로 가져온다 — 종목리포트(투자의견·IB 코멘트), 특징주, 실적공시 등 한국어 기사. " +
+			"'엔비디아 뉴스', 'MU 요즘 이슈', '미국 주식 소식' 같은 요청에 쓴다. symbol 을 빼면 해외 전체 최신 뉴스다. " +
+			"거래소는 자동으로 찾는다. 국내 종목(6자리 코드)은 market_news 를 쓴다. " +
+			"⚠️ 제목만 온다 (본문·링크 없음) — 원인을 단정하려면 web_search 로 원문을 찾아 읽는다. " +
+			"KIS 연결이 필요하다.",
+		parameters: Type.Object({
+			symbol: Type.Optional(Type.String({ description: "해외 티커 (예: NVDA, MU, KO). 비우면 전체 뉴스" })),
+			count: Type.Optional(Type.Integer({ description: "기사 수 (기본 10, 최대 50)" })),
+		}),
+		execute: async (_id, params) => {
+			const kis = deps.brokers.kis;
+			if (!kis) throw new Error("해외 뉴스는 한국투자증권(KIS) 연결이 필요합니다. 설정 화면에서 키를 입력하세요.");
+
+			const symbol = params.symbol?.trim().toUpperCase() || undefined;
+			if (symbol && marketOf(symbol) === "KR") {
+				throw new Error(`국내 종목(${symbol})은 market_news 로 검색하세요. 이 툴은 해외 티커 전용입니다.`);
+			}
+			const count = Math.min(Math.max(params.count ?? 10, 1), 50);
+
+			const ctx = kis();
+			const result = await collectOverseasNews(
+				(q) => overseasNews(ctx, { symbol, excd: q.excd, date: q.date, time: q.time }),
+				{ symbol, count },
+			);
+			const details: OverseasNewsDetails = { kind: "overseas-news", symbol: symbol ?? null, excd: result.excd, items: result.items };
+
+			const first = result.items[0];
+			const title = symbol ? `${first?.name || symbol} (${symbol}${result.excd ? `·${result.excd}` : ""})` : "해외 전체";
+			if (!first) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: symbol
+								? `${symbol} 뉴스를 찾지 못했습니다 (NAS/NYS/AMS 모두 없음 — 티커를 확인하거나 web_search 를 쓰세요).`
+								: "해외 뉴스가 없습니다.",
+						},
+					],
+					details,
+				};
+			}
+
+			// 전체 조회면 기사마다 종목이 다르다 — 줄마다 티커를 붙인다
+			const lines = result.items.map(
+				(n) =>
+					`- [${n.date} ${n.time}] ${symbol ? "" : `${n.name || n.symbol}(${n.symbol}) `}${n.title}` +
+					` — ${[n.category, n.source].filter(Boolean).join("·")}`,
+			);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text:
+							`${title} 뉴스 ${result.items.length}건 (KIS 해외뉴스종합 · 시각 KST)\n\n${lines.join("\n")}` +
+							"\n\n※ 제목만 제공됩니다 (본문·링크 없음). 원문이 필요하면 web_search 로 찾습니다.",
+					},
+				],
 				details,
 			};
 		},
@@ -1530,6 +1605,7 @@ ${out.text}${note}` }],
 		stockResearch,
 		marketMovers,
 		marketNews,
+		marketOverseasNews,
 		marketFinancials,
 		portfolioHoldings,
 		portfolioSignals,
@@ -1549,6 +1625,7 @@ export const BROKER_TOOL_NAMES = [
 	"stock_research",
 	"market_movers",
 	"market_news",
+	"market_overseas_news",
 	"market_financials",
 	"portfolio_holdings",
 	"portfolio_signals",

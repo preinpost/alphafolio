@@ -261,3 +261,35 @@ export function domesticConsensus(ctx: KisContext, symbol: string): Promise<KisR
 		query: { SHT_CD: symbol },
 	});
 }
+
+// ── 뉴스 ────────────────────────────────────────────────────────────────
+
+/**
+ * 해외뉴스종합 제목 (HHPSTH60100C1, HTS [7702]). 필드는 전부 "공백 = 전체".
+ *
+ * 실측 (2026-09):
+ *   - SYMB 는 EXCHANGE_CD 와 **함께** 줘야 걸린다 (거래소 공백이면 빈 응답).
+ *   - 1회 10건, 연속조회 키 없음 — DATA_DT/DATA_TM 에 마지막 행 시각을 넣으면
+ *     그 시각 **포함** 이전부터 온다 (경계 1건 중복).
+ *   - data_dt/data_tm 은 KST.
+ */
+export function overseasNews(
+	ctx: KisContext,
+	opts: { symbol?: string; excd?: string; date?: string; time?: string },
+): Promise<KisResponse> {
+	return kisGet(ctx, {
+		label: `해외뉴스 ${opts.symbol || "전체"}${opts.excd ? `@${opts.excd}` : ""}`,
+		path: "/uapi/overseas-price/v1/quotations/news-title",
+		trId: "HHPSTH60100C1",
+		query: {
+			INFO_GB: "",
+			CLASS_CD: "",
+			NATION_CD: "",
+			EXCHANGE_CD: opts.excd ?? "",
+			SYMB: opts.symbol ?? "",
+			DATA_DT: opts.date ?? "",
+			DATA_TM: opts.time ?? "",
+			CTS: "",
+		},
+	});
+}

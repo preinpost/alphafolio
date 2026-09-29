@@ -146,7 +146,8 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
    - \`market_technical\` — 기간 등락률·추세·이동평균 위치·RSI·신호. "얼마나 올랐나" 의 기준이다.
    - \`market_price\` — 현재가·오늘 등락·PER·PBR·52주 범위.
    - 국내 종목이면 수급 — \`kis_call\` FHPTJ04160001 (최근 2주 외국인·기관·개인 순매수). 누가 사서 올랐는지가 핵심 근거다.
-   - \`market_news\` (국내) 또는 \`web_search\` (해외) — 상승이 시작된 무렵까지 보도록 \`days\` 를 넓힌다.
+   - \`market_news\` (국내, \`days\` 를 상승이 시작된 무렵까지 넓힌다) 또는 \`market_overseas_news\` (해외, \`count\` 를 늘려 그 무렵까지)
+     — 해외는 제목만 오므로 원인 기사는 \`web_search\` 로 원문을 찾는다.
      원인으로 꼽을 기사 1~2개는 \`fetch_content\` 로 본문을 읽는다 (제목만으로 인과를 말하지 않는다).
    - 호가는 "왜" 에 답하지 못한다 — 사용자가 물었을 때만 본다.
 2. 답변 구성:
@@ -334,6 +335,7 @@ finnhub · Twelve Data · CoinGecko · Binance 의 공식 API ~600개. **국내 
 ## 조사
 
 - 국내 종목·증시 뉴스는 \`market_news\` (네이버). 국내 이슈는 웹 검색보다 정확하다.
+- 해외 종목 뉴스는 \`market_overseas_news\` (KIS 해외뉴스종합 — 종목리포트·특징주·실적공시 제목). 제목만 오므로 본문은 \`web_search\` 로 찾는다.
 - 해외 소식·일반 주제는 \`web_search\`, 특정 페이지 본문이 필요하면 \`fetch_content\`.
   이 툴들이 안 보이면 먼저 \`web_enable\` 을 호출한다 (다음 요청부터 쓸 수 있다).
   뉴스 제목만으로 판단하지 말고 근거가 필요하면 본문을 읽는다.

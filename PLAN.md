@@ -675,6 +675,7 @@ Phase 3 에서 증권 API 를 **조회 6개 + 랭킹**으로 좁혔다. 구 컨�
 |---|---|---|
 | 시장 랭킹·주도주 | `kis_api` 순위 API | ✅ `market_movers` (2026-09-23 추가) |
 | 종목 뉴스 | `naver_news_search` | ✅ `market_news` (네이티브, 사용자별 키) |
+| 해외 종목 뉴스 | `kis_api` 해외주식-053 | ✅ `market_overseas_news` (KIS 해외뉴스종합, 2026-09-29 추가) |
 | 웹 검색·URL 읽기 | `pi-web-access` | ✅ 확장 로드 (web_search·fetch_content·source_check) |
 | 재무제표·컨센서스 | `kis_research` | ✅ `market_financials` (국내 전용) |
 | 기술적 지표 (RSI/MACD/볼린저…) | `kis_technical` + core indicators | ✅ `market_technical` · `portfolio_signals` |

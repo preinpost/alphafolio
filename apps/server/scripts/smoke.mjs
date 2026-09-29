@@ -472,6 +472,7 @@ async function main() {
 		"stock_research",
 		"market_movers",
 		"market_news",
+		"market_overseas_news",
 		"market_financials",
 		"portfolio_holdings",
 		"portfolio_signals",
