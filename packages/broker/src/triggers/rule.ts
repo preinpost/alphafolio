@@ -5,12 +5,46 @@
  *   리스크 정규장 안인가 · 하루 매수 한도 · 매도 가능 수량
  *
  * 금액 주문은 **최악 허용가로** 나눠 내림한다 — 가장 나쁘게 체결돼도 금액을 넘지 않는다.
+ * 코인(Binance 현물)은 24시간 — 장 시간 검사가 없고, 하루는 UTC 날짜, 한도는 USDT. USDT 마켓만 자동 매매한다.
  */
 import type { Market } from "../orders.ts";
 import { localClock, localDate, MARKETS, sessionOf } from "./market-time.ts";
-import type { CondNode, Condition, Interval, OrderRule, OrderSize, OrderTarget, Position, ProtectLevel, ProtectRule } from "./types.ts";
+import type { CondNode, Condition, Interval, OrderRule, OrderSize, OrderTarget, Position, ProtectLevel, ProtectRule, Venue } from "./types.ts";
 import { INTERVAL_LABEL } from "./describe.ts";
-import { roundPrice } from "./venues/tick.ts";
+import { stockGrid } from "./venues/tick.ts";
+import type { Grid } from "./venues/types.ts";
+
+/** 하루 매수 한도·체결 금액의 통화 — 국장 원, 미장 달러, 코인 USDT */
+export type TradeCurrency = "KRW" | "USD" | "USDT";
+export const TRADE_CURRENCIES = ["KRW", "USD", "USDT"] as const;
+
+/** 코인 자동 매매는 USDT 마켓만 — 한도·금액을 한 통화로 센다 */
+export const CRYPTO_AUTO_QUOTE = "USDT";
+
+/** 코인 심볼의 기준 자산 (BTCUSDT → BTC) */
+export const cryptoBase = (symbol: string): string => (symbol.endsWith(CRYPTO_AUTO_QUOTE) ? symbol.slice(0, -CRYPTO_AUTO_QUOTE.length) : symbol);
+
+/** 코인 자동 매매를 할 수 없는 심볼이면 이유 */
+export function cryptoAutoProblem(symbol: string): string | null {
+	if (!symbol.endsWith(CRYPTO_AUTO_QUOTE) || symbol.length <= CRYPTO_AUTO_QUOTE.length) return `코인 자동 매매는 USDT 마켓만 됩니다 (예: BTCUSDT) — ${symbol}`;
+	return null;
+}
+
+/** 수량 단위 — 주식 "주", 코인 기준 자산 */
+export const unitOf = (venue: Venue, symbol: string): string => (venue === "binance" ? cryptoBase(symbol) : "주");
+
+/** 금액 표시 — 1,000원 · $12.50 · 12.5 USDT */
+export function moneyText(v: number, c: TradeCurrency): string {
+	if (c === "KRW") return `${Math.round(v).toLocaleString("en-US")}원`;
+	if (c === "USD") return `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+	return `${v.toLocaleString("en-US", { maximumFractionDigits: v >= 1 ? 2 : 8 })} USDT`;
+}
+
+/** 수량 표시 — 12주 · 0.015 BTC (지수 표기 없이) */
+export function qtyText(q: number, unit: string): string {
+	if (unit === "주") return `${q.toLocaleString("en-US")}주`;
+	return `${q.toLocaleString("en-US", { maximumFractionDigits: 8 })} ${unit}`;
+}
 
 export const ORDER_DEFAULTS = {
 	BUY: { worstPct: 1, urgency: "patient", deadlineSec: 60 },
@@ -23,10 +57,11 @@ export const KRX_CLOSING_CALL_MIN = 10;
 
 export function validateOrderRule(r: OrderRule): string[] {
 	const e: string[] = [];
-	const s = r.size as Partial<Record<"shares" | "amount" | "holdingPct", number>>;
-	const kinds = (["shares", "amount", "holdingPct"] as const).filter((k) => s[k] !== undefined);
-	if (kinds.length !== 1) e.push("수량은 주(shares)·금액(amount)·보유 %(holdingPct) 중 하나만 정합니다");
+	const s = r.size as Partial<Record<"shares" | "qty" | "amount" | "holdingPct", number>>;
+	const kinds = (["shares", "qty", "amount", "holdingPct"] as const).filter((k) => s[k] !== undefined);
+	if (kinds.length !== 1) e.push("수량은 주(shares)·코인 수량(qty)·금액(amount)·보유 %(holdingPct) 중 하나만 정합니다");
 	if (s.shares !== undefined && (!Number.isInteger(s.shares) || s.shares < 1 || s.shares > 1_000_000)) e.push("주 수는 1 이상의 정수입니다");
+	if (s.qty !== undefined && !(s.qty > 0 && Number.isFinite(s.qty))) e.push("코인 수량은 0보다 커야 합니다");
 	if (s.amount !== undefined && !(s.amount > 0 && Number.isFinite(s.amount))) e.push("금액은 0보다 커야 합니다");
 	if (s.holdingPct !== undefined && !(s.holdingPct > 0 && s.holdingPct <= 100)) e.push("보유 %는 0 초과 100 이하입니다");
 	if (s.holdingPct !== undefined && r.side !== "SELL") e.push("보유 %는 매도에만 씁니다");
@@ -35,9 +70,10 @@ export function validateOrderRule(r: OrderRule): string[] {
 	return e;
 }
 
-export function sizeText(size: OrderSize, currency: "KRW" | "USD"): string {
-	if ("shares" in size) return `${size.shares.toLocaleString("en-US")}주`;
-	if ("amount" in size) return currency === "KRW" ? `${Math.round(size.amount).toLocaleString("en-US")}원어치` : `$${size.amount.toLocaleString("en-US")}어치`;
+export function sizeText(size: OrderSize, currency: TradeCurrency, unit = "주"): string {
+	if ("shares" in size) return qtyText(size.shares, "주");
+	if ("qty" in size) return qtyText(size.qty, unit);
+	if ("amount" in size) return currency === "USD" ? `$${size.amount.toLocaleString("en-US")}어치` : `${moneyText(size.amount, currency)}어치`;
 	return `매도 가능 수량의 ${size.holdingPct}%`;
 }
 
@@ -48,28 +84,42 @@ export interface Plan {
 	maxAmount: number;
 }
 
-/** 기준가·매도 가능 수량으로 수량과 최악 허용가를 정한다. 낼 수 없으면 이유 */
-export function planOrder(rule: OrderRule, ctx: { market: Market; ref: number; sellable?: number }): Plan | { error: string } {
+/**
+ * 기준가·매도 가능 수량으로 수량과 최악 허용가를 정한다. 낼 수 없으면 이유 —
+ * small = 최소 수량·최소 주문금액에 못 미친다 (보호 트리거는 이러면 남은 부스러기를 포기하고 끝낸다).
+ * 격자(grid)를 주지 않으면 market 의 주식 표 (호가 단위 · 정수 주).
+ */
+export function planOrder(rule: OrderRule, ctx: { market?: Market; grid?: Grid; ref: number; sellable?: number }): Plan | { error: string; small?: boolean } {
 	if (!(ctx.ref > 0)) return { error: "기준가를 알 수 없습니다 (호가·종가 없음)" };
+	const g = ctx.grid ?? stockGrid(ctx.market ?? "KR");
+	const stock = g.unit === "주";
 	const buy = rule.side === "BUY";
-	const worst = roundPrice(ctx.market, ctx.ref * (1 + ((buy ? 1 : -1) * rule.worstPct) / 100), buy ? "down" : "up");
+	const worst = g.roundPrice(ctx.ref * (1 + ((buy ? 1 : -1) * rule.worstPct) / 100), buy ? "down" : "up");
 	if (!(worst > 0)) return { error: "최악 허용가가 0 이하입니다" };
 	let qty: number;
 	const s = rule.size;
-	if ("shares" in s) qty = s.shares;
-	else if ("amount" in s) qty = Math.floor(s.amount / worst);
-	else qty = Math.floor(((ctx.sellable ?? 0) * s.holdingPct) / 100 + 1e-9);
+	if ("shares" in s) qty = g.floorQty(s.shares);
+	else if ("qty" in s) qty = g.floorQty(s.qty);
+	else if ("amount" in s) qty = g.floorQty(s.amount / worst);
+	else qty = g.floorQty(((ctx.sellable ?? 0) * s.holdingPct) / 100);
 	if (!buy) {
 		if (ctx.sellable === undefined) return { error: "매도 가능 수량을 확인하지 못했습니다" };
 		if (ctx.sellable <= 0) return { error: "매도 가능 수량이 없습니다" };
-		qty = Math.min(qty, ctx.sellable);
+		qty = Math.min(qty, g.floorQty(ctx.sellable));
 	}
-	if (qty < 1) return { error: "amount" in s ? `금액이 1주 최악 허용가(${worst})보다 작습니다` : "주문할 수량이 1주보다 작습니다" };
+	if (qty < g.minQty || qty <= 0) {
+		if (stock) return { error: "amount" in s ? `금액이 1주 최악 허용가(${worst})보다 작습니다` : "주문할 수량이 1주보다 작습니다", small: true };
+		return { error: `주문할 수량이 최소 수량(${qtyText(g.minQty, g.unit)})보다 작습니다`, small: true };
+	}
+	// 체결될 수 있는 가장 낮은 가격 기준 (매수는 기준가, 매도는 최악 허용가) — 거래소는 가격 × 수량으로 본다
+	const low = Math.min(ctx.ref, worst);
+	if (g.minNotional > 0 && qty * low < g.minNotional) return { error: `주문 금액(약 ${(qty * low).toFixed(2)})이 거래소 최소 주문금액(${g.minNotional})보다 작습니다`, small: true };
 	return { quantity: qty, worstPrice: worst, maxAmount: qty * worst };
 }
 
-/** 정규장 안인가 — 아니면 이유. 휴장일은 따로 보지 않는다 (봉이 안 와서 신호도 없다) */
-export function sessionProblem(venue: "krx" | "us", now: number): string | null {
+/** 정규장 안인가 — 아니면 이유. 휴장일은 따로 보지 않는다 (봉이 안 와서 신호도 없다). 코인은 24시간 */
+export function sessionProblem(venue: Venue, now: number): string | null {
+	if (venue === "binance") return null;
 	const m = MARKETS[venue];
 	const d = localDate(now, m.tz);
 	if (d.weekday === 0 || d.weekday === 6) return `${m.label} 휴장(주말)`;
@@ -81,26 +131,28 @@ export function sessionProblem(venue: "krx" | "us", now: number): string | null 
 }
 
 /** 하루 매수 한도 — 한도가 없으면 매수하지 않는다 */
-export function dailyLimitProblem(maxAmount: number, spentToday: number, limit: number | null, currency: "KRW" | "USD"): string | null {
-	const f = (v: number) => (currency === "KRW" ? `${Math.round(v).toLocaleString("en-US")}원` : `$${v.toFixed(2)}`);
+export function dailyLimitProblem(maxAmount: number, spentToday: number, limit: number | null, currency: TradeCurrency): string | null {
+	const f = (v: number) => moneyText(v, currency);
 	if (limit === null || !(limit > 0)) return `하루 매수 한도(${currency})가 없습니다 — 설정 → 감시 → 자동 매매 한도`;
 	if (spentToday + maxAmount > limit + 1e-9) return `하루 매수 한도 초과 — 오늘 ${f(spentToday)} + 이번 최대 ${f(maxAmount)} > 한도 ${f(limit)}`;
 	return null;
 }
 
-/** 하루 한도를 세는 날 — 시장 현지 날짜 */
-export function tradingDay(venue: "krx" | "us", now: number): string {
+/** 하루 한도를 세는 날 — 시장 현지 날짜 (코인은 UTC) */
+export function tradingDay(venue: Venue, now: number): string {
+	if (venue === "binance") return new Date(now).toISOString().slice(0, 10);
 	return localDate(now, MARKETS[venue].tz).ymd;
 }
 
-export const currencyOf = (venue: "krx" | "us"): "KRW" | "USD" => (venue === "krx" ? "KRW" : "USD");
+export const currencyOf = (venue: Venue): TradeCurrency => (venue === "krx" ? "KRW" : venue === "us" ? "USD" : "USDT");
 
 /** 주문 동작 한 줄 — "매수 5,000,000원어치 · 한국투자 ****-01 · 최악 +1% · 기다리며 60초" */
-export function orderText(a: { target: OrderTarget; order: OrderRule; protect?: ProtectRule; position?: Position }, venue: "krx" | "us"): string {
+export function orderText(a: { target: OrderTarget; order: OrderRule; protect?: ProtectRule; position?: Position }, venue: Venue, symbol = ""): string {
 	const r = a.order;
+	const unit = unitOf(venue, symbol);
 	const how = r.urgency === "patient" ? `기다리며 ${r.deadlineSec}초` : `즉시 (${r.deadlineSec}초 안)`;
-	const base = `${r.side === "BUY" ? "매수" : "매도"} ${sizeText(r.size, currencyOf(venue))} · ${a.target.accountLabel} · 최악 ${r.side === "BUY" ? "+" : "−"}${r.worstPct}% · ${how}`;
-	if (a.position) return `보호 ${a.position.shares}주 (평단 ${a.position.avgPrice.toLocaleString("en-US", { maximumFractionDigits: 2 })}) · ${a.target.accountLabel}`;
+	const base = `${r.side === "BUY" ? "매수" : "매도"} ${sizeText(r.size, currencyOf(venue), unit)} · ${a.target.accountLabel} · 최악 ${r.side === "BUY" ? "+" : "−"}${r.worstPct}% · ${how}`;
+	if (a.position) return `보호 ${qtyText(a.position.shares, unit)}${a.position.avgPrice > 0 ? ` (평단 ${a.position.avgPrice.toLocaleString("en-US", { maximumFractionDigits: 8 })})` : ""} · ${a.target.accountLabel}`;
 	if (a.protect) return `${base} → 체결 후 ${protectRuleText(a.protect)}`;
 	return base;
 }
@@ -127,10 +179,25 @@ export function validateProtect(p: ProtectRule): string[] {
 	return e;
 }
 
+/** 코인 격자를 모를 때 (기동 복구 등) — 유효숫자 8자리로 (판정용 가격이라 호가 단위가 아니어도 된다) */
+export const LOOSE_GRID: Grid = {
+	roundPrice: (p, dir) => {
+		if (!(p > 0)) return 0;
+		const e = 10 ** (Math.floor(Math.log10(p)) - 7);
+		return Number(((dir === "down" ? Math.floor(p / e + 1e-9) : Math.ceil(p / e - 1e-9)) * e).toPrecision(8));
+	},
+	stepPrice: (p) => p,
+	floorQty: (q) => Math.floor(q * 1e8 + 1e-6) / 1e8,
+	minQty: 0,
+	minNotional: 0,
+	unit: "",
+};
+
 /** 평단으로 손절·익절 가격 — 손절은 호가 단위 내림, 익절은 올림 (조건은 종가 < 손절가 · 종가 > 익절가) */
-export function protectPrices(p: Pick<ProtectRule, "stop" | "take">, avg: number, market: Market): { stopPrice: number | null; takePrice: number | null; problems: string[] } {
-	const stopPrice = p.stop ? ("price" in p.stop ? p.stop.price : roundPrice(market, avg * (1 - p.stop.pct / 100), "down")) : null;
-	const takePrice = p.take ? ("price" in p.take ? p.take.price : roundPrice(market, avg * (1 + p.take.pct / 100), "up")) : null;
+export function protectPrices(p: Pick<ProtectRule, "stop" | "take">, avg: number, market: Market | Grid): { stopPrice: number | null; takePrice: number | null; problems: string[] } {
+	const g = typeof market === "string" ? stockGrid(market) : market;
+	const stopPrice = p.stop ? ("price" in p.stop ? p.stop.price : g.roundPrice(avg * (1 - p.stop.pct / 100), "down")) : null;
+	const takePrice = p.take ? ("price" in p.take ? p.take.price : g.roundPrice(avg * (1 + p.take.pct / 100), "up")) : null;
 	const problems: string[] = [];
 	if (stopPrice !== null && takePrice !== null && !(stopPrice < takePrice)) problems.push("손절가가 익절가보다 낮아야 합니다");
 	return { stopPrice, takePrice, problems };
@@ -174,8 +241,9 @@ export function protectRuleText(p: ProtectRule): string {
 	return `${bits.join(" · ")} (${INTERVAL_LABEL[p.interval] ?? p.interval} 종가)`;
 }
 
-/** 새 주문을 낼 수 있는 남은 시간 (ms) — 국장은 종가 단일가 전까지. 체결 제한 시간을 여기에 맞춘다 */
-export function sessionRemainingMs(venue: "krx" | "us", now: number): number {
+/** 새 주문을 낼 수 있는 남은 시간 (ms) — 국장은 종가 단일가 전까지, 코인은 끝이 없다. 체결 제한 시간을 여기에 맞춘다 */
+export function sessionRemainingMs(venue: Venue, now: number): number {
+	if (venue === "binance") return Number.POSITIVE_INFINITY;
 	const m = MARKETS[venue];
 	const s = sessionOf({ market: { venue, symbol: "" } }, localDate(now, m.tz).ymd);
 	const end = venue === "krx" ? s.close - KRX_CLOSING_CALL_MIN * 60_000 : s.close;

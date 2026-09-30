@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { migrate } from "@alphafolio/ledger";
-import { VenueUnknown, type Book, type ExecVenue, type OrderTarget, type TriggerSpec, type VenueOrderState, type VenuePlace, type WatchBar } from "@alphafolio/broker";
+import { cryptoGrid, VenueUnknown, type Book, type ExecVenue, type Grid, type OrderTarget, type TriggerSpec, type VenueMarket, type VenueOrderState, type VenuePlace, type WatchBar } from "@alphafolio/broker";
 import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d1.ts";
 import { OrderTokenGuard } from "../src/order-tokens.ts";
 import { OrderRunner } from "../src/order-runner.ts";
@@ -26,7 +26,8 @@ const TARGET: OrderTarget = { broker: "kis", account: "abc123def456", accountLab
 
 class FakeVenue implements ExecVenue {
 	label = "가짜 국장";
-	market = "KR" as const;
+	market: VenueMarket = "KR";
+	grid?: Grid;
 	symbol = "005930";
 	supportsIoc = false;
 	idempotent = false;
@@ -378,11 +379,12 @@ describe("켜기", () => {
 	});
 
 	it("한도 설정 — 앱 화면, 0 이하 거절, 지우기", async () => {
-		assert.deepEqual(await ops.setLimit("ms", "USD", 2000), { KRW: 5_000_000, USD: 2000 });
+		assert.deepEqual(await ops.setLimit("ms", "USD", 2000), { KRW: 5_000_000, USD: 2000, USDT: null });
 		await assert.rejects(ops.setLimit("ms", "USD", -1), /0보다 큰/);
-		assert.deepEqual(await ops.setLimit("ms", "USD", null), { KRW: 5_000_000, USD: null });
+		assert.deepEqual(await ops.setLimit("ms", "USD", null), { KRW: 5_000_000, USD: null, USDT: null });
+		assert.deepEqual(await ops.setLimit("ms", "USDT", 300), { KRW: 5_000_000, USD: null, USDT: 300 });
 		const v = await ops.view("ms");
-		assert.deepEqual(v.trading?.limits, { KRW: 5_000_000, USD: null });
+		assert.deepEqual(v.trading?.limits, { KRW: 5_000_000, USD: null, USDT: 300 });
 	});
 });
 
@@ -492,5 +494,112 @@ describe("연계주문 (보호)", () => {
 		});
 		const id = await arm(spec);
 		assert.match(ops.list("ms").find((w) => w.id === id)!.order ?? "", /보호 5주 \(평단 70,000\)/);
+	});
+});
+
+describe("코인 자동 매매 (Binance 현물)", () => {
+	/** 2026-09-27 (일) 03:00 KST = 09-26 (토) 18:00 UTC — 주식이면 휴장 */
+	const SUN_3AM = Date.parse("2026-09-27T03:00:00+09:00");
+	const BINANCE: OrderTarget = { broker: "binance", account: "f00dcafe0000", accountLabel: "Binance 현물 (키 f00dca)" };
+	const BTC = {
+		symbol: "BTCUSDT", status: "TRADING", base: "BTC", quote: "USDT", orderTypes: ["LIMIT"], spot: true,
+		tickSize: "0.01", minPrice: "0.01", maxPrice: "1000000", stepSize: "0.00001", minQty: "0.00001", maxQty: "9000",
+		marketStepSize: "0.00001", marketMinQty: "0", marketMaxQty: "120", minNotional: "5", notionalAppliesToMarket: true,
+	};
+	const coinSpec = (over: Partial<TriggerSpec> = {}): TriggerSpec => ({
+		name: "BTC 돌파 매수",
+		condition: { market: { venue: "binance", symbol: "BTCUSDT" }, interval: "1m", when: "bar_close", all: [{ left: "close", op: ">", right: 84_000 }], confirmBars: 1, fire: "on_enter" },
+		action: { kind: "order", target: BINANCE, order: { side: "BUY", size: { amount: 100 }, worstPct: 1, urgency: "immediate", deadlineSec: 30 } },
+		limits: { maxFires: 1, cooldownSec: 0, expiresAt: new Date(SUN_3AM + 30 * 86_400_000).toISOString() },
+		conversationId: null,
+		...over,
+	});
+	const protectOf = (parent: string) => store.list("ms").find((t) => t.action.kind === "order" && t.action.position?.parentId === parent)!;
+
+	beforeEach(async () => {
+		clock = SUN_3AM;
+		venue.market = "CRYPTO";
+		venue.grid = cryptoGrid(BTC);
+		venue.symbol = "BTCUSDT";
+		venue.ob = { bids: [{ price: 83_999.99, volume: 2 }], asks: [{ price: 84_000, volume: 2 }], at: 0 };
+		await trades.setLimit("ms", "USDT", 500);
+	});
+
+	it("주말 새벽에도 — USDT 금액을 최악 허용가로 나눠 코인 수량 단위로, 하루는 UTC", async () => {
+		const id = await arm(coinSpec());
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(SUN_3AM - MIN, 84_100), closeAt: SUN_3AM });
+		// 중간가 83,999.995 × 1.01 = 84,839.99 → 100 / 84,839.99 = 0.0011787 → 0.00117 BTC
+		assert.deepEqual(
+			venue.placed.map((p) => [p.side, p.quantity]),
+			[["BUY", 0.00117]],
+		);
+		const [x] = await trades.recent("ms");
+		assert.equal(x!.state, "filled");
+		assert.equal(x!.currency, "USDT");
+		assert.equal(x!.day, "2026-09-26");
+		assert.equal(x!.broker, "binance");
+		assert.equal(x!.filledQty, 0.00117);
+		assert.equal(store.get("ms", id)!.state, "done");
+		assert.match(last().message.lines!.join("\n"), /매수 0\.00117\/0\.00117 BTC · 평균 84,000 USDT/);
+		assert.ok(Math.abs((await trades.spentToday("ms", "USDT", "2026-09-26")) - 0.00117 * 84_000) < 1e-9);
+	});
+
+	it("USDT 한도가 없거나 넘으면 매수하지 않는다 (원·달러 한도와 따로)", async () => {
+		await trades.setLimit("ms", "USDT", null);
+		const id = await arm(coinSpec());
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(SUN_3AM - MIN), closeAt: SUN_3AM });
+		assert.equal(venue.placed.length, 0);
+		assert.match(last().message.lines!.join(" "), /한도\(USDT\)가 없습니다/);
+		await trades.setLimit("ms", "USDT", 50);
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(SUN_3AM - 2 * MIN), closeAt: SUN_3AM - MIN });
+		assert.match(last().message.lines!.join(" "), /하루 매수 한도 초과 — 오늘 0 USDT \+ 이번 최대 99\.26 USDT > 한도 50 USDT/);
+		assert.equal(store.get("ms", id)!.fires, 0);
+	});
+
+	it("USDT 마켓이 아니면 주문하지 않는다", async () => {
+		const id = await arm(coinSpec({ condition: { ...coinSpec().condition, market: { venue: "binance", symbol: "ETHBTC" } } }));
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(SUN_3AM - MIN), closeAt: SUN_3AM });
+		assert.equal(venue.placed.length, 0);
+		assert.match(last().message.lines!.join(" "), /USDT 마켓만/);
+	});
+
+	it("연계주문 — 체결 수량(코인)으로 보호, 수수료로 모자란 만큼만 팔고 남은 부스러기는 끝낸다", async () => {
+		const id = await arm(coinSpec({ action: { kind: "order", target: BINANCE, order: { side: "BUY", size: { amount: 100 }, worstPct: 1, urgency: "immediate", deadlineSec: 30 }, protect: { stop: { pct: 5 }, take: { pct: 10 }, interval: "1m" } } }));
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(SUN_3AM - MIN, 84_100), closeAt: SUN_3AM });
+		const p = protectOf(id);
+		assert.ok(p.action.kind === "order");
+		// 평단 84,000 → 손절 79,800 · 익절 92,400 (0.01 단위)
+		assert.deepEqual(p.action.position, { shares: 0.00117, avgPrice: 84_000, stopPrice: 79_800, takePrice: 92_400, parentId: id });
+		assert.deepEqual(p.action.order.size, { qty: 0.00117 });
+		assert.match(last().message.lines!.join("\n"), /보호 켬 \(w[0-9a-f]{8}\): 0\.00117 BTC — 손절 < 79,800/);
+		// 수수료 0.1% 가 BTC 로 빠져 free 는 0.0011688 → 0.00116 만 팔 수 있다
+		sellable = 0.00116;
+		venue.placed = [];
+		venue.ob = { bids: [{ price: 79_500, volume: 2 }], asks: [{ price: 79_500.01, volume: 2 }], at: 0 };
+		await runner.submit({ trigger: p, bar: bar(SUN_3AM, 79_600), closeAt: SUN_3AM + MIN });
+		assert.deepEqual(
+			venue.placed.map((x) => [x.side, x.quantity]),
+			[["SELL", 0.00116]],
+		);
+		// 남은 0.00001 BTC (약 0.8 USDT) 는 최소 주문금액 미만 — 더 팔 수 없어 끝낸다
+		assert.equal(store.get("ms", p.id)!.state, "done");
+		assert.match(last().message.title, /손절 매도 체결/);
+		assert.match(last().message.lines!.join(" "), /포지션을 다 팔아 보호를 끝냈습니다/);
+	});
+
+	it("보호할 게 최소 주문 단위보다 작으면 보호를 끈다", async () => {
+		const pos = { shares: 0.00003, avgPrice: 0, stopPrice: 80_000, takePrice: null, parentId: null };
+		const id = await arm(
+			coinSpec({
+				condition: { market: { venue: "binance", symbol: "BTCUSDT" }, interval: "1m", when: "bar_close", all: [{ left: "close", op: "<", right: 80_000 }], confirmBars: 1, fire: "while_true" },
+				action: { kind: "order", target: BINANCE, order: { side: "SELL", size: { qty: 0.00003 }, worstPct: 2, urgency: "immediate", deadlineSec: 30 }, position: pos },
+				limits: { maxFires: null, cooldownSec: 0, expiresAt: new Date(SUN_3AM + 86_400_000).toISOString() },
+			}),
+		);
+		sellable = 0.00003;
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(SUN_3AM - MIN, 79_000), closeAt: SUN_3AM });
+		assert.equal(venue.placed.length, 0);
+		assert.equal(store.get("ms", id)!.state, "off");
+		assert.match(last().message.lines!.join(" "), /최소 주문금액.*부스러기는 팔 수 없어 보호를 끝냅니다/);
 	});
 });

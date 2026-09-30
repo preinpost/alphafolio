@@ -154,6 +154,7 @@ export interface WatchEventItem {
 		reason?: string | null;
 		// 자동 매매 결과 (kind "ordered")
 		side?: "BUY" | "SELL";
+		symbol?: string;
 		status?: "filled" | "partial" | "none" | "unknown";
 		quantity?: number;
 		filledQty?: number;
@@ -161,13 +162,16 @@ export interface WatchEventItem {
 	};
 }
 
+/** 자동 매매 통화 — 국장 원 · 미장 달러 · 코인 USDT (Binance 현물) */
+export type TradeCurrency = "KRW" | "USD" | "USDT";
+
 /** 자동 매매 한 번 (신호 하나) — 서버 execView */
 export interface TradeExecItem {
 	id: string;
 	triggerId: string;
 	symbol: string;
 	side: "BUY" | "SELL";
-	currency: "KRW" | "USD";
+	currency: TradeCurrency;
 	state: "running" | "filled" | "partial" | "none" | "unknown";
 	quantity: number;
 	worstPrice: number;
@@ -187,7 +191,7 @@ export interface WatchView {
 	telegram: { listening: boolean; problem: string | null };
 	storageReady: boolean;
 	/** 자동 매매 — 서버가 지원하지 않으면 null */
-	trading: { limits: { KRW: number | null; USD: number | null }; execs: TradeExecItem[] } | null;
+	trading: { limits: Record<TradeCurrency, number | null>; execs: TradeExecItem[] } | null;
 }
 
 export const api = {
@@ -271,8 +275,8 @@ export const api = {
 	resumeWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}/resume`, { method: "POST" }),
 	deleteWatch: (id: string) => request<unknown>(`/api/watch/${encodeURIComponent(id)}`, { method: "DELETE" }),
 	stopAllWatches: () => request<{ stopped: number }>("/api/watch/stop-all", { method: "POST" }),
-	setTradeLimit: (currency: "KRW" | "USD", dailyBuy: number | null) =>
-		request<{ limits: { KRW: number | null; USD: number | null } }>("/api/watch/limits", { method: "PUT", body: JSON.stringify({ currency, dailyBuy }) }),
+	setTradeLimit: (currency: TradeCurrency, dailyBuy: number | null) =>
+		request<{ limits: Record<TradeCurrency, number | null> }>("/api/watch/limits", { method: "PUT", body: JSON.stringify({ currency, dailyBuy }) }),
 
 	// ── 원격 MCP 서버 (설정 화면 전용 — 에이전트는 추가·연결할 수 없다) ───────
 	mcpServers: () => request<McpListing>("/api/mcp/servers"),

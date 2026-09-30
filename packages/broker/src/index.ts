@@ -43,4 +43,5 @@ export * from "./triggers/venues/types.ts";
 export * from "./triggers/venues/tick.ts";
 export * from "./triggers/venues/toss.ts";
 export * from "./triggers/venues/kis.ts";
+export * from "./triggers/venues/binance.ts";
 export * from "./triggers/venues/targets.ts";

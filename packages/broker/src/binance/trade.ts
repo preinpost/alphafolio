@@ -168,6 +168,16 @@ export async function freeBalances(c: BinanceCreds): Promise<Record<string, stri
 	return Object.fromEntries((r.balances ?? []).map((b) => [b.asset, b.free]));
 }
 
+/** 주문 권한 + free 잔고 — 자동 매매 계좌 확인용 (API 키에 현물 거래 권한이 없으면 canTrade=false) */
+export async function accountInfo(c: BinanceCreds): Promise<{ canTrade: boolean; free: Record<string, string> }> {
+	const r = (await signed("GET", "/api/v3/account", { omitZeroBalances: "true" }, c, "계좌 조회")) as {
+		canTrade?: boolean;
+		permissions?: string[];
+		balances?: Array<{ asset: string; free: string }>;
+	};
+	return { canTrade: r.canTrade !== false, free: Object.fromEntries((r.balances ?? []).map((b) => [b.asset, b.free])) };
+}
+
 export async function openOrders(c: BinanceCreds, symbol?: string): Promise<Array<BinanceOriginal & { symbol: string }>> {
 	const r = (await signed("GET", "/api/v3/openOrders", symbol ? { symbol } : {}, c, "미체결 조회")) as Array<Record<string, unknown>>;
 	return (Array.isArray(r) ? r : []).map((o) => ({

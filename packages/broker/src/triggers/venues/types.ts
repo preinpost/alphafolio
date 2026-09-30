@@ -8,6 +8,28 @@
  */
 import type { Market, OrderSide } from "../../orders.ts";
 
+/** 체결 시장 — 국장·미장 + 코인 (Binance 현물, 24시간) */
+export type VenueMarket = Market | "CRYPTO";
+
+/**
+ * 가격·수량 격자 — 체결기·규칙이 가격을 맞추고 수량을 자를 때.
+ * 주식은 호가 단위표 · 정수 주 (stockGrid), 코인은 종목마다 거래소 규칙 (tickSize · stepSize · 최소 주문금액).
+ */
+export interface Grid {
+	/** 유효한 가격으로 — down = 그 이하에서 가장 가까운 값, up = 그 이상 */
+	roundPrice(price: number, dir: "down" | "up"): number;
+	/** 한 호가 위(+1)·아래(−1) */
+	stepPrice(price: number, dir: 1 | -1): number;
+	/** 수량 단위로 내림 (주식 = 정수 주). 부동소수점 잡음(0.3 − 0.1)을 먼저 걷어 낸다 */
+	floorQty(qty: number): number;
+	/** 최소 수량 (주식 1) */
+	minQty: number;
+	/** 최소 주문금액 — 가격 × 수량 (없으면 0) */
+	minNotional: number;
+	/** 수량 단위 표시 ("주" · "BTC") */
+	unit: string;
+}
+
 export interface BookLevel {
 	price: number;
 	volume: number;
@@ -45,8 +67,10 @@ export interface VenueOrderState {
 export interface ExecVenue {
 	/** 표시용 ("토스 국장", "한국투자 미장") */
 	readonly label: string;
-	readonly market: Market;
+	readonly market: VenueMarket;
 	readonly symbol: string;
+	/** 가격·수량 격자 — 없으면 주식 표 (market 의 호가 단위 · 정수 주) */
+	readonly grid?: Grid;
 	/** IOC 지정가를 낼 수 있는가 (KIS 국장) */
 	readonly supportsIoc: boolean;
 	/** 같은 clientId 로 다시 보내면 이전 결과를 돌려주는가 (토스) — 응답을 못 받았을 때 한 번 다시 보낼 수 있다 */

@@ -15,16 +15,19 @@
  *     멱등성 키가 있는 곳(토스)만 **같은 clientId 로** 한 번 다시 보낸다 (주문이 하나로 유지된다)
  *   - 잔량 취소를 확인하지 못하면 unknown (살아 있는 주문이 더 체결될 수 있다)
  *   - 가격은 절대 최악 허용가를 넘지 않는다 (매수는 그 이하, 매도는 그 이상)
+ *
+ * 가격·수량 단위는 어댑터의 격자(grid)를 따른다 — 주식은 호가 단위표·정수 주, 코인은 거래소 규칙(tickSize·stepSize).
+ * 코인은 남은 수량이 최소 수량·최소 주문금액보다 작으면 더 내지 않는다 (거래소가 거절한다).
  */
 import type { OrderSide } from "../orders.ts";
-import { roundPrice, stepPrice } from "./venues/tick.ts";
+import { gridOf } from "./venues/tick.ts";
 import { VenueRejected, VenueUnknown, type Book, type BookLevel, type ExecVenue, type VenueOrderState } from "./venues/types.ts";
 
 export type Urgency = "immediate" | "patient";
 
 export interface ExecIntent {
 	side: OrderSide;
-	/** 정수 주 */
+	/** 주식은 정수 주, 코인은 수량 단위(stepSize)의 배수 */
 	quantity: number;
 	/** 매수 상한 · 매도 하한 */
 	worstPrice: number;
@@ -141,12 +144,12 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 	const stepMs = deps.stepMs ?? 10_000;
 	const settleMs = deps.settleMs ?? 3_000;
 	const { side } = intent;
-	const market = venue.market;
+	const grid = gridOf(venue);
 
-	if (!Number.isInteger(intent.quantity) || intent.quantity <= 0) throw new Error(`수량이 올바르지 않습니다: ${intent.quantity}`);
+	if (!(intent.quantity > 0) || grid.floorQty(intent.quantity) !== intent.quantity) throw new Error(`수량이 올바르지 않습니다: ${intent.quantity}`);
 	if (!/^[A-Za-z0-9_-]{1,30}$/.test(intent.nonce)) throw new Error(`nonce 형식이 올바르지 않습니다: ${intent.nonce}`);
 	// 최악 허용가도 호가 단위로 — 매수는 내림, 매도는 올림 (허용 범위 안쪽으로)
-	const worst = roundPrice(market, intent.worstPrice, side === "BUY" ? "down" : "up");
+	const worst = grid.roundPrice(intent.worstPrice, side === "BUY" ? "down" : "up");
 	if (!(worst > 0)) throw new Error(`최악 허용가가 올바르지 않습니다: ${intent.worstPrice}`);
 
 	const start = now();
@@ -154,6 +157,11 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 	const children: ChildOrder[] = [];
 	let remaining = intent.quantity;
 	let arrival: number | null = null;
+	/** 더 낼 수 있는 잔량인가 — 주식은 1주 이상, 코인은 최소 수량 이상 */
+	const more = (): boolean => remaining > 0 && remaining >= grid.minQty;
+	/** 거래소 최소 주문금액 미만이면 이유 (보내면 거절된다) */
+	const tooSmall = (price: number, qty: number): string | null =>
+		grid.minNotional > 0 && price * qty < grid.minNotional ? `남은 수량이 최소 주문금액(${grid.minNotional})보다 작아 더 내지 않았습니다` : null;
 
 	const record = async (c: ChildOrder) => {
 		if (deps.record) await deps.record({ ...c });
@@ -260,7 +268,7 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 	const finish = async (c: ChildOrder): Promise<void> => {
 		if (c.state === "open") await close(c);
 		else await record(c);
-		remaining -= c.filledQty;
+		remaining = grid.floorQty(remaining - c.filledQty);
 		if (c.state === "rejected") throw new Stop("rejected", `주문 거절: ${c.reason ?? "이유 없음"}`);
 	};
 
@@ -271,7 +279,7 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 		arrival = midPrice(book);
 
 		if (intent.urgency === "immediate") {
-			for (let k = 0; k < IMMEDIATE_ATTEMPTS && remaining > 0; k++) {
+			for (let k = 0; k < IMMEDIATE_ATTEMPTS && more(); k++) {
 				if (k > 0) {
 					if (now() >= deadline) break;
 					const fresh = await venue.book().catch(() => null);
@@ -287,13 +295,23 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 					break;
 				}
 				const price = sweepPrice(book, side, remaining, worst);
+				const small = tooSmall(price, remaining);
+				if (small) {
+					reason = small;
+					break;
+				}
 				const c = await send(price, remaining, venue.supportsIoc);
 				await watch(c, venue.supportsIoc ? now() : Math.min(deadline, now() + settleMs));
 				await finish(c);
 			}
 		} else {
 			let price = joinPrice(book, side, worst);
-			while (remaining > 0) {
+			while (more()) {
+				const small = tooSmall(price, remaining);
+				if (small) {
+					reason = small;
+					break;
+				}
 				const c = await send(price, remaining, false);
 				await watch(c, Math.min(deadline, now() + stepMs));
 				if (c.state === "done" && c.filledQty < c.quantity) {
@@ -312,7 +330,7 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 					const fresh = await venue.book().catch(() => null);
 					if (fresh) book = fresh;
 					const own = fresh ? (side === "BUY" ? fresh.bids[0]?.price : fresh.asks[0]?.price) : undefined;
-					let next = stepPrice(market, price, side === "BUY" ? 1 : -1);
+					let next = grid.stepPrice(price, side === "BUY" ? 1 : -1);
 					if (own !== undefined && better(side, next, own)) next = own;
 					next = clamp(side, next, worst);
 					if (next === price) {
@@ -328,7 +346,7 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 				if (now() >= deadline) break;
 			}
 		}
-		if (remaining > 0 && !reason) reason = now() >= deadline ? "기한 안에 다 체결되지 않아 잔량을 취소했습니다" : "잔량을 취소했습니다";
+		if (more() && !reason) reason = now() >= deadline ? "기한 안에 다 체결되지 않아 잔량을 취소했습니다" : "잔량을 취소했습니다";
 	} catch (err) {
 		if (err instanceof Stop) stopped = err;
 		else if (children.length === 0) throw err; // 아무것도 보내기 전 — 호출부가 "주문 안 함" 으로 처리한다
@@ -336,7 +354,7 @@ export async function execute(intent: ExecIntent, venue: ExecVenue, deps: ExecDe
 		reason = stopped.message;
 	}
 
-	const filled = children.reduce((s, c) => s + c.filledQty, 0);
+	const filled = grid.floorQty(children.reduce((s, c) => s + c.filledQty, 0));
 	const amount = children.reduce((s, c) => s + (c.avgPrice ?? 0) * c.filledQty, 0);
 	const avg = filled > 0 ? amount / filled : null;
 	const status: ExecStatus = stopped?.status === "unknown" ? "unknown" : filled >= intent.quantity ? "filled" : filled > 0 ? "partial" : "none";

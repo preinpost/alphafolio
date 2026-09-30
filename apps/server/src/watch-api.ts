@@ -225,8 +225,8 @@ export async function handleWatch(req: IncomingMessage, path: string, user: stri
 		if (path === "/api/watch/stop-all" && req.method === "POST") return { stopped: await ops.stopAll(user, "app") };
 		if (path === "/api/watch/limits" && req.method === "PUT") {
 			const body = await readJson(req);
-			const currency = body.currency === "USD" ? "USD" : body.currency === "KRW" ? "KRW" : null;
-			if (!currency) throw new HttpError(400, "currency 는 KRW 또는 USD");
+			const currency = body.currency === "USD" || body.currency === "KRW" || body.currency === "USDT" ? body.currency : null;
+			if (!currency) throw new HttpError(400, "currency 는 KRW · USD · USDT");
 			const v = body.dailyBuy === null || body.dailyBuy === "" || body.dailyBuy === undefined ? null : Number(body.dailyBuy);
 			return { limits: await ops.setLimit(user, currency, v) };
 		}

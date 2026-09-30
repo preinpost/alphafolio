@@ -6,6 +6,7 @@
  * 국장 구간 경계(2,000 · 5,000 · …)는 모두 윗 구간 단위의 배수라 경계를 넘어도 유효한 가격이 된다.
  */
 import { tickSize, type Market } from "../../orders.ts";
+import type { ExecVenue, Grid } from "./types.ts";
 
 /** 미장은 센트 정수로 — 4.35 / 0.01 = 434.999… 같은 부동소수점 잡음을 피한다 */
 const cents = (p: number): number => Math.round(p * 1_000_000) / 10_000;
@@ -36,4 +37,23 @@ export function stepPrice(market: Market, price: number, dir: 1 | -1): number {
 /** 증권사에 보낼 가격 문자열 — 국장 정수, 미장 소수 둘째 자리 */
 export function priceText(market: Market, price: number): string {
 	return market === "US" ? price.toFixed(2) : String(Math.round(price));
+}
+
+/** 주식 격자 — 호가 단위표 · 정수 주 */
+export function stockGrid(market: Market): Grid {
+	return {
+		roundPrice: (p, dir) => roundPrice(market, p, dir),
+		stepPrice: (p, dir) => stepPrice(market, p, dir),
+		floorQty: (q) => Math.floor(q + 1e-9),
+		minQty: 1,
+		minNotional: 0,
+		unit: "주",
+	};
+}
+
+/** 어댑터의 격자 — 코인 어댑터는 반드시 grid 를 준다 */
+export function gridOf(v: Pick<ExecVenue, "market" | "grid">): Grid {
+	if (v.grid) return v.grid;
+	if (v.market === "CRYPTO") throw new Error("코인 체결 어댑터에 가격·수량 규칙(grid)이 없습니다");
+	return stockGrid(v.market);
 }

@@ -12,11 +12,20 @@
  * 결과를 모르면 그 트리거를 일시정지한다 (사람이 증권사 앱에서 확인하고 다시 켠다). 자동 재시도는 없다.
  *
  * 기동 복구: running 으로 남은 신호 — 접수된 자식 주문은 상태를 보고 살아 있으면 취소, "보내는 중" 이었던 것은 결과 모름.
+ *
+ * 코인(Binance 현물, PLAN §40 4단계)도 같은 길이다 — 장 시간 검사가 없고(24시간), 하루는 UTC 날짜, 한도는 USDT.
+ * 수량은 코인 단위(소수)라 격자(venue.grid)로 자른다. 보호 트리거의 남은 수량이 최소 주문 단위보다 작으면(수수료로 빠진 부스러기) 끝낸다.
  */
 import { randomBytes } from "node:crypto";
 import {
+	cryptoAutoProblem,
+	currencyOf,
 	execute,
-	isStock,
+	gridOf,
+	LOOSE_GRID,
+	moneyText,
+	qtyText,
+	unitOf,
 	PROTECT_EXTRA_DAYS,
 	PROTECT_SELL,
 	protectCondition,
@@ -36,6 +45,7 @@ import {
 	type ExecDeps,
 	type ExecReport,
 	type ExecVenue,
+	type Grid,
 	type OrderTarget,
 	type WatchBar,
 } from "@alphafolio/broker";
@@ -66,12 +76,13 @@ export interface RunnerDeps {
 	exec?: Pick<ExecDeps, "sleep" | "now" | "pollMs" | "stepMs" | "settleMs">;
 }
 
-const money = (v: number, c: Currency): string => (c === "KRW" ? `${Math.round(v).toLocaleString("en-US")}원` : `$${v.toFixed(2)}`);
+const money = (v: number, c: Currency): string => (c === "KRW" ? `${Math.round(v).toLocaleString("en-US")}원` : c === "USD" ? `$${v.toFixed(2)}` : moneyText(v, c));
 const SIDE = { BUY: "매수", SELL: "매도" } as const;
 const STATUS: Record<ExecReport["status"], string> = { filled: "체결", partial: "일부 체결", none: "미체결", unknown: "결과 모름" };
 
-export function reportLines(r: ExecReport, plan: Pick<ExecPlan, "side" | "quantity">, currency: Currency): string[] {
-	const lines = [`${SIDE[plan.side]} ${r.filledQty}/${plan.quantity}주${r.avgPrice !== null ? ` · 평균 ${money(r.avgPrice, currency)}` : ""}`];
+export function reportLines(r: ExecReport, plan: Pick<ExecPlan, "side" | "quantity">, currency: Currency, unit = "주"): string[] {
+	const qty = unit === "주" ? `${r.filledQty}/${plan.quantity}주` : `${r.filledQty}/${qtyText(plan.quantity, unit)}`;
+	const lines = [`${SIDE[plan.side]} ${qty}${r.avgPrice !== null ? ` · 평균 ${money(r.avgPrice, currency)}` : ""}`];
 	if (r.slippageBps !== null && r.arrivalPrice !== null) lines.push(`신호 때 중간가 ${money(r.arrivalPrice, currency)} 대비 ${r.slippageBps >= 0 ? "+" : ""}${r.slippageBps}bp`);
 	if (r.reason) lines.push(r.reason);
 	return lines;
@@ -143,7 +154,9 @@ export class OrderRunner {
 		const c = t.source.condition;
 		const venueId = c.market.venue;
 		const symbol = c.market.symbol;
-		if (!isStock(venueId)) return this.skip(t, sig, "코인 자동 매매는 아직 없습니다");
+		const crypto = venueId === "binance";
+		const unsupported = crypto ? cryptoAutoProblem(symbol) : null;
+		if (unsupported) return this.skip(t, sig, unsupported);
 		if (t.state !== "armed") return this.skip(t, sig, `감시가 켜져 있지 않습니다 (${t.state})`);
 		const off = this.d.disabled();
 		if (off) return this.skip(t, sig, off);
@@ -168,11 +181,21 @@ export class OrderRunner {
 		}
 		const position = t.action.position;
 		if (position && sellable !== undefined && sellable <= 0) return this.closePosition(t, sig, "매도 가능 수량이 없습니다 (직접 팔았거나 옮겼습니다) — 보호를 끕니다");
+		let grid: Grid;
+		try {
+			grid = gridOf(venue);
+		} catch (err) {
+			return this.skip(t, sig, err instanceof Error ? err.message : String(err));
+		}
 		// 보호 트리거는 남은 포지션만 판다 (보유 전체가 아니라)
-		const rule = position ? { ...order, size: { shares: position.shares } } : order;
-		const plan = planOrder(rule, { market: venue.market, ref, sellable });
-		if ("error" in plan) return this.skip(t, sig, plan.error);
-		const currency: Currency = venue.market === "KR" ? "KRW" : "USD";
+		const rule = position ? { ...order, size: crypto ? { qty: position.shares } : { shares: position.shares } } : order;
+		const plan = planOrder(rule, { grid, ref, sellable });
+		if ("error" in plan) {
+			// 코인 보호 — 남은 게 최소 주문 단위보다 작다 (수수료로 빠진 부스러기). 팔 수 없으니 끝낸다
+			if (crypto && position && plan.small) return this.closePosition(t, sig, `${plan.error} — 남은 부스러기는 팔 수 없어 보호를 끝냅니다`);
+			return this.skip(t, sig, plan.error);
+		}
+		const currency: Currency = currencyOf(venueId);
 		const day = tradingDay(venueId, this.now());
 		if (order.side === "BUY") {
 			const limits = await this.d.trades.limits(t.member);
@@ -199,7 +222,7 @@ export class OrderRunner {
 			console.log(`[trade] 같은 봉 신호 — 건너뜀 ${t.id} bar=${kstShort(sig.bar.t)}`);
 			return;
 		}
-		console.log(`[trade] 시작 user=${t.member} ${t.id} ${SIDE[order.side]} ${symbol} ${plan.quantity}주 최악 ${plan.worstPrice} (${venue.label})`);
+		console.log(`[trade] 시작 user=${t.member} ${t.id} ${SIDE[order.side]} ${symbol} ${qtyText(plan.quantity, grid.unit)} 최악 ${plan.worstPrice} (${venue.label})`);
 
 		const started = this.now();
 		const children: ChildOrder[] = [];
@@ -222,7 +245,7 @@ export class OrderRunner {
 		}
 		await this.d.trades.finish(id, report);
 		const leg = position ? protectLeg(position, sig.bar.close) : null;
-		await this.conclude(t, sig.bar.t, full, report, currency, leg ? [`${leg === "stop" ? "손절" : "익절"} — ${kstShort(sig.closeAt)} 마감 종가 ${sig.bar.close.toLocaleString("en-US")}`] : [], leg);
+		await this.conclude(t, sig.bar.t, full, report, currency, leg ? [`${leg === "stop" ? "손절" : "익절"} — ${kstShort(sig.closeAt)} 마감 종가 ${sig.bar.close.toLocaleString("en-US")}`] : [], leg, grid);
 	}
 
 	/** 보호할 포지션이 없다 — 트리거를 끄고 알린다 */
@@ -232,12 +255,14 @@ export class OrderRunner {
 	}
 
 	/** 매수 체결 → 보호 트리거 (손절·익절 한 트리거, 체결 수량·평단으로). 사람 승인은 매수 트리거를 켤 때 이미 받았다 */
-	private async armProtect(t: TriggerRecord, report: ExecReport, currency: Currency): Promise<string> {
+	private async armProtect(t: TriggerRecord, report: ExecReport, currency: Currency, grid?: Grid): Promise<string> {
 		if (t.action.kind !== "order" || !t.action.protect || report.avgPrice === null || report.filledQty <= 0) return "";
 		const p = t.action.protect;
 		const avg = report.avgPrice;
-		const { stopPrice, takePrice } = protectPrices(p, avg, currency === "KRW" ? "KR" : "US");
 		const base = t.source.condition;
+		const crypto = base.market.venue === "binance";
+		const unit = unitOf(base.market.venue, base.market.symbol);
+		const { stopPrice, takePrice } = protectPrices(p, avg, crypto ? (grid ?? LOOSE_GRID) : currency === "KRW" ? "KR" : "US");
 		const until = Math.max(Date.parse(t.expiresAt), this.now()) + PROTECT_EXTRA_DAYS * 86_400_000;
 		const spec: TriggerSpec = {
 			name: `${t.name} · 보호`,
@@ -245,7 +270,7 @@ export class OrderRunner {
 			action: {
 				kind: "order",
 				target: t.action.target,
-				order: { ...PROTECT_SELL, size: { shares: report.filledQty } },
+				order: { ...PROTECT_SELL, size: crypto ? { qty: report.filledQty } : { shares: report.filledQty } },
 				position: { shares: report.filledQty, avgPrice: avg, stopPrice, takePrice, parentId: t.id },
 			},
 			limits: { maxFires: null, cooldownSec: 0, expiresAt: new Date(until).toISOString() },
@@ -253,18 +278,31 @@ export class OrderRunner {
 		};
 		const rec = await this.d.store.create(t.member, spec);
 		await this.d.store.addEvent({ triggerId: rec.id, member: t.member, at: this.now(), kind: "armed", barT: null, detail: { name: rec.name, by: "auto", parentId: t.id }, notified: null });
-		console.log(`[trade] 보호 켬 user=${t.member} ${rec.id} ${report.filledQty}주 손절 ${stopPrice ?? "-"} 익절 ${takePrice ?? "-"}`);
-		return `보호 켬 (${rec.id}): ${report.filledQty}주 — ${protectText({ stopPrice, takePrice, avgPrice: avg }, p.interval)}`;
+		console.log(`[trade] 보호 켬 user=${t.member} ${rec.id} ${qtyText(report.filledQty, unit)} 손절 ${stopPrice ?? "-"} 익절 ${takePrice ?? "-"}`);
+		return `보호 켬 (${rec.id}): ${qtyText(report.filledQty, unit)} — ${protectText({ stopPrice, takePrice, avgPrice: avg }, p.interval)}`;
 	}
 
 	/** 보고 → 발동 횟수·상태 → 알림 (기동 복구도 여기로) */
-	private async conclude(t0: TriggerRecord, barT: number, plan: ExecPlan, report: ExecReport, currency: Currency, extra: string[] = [], leg: "stop" | "take" | null = null): Promise<void> {
+	private async conclude(
+		t0: TriggerRecord,
+		barT: number,
+		plan: ExecPlan,
+		report: ExecReport,
+		currency: Currency,
+		extra: string[] = [],
+		leg: "stop" | "take" | null = null,
+		grid?: Grid,
+	): Promise<void> {
 		const t = this.d.store.get(t0.member, t0.id) ?? t0;
 		const counted = report.filledQty > 0 || report.status === "unknown";
 		const fires = counted ? t.fires + 1 : t.fires;
+		const unit = plan.target.broker === "binance" ? unitOf("binance", plan.symbol) : "주";
 		// 보호 트리거는 횟수가 아니라 남은 수량으로 끝난다 — 다 팔면 끝 (손절·익절이 한 트리거라 다른 쪽도 같이)
 		const position = t.action.kind === "order" ? t.action.position : undefined;
-		const left = position ? Math.max(0, position.shares - report.filledQty) : null;
+		const g = grid ?? (unit === "주" ? null : LOOSE_GRID);
+		let left = position ? Math.max(0, g ? g.floorQty(position.shares - report.filledQty) : position.shares - report.filledQty) : null;
+		// 코인 — 남은 게 최소 수량·최소 주문금액 미만이면 더 팔 수 없다 (수수료 부스러기)
+		if (left !== null && left > 0 && g && report.filledQty > 0 && (left < g.minQty || left * (report.avgPrice ?? plan.ref) < g.minNotional)) left = 0;
 		const done = position ? left === 0 : counted && t.maxFires !== null && fires >= t.maxFires;
 		const alive = !!this.d.store.get(t.member, t.id);
 		if (alive) {
@@ -282,7 +320,7 @@ export class OrderRunner {
 		let protectLine = "";
 		if (alive && plan.side === "BUY") {
 			try {
-				protectLine = await this.armProtect(t, report, currency);
+				protectLine = await this.armProtect(t, report, currency, grid);
 			} catch (err) {
 				protectLine = `⚠ 보호(손절·익절)를 켜지 못했습니다: ${err instanceof Error ? err.message : err} — 직접 걸어 주세요`;
 			}
@@ -290,11 +328,11 @@ export class OrderRunner {
 		const at = this.now();
 		const lines = [
 			...extra,
-			...reportLines(report, plan, currency),
+			...reportLines(report, plan, currency, unit),
 			...(protectLine ? [protectLine] : []),
 			...(report.status === "unknown" ? ["⚠ 이 감시를 일시정지했습니다 — 증권사 앱에서 주문을 확인한 뒤 다시 켜 주세요."] : []),
 			...(done ? [position ? "포지션을 다 팔아 보호를 끝냈습니다." : `최대 ${t.maxFires}번을 채워 감시를 끝냈습니다.`] : []),
-			...(position && !done && left !== null && report.status !== "unknown" ? [`남은 ${left}주 — 다음 봉에도 조건이 맞으면 다시 팝니다.`] : []),
+			...(position && !done && left !== null && report.status !== "unknown" ? [`남은 ${qtyText(left, unit)} — 다음 봉에도 조건이 맞으면 다시 팝니다.`] : []),
 		];
 		const what = leg === "stop" ? "손절 매도" : leg === "take" ? "익절 매도" : SIDE[plan.side];
 		const message: NotifyMessage = {
@@ -320,11 +358,11 @@ export class OrderRunner {
 				avgPrice: report.avgPrice,
 				slippageBps: report.slippageBps,
 				reason: report.reason,
-				size: sizeText({ shares: plan.quantity }, currency),
+				size: sizeText(unit === "주" ? { shares: plan.quantity } : { qty: plan.quantity }, currency, unit),
 			},
 			notified,
 		});
-		console.log(`[trade] ${report.status} user=${t.member} ${t.id} ${report.filledQty}/${plan.quantity} avg=${report.avgPrice ?? "-"} ${report.reason ?? ""}`);
+		console.log(`[trade] ${report.status} user=${t.member} ${t.id} ${report.filledQty}/${plan.quantity}${unit === "주" ? "" : ` ${unit}`} avg=${report.avgPrice ?? "-"} ${report.reason ?? ""}`);
 	}
 
 	/**
@@ -382,7 +420,7 @@ export class OrderRunner {
 				c.reason = `상태 확인 실패: ${err instanceof Error ? err.message : err}`;
 			}
 		}
-		const filled = children.reduce((s, c) => s + c.filledQty, 0);
+		const filled = Number(children.reduce((s, c) => s + c.filledQty, 0).toFixed(12));
 		const amount = children.reduce((s, c) => s + (c.avgPrice ?? 0) * c.filledQty, 0);
 		const unknown = children.some((c) => c.state === "unknown");
 		const avg = filled > 0 ? amount / filled : null;

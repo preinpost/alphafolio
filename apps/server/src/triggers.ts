@@ -110,7 +110,7 @@ export function toSummary(rec: TriggerRecord, now: number): WatchSummary {
 		id: rec.id,
 		name: rec.name,
 		text: conditionText(rec.source.condition),
-		order: rec.action.kind === "order" && isStock(rec.source.condition.market.venue) ? orderText(rec.action, rec.source.condition.market.venue) : null,
+		order: rec.action.kind === "order" ? orderText(rec.action, rec.source.condition.market.venue, rec.source.condition.market.symbol) : null,
 		state: rec.state,
 		fires: rec.fires,
 		maxFires: rec.maxFires,

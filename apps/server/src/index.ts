@@ -35,8 +35,8 @@ import {
 	type DataCreds,
 	fetchWatchBars,
 	type Condition,
+	cryptoAutoProblem,
 	currencyOf,
-	isStock,
 	orderTarget,
 	targetSellable,
 	targetVenue,
@@ -182,7 +182,12 @@ async function main(): Promise<void> {
 		const off = autoTradeOff();
 		if (off) return off;
 		const venue = spec.condition.market.venue;
-		if (!isStock(venue)) return "코인 자동 매매는 아직 없습니다";
+		if (venue === "binance") {
+			const bad = cryptoAutoProblem(spec.condition.market.symbol);
+			if (bad) return bad;
+		}
+		// 코인은 Binance 계정으로만, 주식은 증권 계좌로만
+		if ((venue === "binance") !== (spec.action.target.broker === "binance")) return "시장과 주문 계좌가 맞지 않습니다 — 다시 준비해 주세요";
 		// 보호 트리거는 횟수가 아니라 남은 수량으로 끝난다
 		if (spec.limits.maxFires === null && !spec.action.position) return "자동 매매 감시는 최대 횟수가 필요합니다";
 		if (spec.action.position && spec.action.order.side !== "SELL") return "보호는 매도만 합니다";
@@ -392,7 +397,7 @@ async function main(): Promise<void> {
 			// 자동 매매 — 주문 계좌(키가 있는 곳)·하루 한도·서버 설정
 			orderTargets: async () => {
 				const out: OrderTarget[] = [];
-				for (const b of ["kis", "toss"] as const) {
+				for (const b of ["kis", "toss", "binance"] as const) {
 					try {
 						out.push(await orderTarget(brokerAccess(user), b));
 					} catch {

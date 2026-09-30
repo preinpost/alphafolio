@@ -6,10 +6,11 @@
  * 하루 매수 한도는 체결 금액(amount) + 진행 중인 신호의 최대 금액(reserved) 합으로 센다.
  */
 import { d1Query, type D1Config } from "@alphafolio/ledger";
-import type { ChildOrder, ExecIntent, ExecReport, ExecStatus, OrderTarget } from "@alphafolio/broker";
+import { TRADE_CURRENCIES, type ChildOrder, type ExecIntent, type ExecReport, type ExecStatus, type OrderTarget, type TradeCurrency } from "@alphafolio/broker";
 
 export type ExecState = "running" | ExecStatus;
-export type Currency = "KRW" | "USD";
+/** 국장 KRW · 미장 USD · 코인 USDT (Binance 현물 USDT 마켓) */
+export type Currency = TradeCurrency;
 
 /** 체결 의도 + 어디로 (기동 복구가 이것만으로 어댑터를 다시 만든다) */
 export interface ExecPlan extends ExecIntent {
@@ -25,7 +26,7 @@ export interface ExecRecord {
 	triggerId: string;
 	member: string;
 	barT: number;
-	broker: "kis" | "toss";
+	broker: OrderTarget["broker"];
 	symbol: string;
 	side: "BUY" | "SELL";
 	currency: Currency;
@@ -147,8 +148,8 @@ export class TradeStore {
 
 	async limits(member: string): Promise<Record<Currency, number | null>> {
 		const r = await d1Query<{ currency: string; daily_buy: number }>(this.d1(), "SELECT currency, daily_buy FROM trade_limits WHERE member = ?", [member]);
-		const out: Record<Currency, number | null> = { KRW: null, USD: null };
-		for (const x of r.results) if (x.currency === "KRW" || x.currency === "USD") out[x.currency] = x.daily_buy;
+		const out: Record<Currency, number | null> = { KRW: null, USD: null, USDT: null };
+		for (const x of r.results) if ((TRADE_CURRENCIES as readonly string[]).includes(x.currency)) out[x.currency as Currency] = x.daily_buy;
 		return out;
 	}
 

@@ -120,14 +120,18 @@ export interface TriggerLimits {
  * account: 토스 = accountSeq, KIS = 계좌번호 지문(해시 앞 12자리 — 계좌번호를 트리거에 남기지 않는다)
  */
 export interface OrderTarget {
-	broker: "kis" | "toss";
+	broker: "kis" | "toss" | "binance";
+	/** 토스 accountSeq · KIS 계좌번호 지문 · Binance API 키 지문 */
 	account: string;
 	/** 표시용 ("한국투자 ****-01") */
 	accountLabel: string;
 }
 
-/** 수량 — 정수 주 · 금액(시장 통화, 최악 허용가로 나눠 내림 — 이 금액을 넘지 않는다) · 매도 가능 수량의 % (매도만) */
-export type OrderSize = { shares: number } | { amount: number } | { holdingPct: number };
+/**
+ * 수량 — 정수 주(주식) · 코인 수량(qty, 코인만) · 금액(시장 통화 — 코인은 USDT, 최악 허용가로 나눠 내림 — 이 금액을 넘지 않는다) ·
+ * 매도 가능 수량의 % (매도만)
+ */
+export type OrderSize = { shares: number } | { qty: number } | { amount: number } | { holdingPct: number };
 
 export interface OrderRule {
 	side: "BUY" | "SELL";
@@ -155,6 +159,7 @@ export interface ProtectRule {
  * shares 는 남은 수량 — 팔 때마다 줄고, 0 이 되면 트리거가 끝난다.
  */
 export interface Position {
+	/** 남은 수량 — 주식은 주, 코인은 코인 수량 */
 	shares: number;
 	avgPrice: number;
 	stopPrice: number | null;

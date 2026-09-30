@@ -1,20 +1,22 @@
 /**
  * 체결 어댑터 실측 (PLAN §40 2단계) — **조회만** 한다. 주문·취소는 보내지 않는다.
  *
- *   1. 호가: KIS 국장(005930) · KIS 미장(AAPL 나스닥, ORCL 뉴욕) · 토스 국장·미장 — 정렬, 호가 단위, 최우선 호가 차이
+ *   1. 호가: KIS 국장(005930) · KIS 미장(AAPL 나스닥, ORCL 뉴욕) · 토스 국장·미장 · Binance 현물(BTCUSDT·ETHUSDT, 공개 — 키 불필요)
+ *      — 정렬, 호가 단위, 최우선 호가 차이
  *   2. 상태 조회 경로: KIS 오늘 일별 체결(TTTC0081R) · 미장 체결 내역(TTTS3035R) 이 규격 파라미터로 통과하는가 (건수만 출력)
  *
  * 실행: node spike/13-exec-venues.ts
  * KIS 토큰 캐시가 없으면 멈춘다 (발급 때 문자가 간다). 계좌 정보·주문 내용은 출력하지 않는다.
  */
 import {
+	binanceVenue,
 	callKisApi,
+	gridOf,
 	kisVenue,
 	kstShort,
 	localDate,
 	midPrice,
 	parseAccount,
-	roundPrice,
 	tokenKey,
 	tossVenue,
 	type Book,
@@ -58,7 +60,8 @@ if (kis) {
 
 function show(v: ExecVenue, b: Book): void {
 	const f = (l: { price: number; volume: number } | undefined) => (l ? `${l.price} × ${l.volume}` : "없음");
-	const onTick = [...b.asks, ...b.bids].every((l) => roundPrice(v.market, l.price, "down") === l.price);
+	const g = gridOf(v);
+	const onTick = [...b.asks, ...b.bids].every((l) => g.roundPrice(l.price, "down") === l.price);
 	const sorted = b.asks.every((l, i) => i === 0 || l.price > b.asks[i - 1]!.price) && b.bids.every((l, i) => i === 0 || l.price < b.bids[i - 1]!.price);
 	console.log(
 		`  ${v.label} ${v.symbol}: 매도 ${b.asks.length}단 (최우선 ${f(b.asks[0])}) · 매수 ${b.bids.length}단 (최우선 ${f(b.bids[0])}) · 중간 ${midPrice(b)} · 정렬 ${sorted ? "✓" : "✗"} · 호가 단위 ${onTick ? "✓" : "✗"}`,
@@ -87,6 +90,9 @@ if (toss) {
 	await probe("토스 005930", () => tossVenue(toss, "005930"));
 	await probe("토스 AAPL", () => tossVenue(toss, "AAPL"));
 }
+// 호가·종목 규칙은 공개 — 빈 키로 (서명 경로는 부르지 않는다)
+await probe("Binance BTCUSDT", () => binanceVenue({ key: "", secret: "" }, "BTCUSDT"));
+await probe("Binance ETHUSDT", () => binanceVenue({ key: "", secret: "" }, "ETHUSDT"));
 
 console.log("\n2. 상태 조회 경로 (건수만)");
 if (kis) {

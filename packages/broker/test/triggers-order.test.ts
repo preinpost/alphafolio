@@ -3,7 +3,7 @@
  *
  * 지켜야 할 것:
  *   - 주문 계좌가 둘이면 고르지 않는다 (사용자에게 묻게 한다)
- *   - 코인·자동 매매 꺼짐·계좌 없음은 준비하지 않는다
+ *   - 자동 매매 꺼짐·계좌 없음은 준비하지 않는다. 코인은 Binance 계정으로만, USDT 마켓만, 코인 수량(qty)·USDT 금액으로
  *   - 자동 매매는 최대 횟수가 필수 (기본 1)
  *   - 매수 한도가 없으면 카드에 "지금은 켤 수 없다" 경고
  */
@@ -11,14 +11,23 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWatchTools, type WatchConfirmCard } from "../src/triggers/tool.ts";
 import type { Condition, OrderTarget, TriggerSpec, WatchBar } from "../src/triggers/types.ts";
+import { cryptoGrid } from "../src/triggers/venues/binance.ts";
+import type { SymbolRules } from "../src/binance/trade.ts";
 
 const D = 86_400_000;
 const T0 = Date.parse("2026-05-01T00:00:00Z");
 const bars = (n: number): WatchBar[] => Array.from({ length: n }, (_, i) => ({ t: T0 + i * D, open: 70_000, high: 71_000, low: 69_000, close: 70_000, volume: 100 }));
 const KIS: OrderTarget = { broker: "kis", account: "aaa", accountLabel: "한국투자 ****78-01" };
 const TOSS: OrderTarget = { broker: "toss", account: "7", accountLabel: "토스 ****1234" };
+const BINANCE: OrderTarget = { broker: "binance", account: "f00dcafe0000", accountLabel: "Binance 현물 (키 f00dca)" };
+/** ETHUSDT 규칙 요약 — tick 0.01, step 0.0001, 최소 5 USDT */
+const ETH_RULES: SymbolRules = {
+	symbol: "ETHUSDT", status: "TRADING", base: "ETH", quote: "USDT", orderTypes: ["LIMIT", "MARKET"], spot: true,
+	tickSize: "0.01000000", minPrice: "0.01", maxPrice: "1000000", stepSize: "0.00010000", minQty: "0.00010000", maxQty: "9000",
+	marketStepSize: "0.0001", marketMinQty: "0.0001", marketMaxQty: "9000", minNotional: "5.00000000", notionalAppliesToMarket: true,
+};
 
-function setup(o: { targets?: OrderTarget[]; limits?: Record<"KRW" | "USD", number | null>; off?: string | null; position?: { sellable: number; avgPrice: number | null } } = {}) {
+function setup(o: { targets?: OrderTarget[]; limits?: Partial<Record<"KRW" | "USD" | "USDT", number | null>>; off?: string | null; position?: { sellable: number; avgPrice: number | null } } = {}) {
 	const prepared: TriggerSpec[] = [];
 	const [tool] = createWatchTools({
 		prepareWatch: (s) => (prepared.push(s), { token: "tok", expiresAt: 99 }),
@@ -33,6 +42,8 @@ function setup(o: { targets?: OrderTarget[]; limits?: Record<"KRW" | "USD", numb
 		tradeLimits: async () => o.limits ?? { KRW: 10_000_000, USD: null },
 		autoTradeOff: () => o.off ?? null,
 		position: async () => o.position ?? { sellable: 10, avgPrice: 71_200 },
+		// 네트워크 없이 — ETHUSDT 만 있다
+		cryptoRules: async (symbol) => (symbol === "ETHUSDT" ? cryptoGrid(ETH_RULES) : null),
 		now: () => Date.parse("2026-09-28T01:00:00Z"),
 	});
 	const run = async (p: Record<string, unknown>) => (await tool!.execute("id", p as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }>; details: WatchConfirmCard };
@@ -74,8 +85,9 @@ describe("watch_alert 자동 매매", () => {
 		assert.deepEqual(a.kind === "order" && a.target, TOSS);
 	});
 
-	it("막는 것 — 코인·꺼짐·계좌 없음·수량 둘·범위", async () => {
-		await assert.rejects(setup().run({ action: "prepare", symbol: "ETHUSDT", interval: "1h", all: [{ left: "close", op: ">", right: 1 }], order: { side: "BUY", shares: 1 } }), /코인 자동 매매/);
+	it("막는 것 — 코인에 주식 계좌만·꺼짐·계좌 없음·수량 둘·범위", async () => {
+		// 코인은 Binance 계정으로만 — 주식 계좌만 있으면 준비하지 않는다
+		await assert.rejects(setup().run({ action: "prepare", symbol: "ETHUSDT", interval: "1h", all: [{ left: "close", op: ">", right: 1 }], order: { side: "BUY", qty: 1 } }), /Binance 계정이 없습니다/);
 		await assert.rejects(setup({ off: "서버에서 자동 매매를 껐습니다" }).run({ ...base, order: { side: "BUY", shares: 1 } }), /껐습니다/);
 		await assert.rejects(setup({ targets: [] }).run({ ...base, order: { side: "BUY", shares: 1 } }), /주문할 증권 계좌가 없습니다/);
 		await assert.rejects(setup().run({ ...base, order: { side: "BUY", shares: 1, amount: 100 } }), /하나만/);
@@ -137,6 +149,87 @@ describe("연계주문 — 매수 후 보호 · 보유 종목 보호", () => {
 		const ok = await setup({ position: { sellable: 5, avgPrice: null } }).run({ action: "protect", symbol: "005930", protect: { stopPrice: 60_000 } });
 		assert.equal(ok.details.order?.estimate, null);
 		await assert.rejects(setup({ targets: [KIS, TOSS] }).run({ action: "protect", symbol: "005930", protect: { stopPct: 5 } }), /어느 증권사에 가진 종목인지/);
-		await assert.rejects(setup().run({ action: "protect", symbol: "ETHUSDT", protect: { stopPct: 5 } }), /코인/);
+		await assert.rejects(setup().run({ action: "protect", symbol: "ETHUSDT", protect: { stopPct: 5 } }), /Binance 계정이 없습니다/);
+	});
+});
+
+describe("코인 자동 매매 (Binance 현물 USDT 마켓)", () => {
+	// 코인 봉 — 종가 2,600 USDT
+	const coinBars = (n: number): WatchBar[] => Array.from({ length: n }, (_, i) => ({ t: T0 + i * 3_600_000, open: 2600, high: 2610, low: 2590, close: 2600, volume: 100 }));
+	function coin(o: Parameters<typeof setup>[0] = {}) {
+		const prepared: TriggerSpec[] = [];
+		const [tool] = createWatchTools({
+			prepareWatch: (s) => (prepared.push(s), { token: "tok", expiresAt: 99 }),
+			listWatches: async () => [],
+			pauseWatch: async () => {
+				throw new Error("no");
+			},
+			channels: () => ["telegram"],
+			fetchBars: async (_c: Condition, limit: number) => coinBars(1000).slice(-limit),
+			orderTargets: async () => o.targets ?? [KIS, TOSS, BINANCE],
+			tradeLimits: async () => o.limits ?? { KRW: 10_000_000, USD: null, USDT: 1000 },
+			autoTradeOff: () => o.off ?? null,
+			position: async () => o.position ?? { sellable: 0.53217, avgPrice: null },
+			cryptoRules: async (symbol) => (symbol === "ETHUSDT" ? cryptoGrid(ETH_RULES) : null),
+			now: () => Date.parse("2026-09-28T01:00:00Z"),
+		});
+		const run = async (p: Record<string, unknown>) => (await tool!.execute("id", p as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }>; details: WatchConfirmCard };
+		return { run, prepared };
+	}
+	const cbase = { action: "prepare", symbol: "ETHUSDT", interval: "1h", all: [{ left: "close", op: ">", right: 2700 }] };
+
+	it("금액(USDT) 매수 — 계좌는 Binance 로 (주식 계좌가 둘이어도 묻지 않는다), 한도는 USDT", async () => {
+		const { run, prepared } = coin();
+		const r = await run({ ...cbase, order: { side: "BUY", amount: 500 } });
+		const a = prepared[0]!.action;
+		assert.ok(a.kind === "order");
+		assert.deepEqual(a.target, BINANCE);
+		assert.deepEqual(a.order, { side: "BUY", size: { amount: 500 }, worstPct: 1, urgency: "patient", deadlineSec: 60 });
+		assert.equal(r.details.order?.size, "500 USDT어치");
+		assert.equal(r.details.order?.dailyLimit, "1,000 USDT");
+		// 2,600 × 1.01 = 2,626 → 500 / 2,626 = 0.19040… → 0.1904 ETH (수량 단위 0.0001 내림)
+		assert.match(r.details.order?.estimate ?? "", /약 0\.1904 ETH/);
+		assert.equal(r.details.feed, null);
+		assert.ok(r.details.warnings.some((w) => /24시간/.test(w)));
+	});
+
+	it("코인 수량(qty)은 수량 단위로 내림, shares 는 코인에 쓰지 않는다", async () => {
+		const { run, prepared } = coin();
+		const r = await run({ ...cbase, order: { side: "SELL", qty: 0.123456 } });
+		const a = prepared[0]!.action;
+		assert.deepEqual(a.kind === "order" && a.order.size, { qty: 0.1234 });
+		assert.equal(r.details.order?.size, "0.1234 ETH");
+		await assert.rejects(coin().run({ ...cbase, order: { side: "BUY", shares: 1 } }), /qty\(코인 수량\)/);
+		await assert.rejects(coin().run({ ...cbase, order: { side: "BUY", qty: 0.00001 } }), /최소 수량/);
+		await assert.rejects(setup().run({ ...base, order: { side: "BUY", qty: 1 } }), /주식은 qty 대신 shares/);
+	});
+
+	it("USDT 마켓이 아니거나 규칙을 못 찾으면 준비하지 않는다", async () => {
+		await assert.rejects(coin().run({ ...cbase, symbol: "ETHBTC", market: "binance", order: { side: "BUY", qty: 1 } }), /USDT 마켓만/);
+		await assert.rejects(coin().run({ ...cbase, symbol: "FOOUSDT", order: { side: "BUY", qty: 1 } }), /종목 규칙을 찾지 못했습니다/);
+		await assert.rejects(coin({ targets: [KIS] }).run({ ...cbase, order: { side: "BUY", qty: 1 } }), /Binance 계정이 없습니다/);
+	});
+
+	it("USDT 한도가 없으면 경고 (켤 수 없다), 최소 주문금액 미만이면 추정에 이유", async () => {
+		const r = await coin({ limits: { KRW: 1, USD: 1, USDT: null } }).run({ ...cbase, order: { side: "BUY", amount: 500 } });
+		assert.ok(r.details.warnings.some((w) => /하루 매수 한도\(USDT\)가 없어/.test(w)));
+		const small = await coin().run({ ...cbase, order: { side: "BUY", amount: 3 } });
+		assert.match(small.details.order?.estimate ?? "", /최소 주문금액/);
+	});
+
+	it("가진 코인 보호 — free 잔고(수량 단위 내림), 가격으로만 (Binance 는 평단이 없다)", async () => {
+		const { run, prepared } = coin();
+		const r = await run({ action: "protect", symbol: "ETHUSDT", protect: { stopPrice: 2400, takePrice: 3000 } });
+		const a = prepared[0]!.action;
+		assert.ok(a.kind === "order");
+		assert.deepEqual(a.target, BINANCE);
+		assert.deepEqual(a.order.size, { qty: 0.5321 });
+		assert.deepEqual(a.position, { shares: 0.5321, avgPrice: 0, stopPrice: 2400, takePrice: 3000, parentId: null });
+		assert.equal(prepared[0]!.condition.market.feed, undefined);
+		assert.equal(r.details.order?.size, "0.5321 ETH (매도 가능 0.53217 ETH)");
+		assert.ok(r.details.warnings.some((w) => /24시간/.test(w)));
+		await assert.rejects(coin().run({ action: "protect", symbol: "ETHUSDT", protect: { stopPct: 5 } }), /평단을 주지 않아/);
+		await assert.rejects(coin().run({ action: "protect", symbol: "ETHUSDT", qty: 1, protect: { stopPrice: 2400 } }), /매도 가능 수량/);
+		await assert.rejects(coin().run({ action: "protect", symbol: "ETHUSDT", shares: 1, protect: { stopPrice: 2400 } }), /qty\(코인 수량\)/);
 	});
 });

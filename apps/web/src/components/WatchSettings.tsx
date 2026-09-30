@@ -5,7 +5,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type TradeExecItem, type WatchEventItem, type WatchItem } from "../lib/api.ts";
+import { api, type TradeCurrency, type TradeExecItem, type WatchEventItem, type WatchItem } from "../lib/api.ts";
 import { kst } from "./cards/WatchCards.tsx";
 
 const btn = "shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-ink disabled:opacity-40";
@@ -40,7 +40,20 @@ const EXEC_STATE: Record<TradeExecItem["state"], { label: string; tone: string }
 	unknown: { label: "결과 모름", tone: "text-danger" },
 };
 
-const money = (v: number, c: "KRW" | "USD") => (c === "KRW" ? `${Math.round(v).toLocaleString("en-US")}원` : `$${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}`);
+const money = (v: number, c: TradeCurrency) =>
+	c === "KRW"
+		? `${Math.round(v).toLocaleString("en-US")}원`
+		: c === "USD"
+			? `$${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+			: `${v.toLocaleString("en-US", { maximumFractionDigits: v >= 1 ? 2 : 8 })} USDT`;
+
+/** 체결 수량 — 주식 "3/5주", 코인 "0.01/0.02 BTC" (USDT 마켓만 자동 매매) */
+const qtyPair = (filled: number, qty: number, symbol: string, coin: boolean) => {
+	const f = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 8 });
+	return coin ? `${f(filled)}/${f(qty)} ${symbol.replace(/USDT$/, "")}` : `${f(filled)}/${f(qty)}주`;
+};
+
+const LIMIT_LABEL: Record<TradeCurrency, string> = { KRW: "국장 (원)", USD: "미장 ($)", USDT: "코인 (USDT)" };
 
 const BY: Record<string, string> = { app: "앱", agent: "에이전트", telegram: "텔레그램" };
 
@@ -51,7 +64,8 @@ function eventText(e: WatchEventItem): string {
 	if (e.detail.count !== undefined) bits.push(`${e.detail.count}개`);
 	if (e.detail.by) bits.push(`(${BY[e.detail.by] ?? e.detail.by})`);
 	if (e.kind === "ordered" && e.detail.side) {
-		bits.push(`${e.detail.side === "BUY" ? "매수" : "매도"} ${e.detail.filledQty ?? 0}/${e.detail.quantity ?? 0}주${e.detail.avgPrice ? ` @${e.detail.avgPrice.toLocaleString("en-US")}` : ""}`);
+		const coin = /USDT$/.test(e.detail.symbol ?? "");
+		bits.push(`${e.detail.side === "BUY" ? "매수" : "매도"} ${qtyPair(e.detail.filledQty ?? 0, e.detail.quantity ?? 0, e.detail.symbol ?? "", coin)}${e.detail.avgPrice ? ` @${e.detail.avgPrice.toLocaleString("en-US")}` : ""}`);
 		if (e.detail.status) bits.push(EXEC_STATE[e.detail.status].label);
 	}
 	if (e.detail.reason && e.kind !== "ordered") bits.push(e.detail.reason);
@@ -59,14 +73,14 @@ function eventText(e: WatchEventItem): string {
 }
 
 /** 하루 매수 한도 — 통화별. 비우고 저장하면 지운다 */
-function LimitRow({ currency, value, onSave, busy }: { currency: "KRW" | "USD"; value: number | null; onSave: (v: number | null) => void; busy: boolean }) {
+function LimitRow({ currency, value, onSave, busy }: { currency: TradeCurrency; value: number | null; onSave: (v: number | null) => void; busy: boolean }) {
 	const [draft, setDraft] = useState<string>(value === null ? "" : String(value));
 	const parsed = draft.trim() === "" ? null : Number(draft.replace(/,/g, ""));
 	const invalid = parsed !== null && !(Number.isFinite(parsed) && parsed > 0);
 	const changed = parsed !== value;
 	return (
 		<div className="flex items-center gap-2">
-			<span className="w-16 shrink-0 text-xs text-muted">{currency === "KRW" ? "국장 (원)" : "미장 ($)"}</span>
+			<span className="w-20 shrink-0 text-xs text-muted">{LIMIT_LABEL[currency]}</span>
 			<input
 				className="min-w-0 flex-1 rounded-lg border border-line bg-card px-2 py-1.5 text-sm text-ink tabular-nums"
 				inputMode="decimal"
@@ -184,10 +198,11 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 				<section>
 					<h2 className="mb-2 text-sm font-medium text-muted">자동 매매 한도</h2>
 					<div className="space-y-2 rounded-xl border border-line p-3">
-						<LimitRow key={`KRW-${d.trading.limits.KRW}`} currency="KRW" value={d.trading.limits.KRW} busy={act.isPending} onSave={(v) => act.mutate(() => api.setTradeLimit("KRW", v))} />
-						<LimitRow key={`USD-${d.trading.limits.USD}`} currency="USD" value={d.trading.limits.USD} busy={act.isPending} onSave={(v) => act.mutate(() => api.setTradeLimit("USD", v))} />
+						{(["KRW", "USD", "USDT"] as const).map((c) => (
+							<LimitRow key={`${c}-${d.trading?.limits[c] ?? null}`} currency={c} value={d.trading?.limits[c] ?? null} busy={act.isPending} onSave={(v) => act.mutate(() => api.setTradeLimit(c, v))} />
+						))}
 						<p className="text-[11px] text-faint">
-							하루(시장 현지 날짜) 동안 자동 매수에 쓸 수 있는 최대 금액입니다. 한도가 없으면 매수 감시를 켤 수 없고, 넘으면 신호가 와도 주문하지 않습니다. 매도(손절·익절)는 보유 수량으로만 제한합니다.
+							하루(시장 현지 날짜 — 코인은 UTC) 동안 자동 매수에 쓸 수 있는 최대 금액입니다. 코인은 Binance 현물 USDT 마켓만 자동 매매합니다. 한도가 없으면 매수 감시를 켤 수 없고, 넘으면 신호가 와도 주문하지 않습니다. 매도(손절·익절)는 보유 수량으로만 제한합니다.
 						</p>
 					</div>
 				</section>
@@ -203,7 +218,8 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 									<span className="shrink-0 text-faint tabular-nums">{kst(x.at)}</span>
 									<span className={x.side === "BUY" ? "text-up" : "text-down"}>{x.side === "BUY" ? "매수" : "매도"}</span>
 									<span className="text-ink">
-										{x.symbol} {x.filledQty}/{x.quantity}주{x.avgPrice !== null ? ` · 평균 ${money(x.avgPrice, x.currency)}` : ""}
+										{x.symbol} {qtyPair(x.filledQty, x.quantity, x.symbol, x.currency === "USDT")}
+										{x.avgPrice !== null ? ` · 평균 ${money(x.avgPrice, x.currency)}` : ""}
 									</span>
 									<span className={`ml-auto shrink-0 ${EXEC_STATE[x.state].tone}`}>{EXEC_STATE[x.state].label}</span>
 								</div>
