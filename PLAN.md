@@ -1965,3 +1965,48 @@ Binance 의 OCO·OTO 는 쓰지 않는다 (주식에서 증권사 조건주문�
   - **실제 주문은 아직 한 번도 내지 않았다.** 테스트넷(`BINANCE_ENV=testnet`)에서 먼저 확인할 것 — 단, 감시 봉은 실전 시세(api.binance.com)라 테스트넷 호가와 다르다.
   - 수수료를 BNB 로 내면 체결 수량이 그대로 남는다 — 이 경우가 가장 깔끔하다. 코인으로 빠지면 위의 부스러기 규칙.
   - 평균가는 주문 조회값(누적 금액 ÷ 체결량)이다 — 체결별 수수료는 보지 않는다.
+
+### 4단계 보강 — Binance bStocks (토큰화 미국 주식, 2026-10-01)
+
+- bStocks(2026-06 출시, BTECH Holdings 발행)는 Binance **현물의 일반 USDT 쌍**이다 — `AAPLBUSDT`(기준 자산 AAPLB) · NVDABUSDT · SPYBUSDT · QQQBUSDT …
+  주문·호가·봉·exchangeInfo 가 코인과 같아서 **코인 자동 매매·`binance_order` 가 그대로** 쓴다. 새로 한 건 알아보고 이름 붙이기(`binance/bstocks.ts`)뿐.
+- 실측 (공개 API, 2026-10-01): AAPLBUSDT tick 0.01 · step 0.001 · 최소 5 USDT · 주문 유형은 코인과 같다. 1시간봉이 토·일에도 움직인다(24시간, 주말 거래량 1/2~1/5).
+  체결가 범위 PRICE_RANGE ±10% (BTC ±15%). 기준가 계산이 **EXTERNAL #2 (USDⓈ-M 선물 지수)** — 코인(ETH·SOL·PAXG·DOGE·BNB)은 ARITHMETIC_MEAN.
+  exchangeInfo 에는 표시가 없어 판정 = B 접미 USDT 쌍 + EXTERNAL #2. 표시·경고에만 쓰고 주문 안전은 거래소 규칙이 지킨다 (조회 실패면 코인으로).
+- **이름이 겹친다**: STXBUSDT = Seagate bStock, STXUSDT = Stacks 코인. 쌍이 아닌 티커(AAPL · STX)는 고르지 않고 후보를 알린다 (`watch_alert` · `binance_order` 둘 다).
+- 확인 카드: 배지 "Binance bStock · AAPL", 경고 — 증서(직접 소유·의결권 없음, 지역·자격이 아니면 거절) · 24시간이지만 미국 장 밖은 얇다 · 기준가 ±10% · 조건은 bStock 자체 시세(나스닥 아님).
+- (정정) Binance 의 직접 미국 주식 거래도 API 가 있다 — 아래 "Binance 미국 주식 직접 거래".
+- 알려진 한계: 실주문 미확인(우리 계정이 bStocks 이용 가능 지역·자격인지 모름 — 아니면 -2010 류로 거절되어 "주문 거절" 로 보고된다).
+  조건을 나스닥 시세로 보고 bStock 으로 주문하는 조합(출처 ≠ 주문처)은 없다 — 조건 시장 = 주문 시장.
+
+### Binance 미국 주식 직접 거래 (2026-10-01)
+
+Binance 앱의 미국 주식(Nest Trading(ADGM) → Alpaca 체결·보관, 실제 주식 7,954종목)은 **`/sapi/v1/equity/*`** API 가 있다 (2026-08-31 공식 커넥터 `@binance/stocks` 1.0 —
+웹 검색엔 안 나오고 binance-connector-js `clients/stocks` 에서 찾았다). 테스트넷 없음.
+
+- 실측 (2026-10-01, 우리 키 — 조회만): exchangeInfo 7,954종목 (BUY_SELL 7,864 · 소수점 6,336 · 24시간 6,541), AAPL stepSize 1e-9 · 최소 5 USDC · 기준가 ±10%.
+  quote 는 최우선 한 단 (AAPL 332.4 × 120 / 332.62 × 40). 서명 조회(미체결·체결 내역)가 200 — 이 계정은 주식 API 를 쓸 수 있다.
+- **tokenize 기본 true** — 안 보내면 산 주식이 bStock 토큰이 된다. 우리는 늘 `tokenize=false`.
+- 주문: LIMIT = price(소수 2자리) + quantity + tradingSession(RTH·EXTENDED·24H), MARKET 매수 = notional(USDC), MARKET 매도 = quantity. DAY·GTC 만 (IOC 없음).
+  clientOrderId 32~36자 — 체결기 id 는 "_" 로 채운다 (0 으로 채우면 n=1 과 n=10 이 겹친다). 접수 응답 status S/F 는 접수 여부일 뿐 — 결과는 `/order/detail`.
+- **보유 수량 API 가 없다.** 매도 가능 수량·평단은 `/trade/history` (상장 시점부터, 100건씩) 매수 − 매도·이동평균으로 추정 — 앱에서 bStock 으로 바꾼 건 빠지지 않아
+  넘칠 수 있고, 그러면 Binance 가 거절한다 (카드에 경고).
+- 자동 매매: `OrderTarget.broker = "binance_stock"` (API 키 지문 `stock:` 접두) — **미장(us) 감시의 세 번째 계좌**. 조건 봉은 증권 키(한국투자·토스) 미장 시세 그대로,
+  주문만 Binance 로. 어댑터(`venues/binance-stock.ts`): 호가 = quote 한 단, 지정가 DAY·RTH, IOC 없음(지정가 + 잔량 취소), idempotent=false(결과 모름이면 clientOrderId 로 찾기).
+  격자 = 가격 0.01 · 수량 stepSize(소수점 주식) · 최소 5 — 금액 주문은 소수점 주식으로 산다. 하루 매수 한도는 미장 USD 한도를 같이 쓴다. 정규장만 (sessionProblem 그대로).
+- 수동 주문: `binance_stock_order` (place·cancel) → 확인 카드(현물 카드 모양, market "stock") → `binance-stock-place`·`binance-stock-cancel` 동작 → execute.
+  nonce 를 clientOrderId 로. 쓰기 경로는 place·cancel 둘 — 약관 동의(`/account/disclaimer`)·토큰 전환(mint/redeem)은 부르지 않는다 (약관은 사람이 앱에서).
+- 테스트: 브로커 +20 (파라미터 한 글자씩·tokenize·clientOrderId·보유 추정·격자·수동 검증·어댑터·체결기·확인 실행·툴 3), 서버 +2 (소수점 매수 → 보호 → 손절 · 장 밖).
+- 알려진 한계: 실주문 미확인 (약관 동의 여부·매수 지갑 walletType 기본 CARD 의 실제 의미는 첫 주문에서 확인). 결제는 USDC 고정. 장 밖(EXTENDED·24H) 자동 매매는 없다.
+
+#### bStock 과 헷갈리지 않게 (2026-10-01)
+
+"바이낸스에서 애플 사 줘" = **실제 주식**(binance_stock_order · watch_alert us + binance_stock). bStock 은 사용자가 토큰을 직접 말했을 때만.
+- 코드로 막는다 (`bStockGate`): bStock 심볼의 새 주문(binance_order place·replace·oco·oto · watch_alert order·protect)은 `bStock: true` 없이는 거절하고
+  실제 주식 쪽을 알려 준다. bStock 확인 조회가 실패하면(unknown) bStock 으로 본다 (실제 주식 원하는 사람에게 토큰을 사 주는 쪽이 더 나쁘다). 취소는 막지 않는다.
+- 쌍이 아닌 티커(AAPL)를 Binance 현물 툴에 주면 안내가 실제 주식 먼저 (예전엔 "후보: AAPLBUSDT" 로 토큰을 내밀었다). STX 처럼 코인과 겹치면 묻게 한다.
+- 페르소나의 모순 문장("바이낸스에서 애플 사 줘 → 토큰") 제거, 툴 설명에서 bStock 을 뒤로.
+- 실측 (`spike/14-binance-stock-routing.ts`, 실제 페르소나·툴·앱 기본 모델 openrouter/openai/gpt-6-luna, 준비만): 6문장 × 4회 **라우팅 24/24** —
+  주식 문장 5개는 늘 binance_stock_order·watch_alert(binance_stock), "AAPLB 토큰(bStock)" 만 binance_order AAPLBUSDT bStock: true.
+  파라미터 실수("0.1주" 를 notional 0.1 · "현재가 근처" 를 price 1)는 검증이 거절 — 거절문에 현재 호가·고칠 값을 넣자 모델이 숫자로 되묻는다.
+

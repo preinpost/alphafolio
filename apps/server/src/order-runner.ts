@@ -191,8 +191,8 @@ export class OrderRunner {
 		const rule = position ? { ...order, size: crypto ? { qty: position.shares } : { shares: position.shares } } : order;
 		const plan = planOrder(rule, { grid, ref, sellable });
 		if ("error" in plan) {
-			// 코인 보호 — 남은 게 최소 주문 단위보다 작다 (수수료로 빠진 부스러기). 팔 수 없으니 끝낸다
-			if (crypto && position && plan.small) return this.closePosition(t, sig, `${plan.error} — 남은 부스러기는 팔 수 없어 보호를 끝냅니다`);
+			// 코인·소수점 주식 보호 — 남은 게 최소 주문 단위보다 작다 (수수료로 빠진 부스러기). 팔 수 없으니 끝낸다
+			if (position && plan.small && grid.minNotional > 0) return this.closePosition(t, sig, `${plan.error} — 남은 부스러기는 팔 수 없어 보호를 끝냅니다`);
 			return this.skip(t, sig, plan.error);
 		}
 		const currency: Currency = currencyOf(venueId);
@@ -299,7 +299,8 @@ export class OrderRunner {
 		const unit = plan.target.broker === "binance" ? unitOf("binance", plan.symbol) : "주";
 		// 보호 트리거는 횟수가 아니라 남은 수량으로 끝난다 — 다 팔면 끝 (손절·익절이 한 트리거라 다른 쪽도 같이)
 		const position = t.action.kind === "order" ? t.action.position : undefined;
-		const g = grid ?? (unit === "주" ? null : LOOSE_GRID);
+		// 소수점 수량(코인·Binance 미국 주식)은 격자로 — 정수 주식은 그대로
+		const g = grid && grid.minNotional > 0 ? grid : unit === "주" ? null : LOOSE_GRID;
 		let left = position ? Math.max(0, g ? g.floorQty(position.shares - report.filledQty) : position.shares - report.filledQty) : null;
 		// 코인 — 남은 게 최소 수량·최소 주문금액 미만이면 더 팔 수 없다 (수수료 부스러기)
 		if (left !== null && left > 0 && g && report.filledQty > 0 && (left < g.minQty || left * (report.avgPrice ?? plan.ref) < g.minNotional)) left = 0;

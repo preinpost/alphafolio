@@ -44,4 +44,7 @@ export * from "./triggers/venues/tick.ts";
 export * from "./triggers/venues/toss.ts";
 export * from "./triggers/venues/kis.ts";
 export * from "./triggers/venues/binance.ts";
+export * from "./binance/bstocks.ts";
+export * from "./binance/stocks.ts";
+export * from "./triggers/venues/binance-stock.ts";
 export * from "./triggers/venues/targets.ts";

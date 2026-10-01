@@ -8,6 +8,7 @@ import { cmpDec, floorToStep, isMultipleOf, mulDec, subDec } from "../src/binanc
 import { createBinanceOrderTool, validateBinance, type BinanceOrderCard } from "../src/binance/order-tool.ts";
 import { executeBinance, ocoParams, otoParams, parseSymbolRules, placeParams, replaceParams, type SymbolRules } from "../src/binance/trade.ts";
 import { binanceSign } from "../src/data/gateway.ts";
+import { clearBStockCache } from "../src/binance/bstocks.ts";
 import { executeOrderAction } from "../src/execute.ts";
 
 const realFetch = globalThis.fetch;
@@ -258,3 +259,51 @@ describe("binance_order — 재주문의 원주문은 조회값, 남은 수량�
 		assert.ok(r.details.errors.some((e) => e.includes("미체결 목록에 없는")));
 	});
 });
+
+describe("binance_order — bStock(토큰)은 사용자가 직접 원할 때만", () => {
+	function fakeAapl(refOk = true) {
+		clearBStockCache();
+		const info = JSON.parse(JSON.stringify(INFO));
+		Object.assign(info.symbols[0], { symbol: "AAPLBUSDT", baseAsset: "AAPLB" });
+		globalThis.fetch = (async (input: string | URL) => {
+			const u = new URL(String(input));
+			const json = (b: unknown) => new Response(JSON.stringify(b));
+			if (u.pathname === "/api/v3/referencePrice/calculation") {
+				if (!refOk) throw new Error("fetch failed");
+				return json({ calculationType: "EXTERNAL", externalCalculationId: 2 });
+			}
+			if (u.pathname === "/api/v3/exchangeInfo") return json(info);
+			if (u.pathname === "/api/v3/ticker/price") return json({ price: "332.50" });
+			if (u.pathname === "/api/v3/account") return json({ balances: [{ asset: "USDT", free: "500" }] });
+			if (u.pathname === "/api/v3/openOrders") return json([{ symbol: "AAPLBUSDT", orderId: 5, side: "BUY", type: "LIMIT", price: "300.00", origQty: "0.1", executedQty: "0" }]);
+			return json({});
+		}) as typeof fetch;
+		const prepared: BinanceAction[] = [];
+		const tool = createBinanceOrderTool({ brokers: { binance: () => ({ ...CREDS, key: `k${Math.random()}` }) }, prepareOrder: (a) => (prepared.push(a as BinanceAction), { token: "t", expiresAt: 1 }) });
+		const run = (p: Record<string, unknown>) => tool.execute("id", p as never, undefined, undefined, undefined as never) as Promise<{ details: BinanceOrderCard }>;
+		return { run, prepared };
+	}
+	const buy = { action: "place", symbol: "AAPLBUSDT", side: "BUY", type: "LIMIT", price: "330", quantity: "0.1" };
+
+	it("bStock: true 없이 사면 거절하고 실제 주식(binance_stock_order)으로 돌려보낸다", async () => {
+		const { run, prepared } = fakeAapl();
+		await assert.rejects(run(buy), /AAPL 주식이 아니라 bStock.*binance_stock_order\(symbol: 'AAPL'\)/);
+		assert.equal(prepared.length, 0);
+	});
+
+	it("확인 조회가 실패해도 거절 (토큰을 잘못 사는 쪽을 막는다)", async () => {
+		const { run } = fakeAapl(false);
+		await assert.rejects(run(buy), /확인하지 못했습니다/);
+	});
+
+	it("bStock: true 면 준비 — 카드에 증서 경고, 취소는 플래그 없이도 된다", async () => {
+		const { run, prepared } = fakeAapl();
+		const r = await run({ ...buy, bStock: true });
+		assert.equal(r.details.ok, true, r.details.errors.join(" / "));
+		assert.ok(r.details.warnings.some((w) => /토큰화 증권/.test(w)));
+		const c = await run({ action: "cancel", symbol: "AAPLBUSDT", orderId: 5 });
+		assert.equal(c.details.ok, true);
+		assert.deepEqual(prepared.map((a) => a.kind), ["binance-place", "binance-cancel"]);
+	});
+});
+

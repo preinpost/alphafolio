@@ -8,11 +8,16 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { BinanceAction, BinanceOriginal, OrderAction } from "../actions.ts";
 import type { BrokerAccess } from "../portfolio.ts";
+import { binanceSymbolHint, bStockGate, bStockOf, bStockStatus, bStockWarnings } from "./bstocks.ts";
 import { cmpDec, floorToStep, mulDec, pctDiff, subDec } from "./decimal.ts";
 import { freeBalances, lastPrice, openOrders, symbolRules, type BinanceCreds, type SymbolRules } from "./trade.ts";
 
+type CardOriginal = Omit<BinanceOriginal, "orderId"> & { orderId: number | string };
+
 export interface BinanceOrderCard {
 	kind: "binance-order-card";
+	/** stock = 미국 주식 직접 거래 (binance_stock_order). 없으면 현물 */
+	market?: "spot" | "stock";
 	ok: boolean;
 	token: string | null;
 	expiresAt: number | null;
@@ -29,11 +34,12 @@ export interface BinanceOrderCard {
 	lastPrice: string | null;
 	balance: { asset: string; free: string } | null;
 	minNotional: string | null;
-	original: BinanceOriginal | null;
+	/** 미국 주식 주문번호는 UUID 문자열 */
+	original: CardOriginal | null;
 	/** OCO·OTO·재주문 줄 — 라벨·내용·현재가 대비 % */
 	lines: Array<{ label: string; text: string; pct: number | null }>;
 	/** 전체 취소 대상 */
-	orders: BinanceOriginal[];
+	orders: CardOriginal[];
 	warnings: string[];
 	errors: string[];
 }
@@ -209,10 +215,13 @@ export function createBinanceOrderTool(deps: { brokers: BrokerAccess; prepareOrd
 			"replace(orderId + 새 price·quantity, 지정가) / oco(보유분 익절·손절 매도: quantity·takeProfitPrice·stopPrice·stopLimitPrice) / " +
 			"oto(지정가 매수 체결 후 지정가 매도: quantity·buyPrice·sellPrice) / cancel_all(종목 미체결 전부). " +
 			"수량은 기준 자산(BTC 등), 가격은 호가 자산(USDT 등). 거래소 단위에 맞춰 서버가 내림 보정한다. " +
+			"**미국 주식은 이 툴이 아니다** — 바이낸스로 애플·엔비디아 등 주식을 사고팔면 binance_stock_order (실제 주식). " +
+			"bStock(토큰화 증서, AAPLBUSDT 같은 티커+B+USDT)은 사용자가 bStock·토큰을 원한다고 직접 말했을 때만 bStock: true 와 함께 (아니면 툴이 거절한다). " +
 			"출금·이체·마진·선물은 지원하지 않는다. 사용자가 명시적으로 요청했을 때만 호출한다.",
 		parameters: Type.Object({
 			action: Type.Union([Type.Literal("place"), Type.Literal("cancel"), Type.Literal("replace"), Type.Literal("oco"), Type.Literal("oto"), Type.Literal("cancel_all")]),
-			symbol: Type.String({ description: "예: BTCUSDT (BTC/USDT 도 된다)" }),
+			symbol: Type.String({ description: "코인 쌍 — 예: BTCUSDT (BTC/USDT 도 된다)" }),
+			bStock: Type.Optional(Type.Boolean({ description: "사용자가 bStock(토큰화 주식)을 원한다고 **직접** 말했을 때만 true. 그냥 '주식' 이면 쓰지 않는다 (binance_stock_order)" })),
 			side: Type.Optional(Type.Union([Type.Literal("BUY"), Type.Literal("SELL")])),
 			type: Type.Optional(Type.Union([Type.Literal("LIMIT"), Type.Literal("MARKET")])),
 			quantity: Type.Optional(Type.String({ description: "기준 자산 수량 (문자열, 예: '0.0012')" })),
@@ -230,15 +239,25 @@ export function createBinanceOrderTool(deps: { brokers: BrokerAccess; prepareOrd
 			const creds = connected(deps.brokers.binance) as BinanceCreds | null;
 			if (!creds) throw new Error("Binance 주문에는 키가 필요합니다 — 설정 → 코인 (Binance) (출금 권한 없이 발급).");
 			const symbol = normSymbol(params.symbol);
+			// 쌍이 아니면(AAPL · STX) 후보를 알리고 멈춘다 — bStock 과 코인 이름이 겹친다
+			const hint = await binanceSymbolHint(symbol, creds).catch(() => null);
+			if (hint) throw new Error(hint);
 			const rules = await symbolRules(symbol, creds);
 			if (!rules) throw new Error(`Binance 에 없는 종목입니다: ${symbol}`);
+			// 토큰(bStock)은 사용자가 원한다고 말했을 때만 — 새로 사고파는 동작만 막는다 (취소는 위험을 줄이는 쪽이라 둔다)
+			const opening = params.action === "place" || params.action === "replace" || params.action === "oco" || params.action === "oto";
+			if (opening) {
+				const gate = bStockGate(symbol, await bStockStatus(symbol, { creds }), params.bStock);
+				if (gate) throw new Error(gate);
+			}
+			const bs = await bStockOf(symbol, { creds }).catch(() => null);
 			const last = await lastPrice(symbol, creds);
 
 			const card: BinanceOrderCard = {
 				kind: "binance-order-card", ok: false, token: null, expiresAt: null, action: params.action, symbol, base: rules.base, quote: rules.quote,
 				side: params.side ?? null, type: params.type ?? null, quantity: null, quoteQuantity: null, price: null, estimatedQuote: null,
 				lastPrice: last, balance: null, minNotional: cmpDec(rules.minNotional, "0") > 0 ? trim(rules.minNotional) : null,
-				original: null, lines: [], orders: [], warnings: [], errors: [],
+				original: null, lines: [], orders: [], warnings: bs ? bStockWarnings(bs, false) : [], errors: [],
 			};
 			const base = { broker: "binance" as const, symbol, base: rules.base, quote: rules.quote };
 			let action: BinanceAction | null = null;

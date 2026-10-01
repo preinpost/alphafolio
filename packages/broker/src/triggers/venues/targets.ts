@@ -5,6 +5,7 @@
  * Binance 는 API 키 지문(sha256 앞 12자리 — 테스트넷이면 앞에 표시). 사용자가 설정에서 다른 계좌 키로 바꾸면 지문이 달라져 주문하지 않는다.
  */
 import { createHash } from "node:crypto";
+import { equityOpenOrders, equityPosition } from "../../binance/stocks.ts";
 import { accountInfo, freeBalances, symbolRules, type BinanceCreds } from "../../binance/trade.ts";
 import { kisOrderExchange, kisSellable } from "../../kis/orders.ts";
 import type { BrokerAccess } from "../../portfolio.ts";
@@ -13,11 +14,12 @@ import { defaultAccountSeq, tossAccounts } from "../../toss/api.ts";
 import { sellableQuantity } from "../../toss/orders.ts";
 import type { OrderTarget } from "../types.ts";
 import { kisVenue } from "./kis.ts";
+import { binanceStockVenue } from "./binance-stock.ts";
 import { binanceSellable, binanceVenue } from "./binance.ts";
 import { tossVenue } from "./toss.ts";
 import type { ExecVenue } from "./types.ts";
 
-const BROKER_LABEL = { kis: "한국투자", toss: "토스", binance: "Binance" } as const;
+const BROKER_LABEL = { kis: "한국투자", toss: "토스", binance: "Binance", binance_stock: "Binance 미국 주식" } as const;
 
 function binanceCreds(access: BrokerAccess): BinanceCreds {
 	const make = access.binance;
@@ -35,6 +37,14 @@ function ctxOf<K extends "kis" | "toss">(access: BrokerAccess, broker: K): Retur
 
 /** 지금 키의 주문 계좌 */
 export async function orderTarget(access: BrokerAccess, broker: OrderTarget["broker"]): Promise<OrderTarget> {
+	if (broker === "binance_stock") {
+		const c = binanceCreds(access);
+		if (c.testnet) throw new Error("Binance 미국 주식은 테스트넷이 없습니다 — 실전 키로만 됩니다");
+		// 서명 조회가 되면 이 키로 주식 API 를 쓸 수 있다 (지역·자격·권한이 아니면 여기서 거절된다)
+		await equityOpenOrders(c);
+		const fp = fingerprint(`stock:${c.key}`);
+		return { broker, account: fp, accountLabel: `Binance 미국 주식 (키 ${fp.slice(0, 6)})` };
+	}
 	if (broker === "binance") {
 		const c = binanceCreds(access);
 		const { canTrade } = await accountInfo(c);
@@ -69,6 +79,7 @@ async function same(access: BrokerAccess, target: OrderTarget): Promise<void> {
 export async function targetVenue(access: BrokerAccess, target: OrderTarget, symbol: string): Promise<ExecVenue> {
 	await same(access, target);
 	if (target.broker === "binance") return binanceVenue(binanceCreds(access), symbol);
+	if (target.broker === "binance_stock") return binanceStockVenue(binanceCreds(access), symbol);
 	if (target.broker === "kis") return kisVenue(ctxOf(access, "kis"), symbol);
 	return tossVenue(ctxOf(access, "toss"), symbol, { accountSeq: Number(target.account) });
 }
@@ -76,6 +87,8 @@ export async function targetVenue(access: BrokerAccess, target: OrderTarget, sym
 /** 매도 가능 수량 */
 export async function targetSellable(access: BrokerAccess, target: OrderTarget, symbol: string): Promise<number> {
 	await same(access, target);
+	// 보유 API 가 없다 — 체결 내역(매수 − 매도)으로 추정. 넘치면 거래소가 거절한다
+	if (target.broker === "binance_stock") return (await equityPosition(binanceCreds(access), symbol)).qty;
 	if (target.broker === "binance") {
 		const c = binanceCreds(access);
 		const rules = await symbolRules(symbol, c);

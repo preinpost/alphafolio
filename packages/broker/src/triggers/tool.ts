@@ -9,6 +9,7 @@
  */
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { binanceSymbolHint, bStockGate, bStockOf, bStockStatus, bStockWarnings, type BStock } from "../binance/bstocks.ts";
 import { symbolRules } from "../binance/trade.ts";
 import { fetchWatchBars } from "./bars.ts";
 import { barsPerDay, fireIndices, holdsNow, maxBarsFor, validateCondition, warmupFor } from "./condition.ts";
@@ -143,6 +144,14 @@ export interface WatchToolDeps {
 	tradeLimits?: () => Promise<Partial<Record<TradeCurrency, number | null>>>;
 	/** 코인 종목 규칙 (수량 단위·최소 주문금액) — 없으면 Binance exchangeInfo (공개) */
 	cryptoRules?: (symbol: string) => Promise<Grid | null>;
+	/** Binance 심볼이 bStock(토큰화 주식)인가 — 없으면 Binance 기준가 계산 조회 (공개) */
+	bStock?: (symbol: string) => Promise<BStock | null>;
+	/** bStock 확인 — unknown = 조회 실패 (주문 길목은 bStock 으로 본다). 없으면 bStock 으로 판정 */
+	bStockStatus?: (symbol: string) => Promise<"bstock" | "coin" | "unknown">;
+	/** 쌍이 아닌 Binance 티커(AAPL·STX)의 후보 문장 — 없으면 exchangeInfo (공개) */
+	binanceHint?: (raw: string) => Promise<string | null>;
+	/** Binance 미국 주식 종목 규칙 (가격 0.01 · 수량 단위 · 최소 주문금액) — 거래할 수 없는 종목이면 null. 서버가 사용자의 Binance 키로 */
+	equityGrid?: (symbol: string) => Promise<Grid | null>;
 	/** 서버에서 자동 매매를 껐으면 이유 */
 	autoTradeOff?: () => string | null;
 	/** 보유 종목 보호 — 그 계좌의 매도 가능 수량과 평단 (평단을 모르면 null) */
@@ -185,6 +194,7 @@ interface ProtectParams {
 	broker?: OrderTarget["broker"];
 	shares?: number;
 	qty?: number;
+	bStock?: boolean;
 	basis?: "krx" | "integrated";
 	expiresDays?: number;
 	name?: string;
@@ -205,7 +215,16 @@ function toProtect(p: { stopPct?: number; stopPrice?: number; takePct?: number; 
 }
 
 /** 이 시장에 주문할 수 있는 계좌 — 주식은 한국투자·토스, 코인은 Binance */
-const targetsFor = (venue: Venue, all: OrderTarget[]): OrderTarget[] => all.filter((t) => (venue === "binance") === (t.broker === "binance"));
+/** 코인·bStock = Binance 현물, 국장 = 한국투자·토스, 미장 = 한국투자·토스·Binance 미국 주식 */
+const targetsFor = (venue: Venue, all: OrderTarget[]): OrderTarget[] =>
+	all.filter((t) => (venue === "binance" ? t.broker === "binance" : t.broker === "kis" || t.broker === "toss" || (venue === "us" && t.broker === "binance_stock")));
+
+/** Binance 미국 주식(직접 거래) 확인 카드 경고 */
+export const BINANCE_STOCK_WARNINGS = [
+	"Binance 미국 주식 — Nest Trading(ADGM)이 받아 Alpaca 가 체결·보관합니다. 매수 대금은 USDC, 매도 대금도 USDC 로 들어옵니다.",
+	"보유 수량 API 가 없어 매도 가능 수량은 Binance 체결 내역으로 추정합니다 (앱에서 bStock 으로 바꾼 주식은 빠지지 않습니다 — 넘치면 Binance 가 거절합니다).",
+	"Binance 앱에서 미국 주식 약관에 동의해 둬야 주문이 됩니다. 산 주식은 토큰(bStock)으로 바꾸지 않습니다 (tokenize=false).",
+];
 const NO_TARGET = (venue: Venue): string =>
 	venue === "binance" ? "주문할 Binance 계정이 없습니다 — 설정 → 코인 (Binance) 에서 API 키를 넣어 주세요 (현물 거래 권한)" : "주문할 증권 계좌가 없습니다 — 설정 → 연결 → 증권 (한국투자는 계좌번호까지)";
 
@@ -218,6 +237,30 @@ export function createWatchTools(deps: WatchToolDeps) {
 			const r = await symbolRules(symbol).catch(() => null);
 			return r ? cryptoGrid(r) : null;
 		});
+	const bStock = deps.bStock ?? ((symbol: string) => bStockOf(symbol));
+	const binanceHint = deps.binanceHint ?? ((raw: string) => binanceSymbolHint(raw));
+	/** Binance 심볼 — 쌍이 아니면 후보를 알리고 멈춘다 (STX = Seagate bStock? Stacks 코인? 고르지 않는다). bStock 이면 정보 */
+	const binanceSymbol = async (symbol: string): Promise<BStock | null> => {
+		const hint = await binanceHint(symbol);
+		if (hint) throw new Error(hint);
+		return bStock(symbol).catch(() => null);
+	};
+	/** Binance 미국 주식 격자 — 없으면 멈춘다 */
+	const equityOrderGrid = async (symbol: string): Promise<Grid> => {
+		if (!deps.equityGrid) throw new Error("Binance 미국 주식 규칙을 확인할 수 없습니다 (서버 미지원)");
+		const g = await deps.equityGrid(symbol);
+		if (!g) throw new Error(`Binance 에서 거래할 수 없는 미국 주식입니다: ${symbol}`);
+		return g;
+	};
+	const statusOf =
+		deps.bStockStatus ?? (deps.bStock ? async (s: string) => ((await deps.bStock!(s).catch(() => null)) ? ("bstock" as const) : ("coin" as const)) : (s: string) => bStockStatus(s));
+	/** 주문 길목 — bStock(토큰)은 사용자가 원한다고 말했을 때만 */
+	const tokenGate = async (symbol: string, allow: boolean | undefined): Promise<void> => {
+		const g = bStockGate(symbol, await statusOf(symbol), allow);
+		if (g) throw new Error(g);
+	};
+	/** 카드 배지 — bStock 이면 "Binance bStock" */
+	const venueLabel = (venue: Venue, b: BStock | null): string => (b ? `Binance bStock · ${b.ticker}` : VENUE_LABEL[venue]);
 	/** 자동 매매 가능한 코인인가 + 규칙 (없으면 throw) */
 	const cryptoOrderGrid = async (symbol: string): Promise<Grid> => {
 		const bad = cryptoAutoProblem(symbol);
@@ -237,6 +280,8 @@ export function createWatchTools(deps: WatchToolDeps) {
 		const symbol = venue === "us" ? raw.replace(/[^A-Z0-9.-]/g, "") : raw.replace(/[^A-Z0-9]/g, "");
 		if (!symbol) throw new Error("symbol 이 필요합니다");
 		const crypto = venue === "binance";
+		const bs = crypto ? await binanceSymbol(symbol) : null;
+		if (crypto) await tokenGate(symbol, params.bStock);
 		const grid = crypto ? await cryptoOrderGrid(symbol) : null;
 		const unit = unitOf(venue, symbol);
 		const off = deps.autoTradeOff?.();
@@ -248,10 +293,16 @@ export function createWatchTools(deps: WatchToolDeps) {
 		const target = params.broker ? targets.find((t) => t.broker === params.broker) : targets.length === 1 ? targets[0] : undefined;
 		if (!target) throw new Error(params.broker ? `${params.broker} 주문 계좌가 없습니다` : `어느 증권사에 가진 종목인지 사용자에게 물어보세요: ${targets.map((t) => `${t.broker} = ${t.accountLabel}`).join(" · ")}`);
 		if (!deps.position) throw new Error("보유 수량을 확인할 수 없습니다 (서버 미지원)");
+		const eqGrid = target.broker === "binance_stock" ? await equityOrderGrid(symbol) : null;
 		const pos = await deps.position(symbol, target);
 		if (pos.sellable <= 0) throw new Error(`${target.accountLabel} 에 ${symbol} 매도 가능 수량이 없습니다`);
 		let shares: number;
-		if (crypto && grid) {
+		if (eqGrid) {
+			// 소수점 주식 — 비우면 보유 추정 전부 (수량 단위로 내림)
+			if (params.qty !== undefined) throw new Error("주식은 qty 대신 shares(주)로 정합니다");
+			shares = eqGrid.floorQty(params.shares ?? pos.sellable);
+			if (!(shares > 0) || shares < eqGrid.minQty) throw new Error("보호할 수량이 최소 수량보다 작습니다");
+		} else if (crypto && grid) {
 			if (params.shares !== undefined) throw new Error("코인은 shares 대신 qty(코인 수량)로 정합니다");
 			shares = grid.floorQty(params.qty ?? pos.sellable);
 			if (!(shares > 0) || shares < grid.minQty) throw new Error(`qty 가 최소 수량(${qtyText(grid.minQty, unit)})보다 작습니다`);
@@ -264,7 +315,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 		const usesPct = (rule.stop && "pct" in rule.stop) || (rule.take && "pct" in rule.take);
 		if (usesPct && !pos.avgPrice) throw new Error(crypto ? "Binance 는 평단을 주지 않아 % 로 정할 수 없습니다 — stopPrice·takePrice(가격)로 정해 주세요" : "평단을 몰라 % 로 정할 수 없습니다 — stopPrice·takePrice(가격)로 정해 주세요");
 		const cur = currencyOf(venue);
-		const prices = protectPrices(rule, pos.avgPrice ?? 0, grid ?? (cur === "KRW" ? "KR" : "US"));
+		const prices = protectPrices(rule, pos.avgPrice ?? 0, grid ?? eqGrid ?? (cur === "KRW" ? "KR" : "US"));
 		if (prices.problems.length) throw new Error(`준비하지 못했습니다:\n- ${prices.problems.join("\n- ")}`);
 		const feed = isStock(venue) ? chooseFeed(venue, deps.feeds?.() ?? { kis: true, toss: true }, params.basis) : undefined;
 		const position = { shares, avgPrice: pos.avgPrice ?? 0, stopPrice: prices.stopPrice, takePrice: prices.takePrice, parentId: null };
@@ -300,6 +351,8 @@ export function createWatchTools(deps: WatchToolDeps) {
 			...(last && position.takePrice !== null && last.close > position.takePrice ? ["지금 종가가 이미 익절가 위입니다 — 켜면 다음 봉 마감에 바로 팝니다."] : []),
 			...(channels.length ? [] : ["알림 채널이 없어 앱 화면에서만 알립니다 — 설정 → 연결 → 알림 (텔레그램)"]),
 			crypto ? "코인은 24시간 — 조건이 맞으면 밤에도 팝니다. Binance 수수료가 코인으로 빠지면 팔 수 있는 만큼만 팝니다." : "주문은 정규장에만 냅니다 (국장 종가 단일가 15:20 뒤 신호는 다음 날 첫 봉에서 다시).",
+			...(bs ? bStockWarnings(bs, true) : []),
+			...(eqGrid ? BINANCE_STOCK_WARNINGS : []),
 		];
 		const pText = protectText({ ...position, avgPrice: pos.avgPrice ?? undefined }, rule.interval);
 		const card: WatchConfirmCard = {
@@ -310,7 +363,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 			text: conditionText(condition),
 			preset: null,
 			feed: feed && isStock(venue) ? FEED_LABEL(venue, feed) : null,
-			venue: VENUE_LABEL[venue],
+			venue: venueLabel(venue, bs),
 			interval: condition.interval,
 			limits: spec.limits,
 			lastClose: last?.close ?? null,
@@ -344,6 +397,9 @@ export function createWatchTools(deps: WatchToolDeps) {
 			"프리셋(preset + presetParams, 숫자는 바꿀 수 있는 기본값): " + presetCatalog() + ". 프리셋이 맞으면 프리셋을 쓴다 (조건이 매번 달라지지 않게). " +
 			"AlphaFolio 자체 감시 — **봉 마감가**로 조건을 판정해 알린다 (순간 꼬리에 울리지 않는다). TradingView 와 무관. " +
 			"order 를 넣으면 **자동 매매**: 조건이 맞을 때 자체 체결기가 최악 허용가 안의 지정가로 주문한다 (국장·미장은 정규장만, 증권사 조건주문은 쓰지 않는다). " +
+			"**바이낸스로 미국 주식**(\"바이낸스에서 애플 사 줘\")은 market: 'us' + order.broker: 'binance_stock' — 실제 주식이다. market: 'binance' 는 코인이다. " +
+			"bStock(토큰화 증서, AAPLBUSDT)은 사용자가 bStock·토큰을 원한다고 직접 말했을 때만 bStock: true 와 함께 (아니면 주문 준비를 거절한다). " +
+			"미장(us)은 Binance 미국 주식 직접 거래로도 주문한다 (broker: 'binance_stock' — Nest·Alpaca 실제 주식, 소수점·금액 주문, 정규장 지정가). 조건 봉은 증권 키(한국투자·토스) 시세. " +
 			"코인 자동 매매는 Binance 현물 **USDT 마켓만** (BTCUSDT 등) — 24시간, 수량은 qty(코인 수량)·amount(USDT)·holdingPct, 하루 매수 한도는 USDT. Binance 는 평단을 주지 않아 가진 코인 보호(action=protect)는 가격(stopPrice·takePrice)으로. " +
 			"자동 매매·손절·익절·OCO·OTO·\"조건주문\" 요청은 모두 이 툴로 준비한다. 주문 계좌가 둘이면 사용자에게 묻는다. 매수는 사용자가 하루 매수 한도를 정해 둬야 켜진다. " +
 			"연계주문: 매수 order 에 protect({ stopPct·stopPrice, takePct·takePrice, interval })를 넣으면 체결 뒤 체결 수량·평단으로 손절·익절을 자동으로 건다 (한 트리거 — 하나가 팔면 끝, OCO). " +
@@ -362,7 +418,8 @@ export function createWatchTools(deps: WatchToolDeps) {
 			action: Type.Union([Type.Literal("prepare"), Type.Literal("protect"), Type.Literal("list"), Type.Literal("pause")]),
 			name: Type.Optional(Type.String({ description: "짧은 한글 이름 (예: 'ETH 1시간봉 2,600 이탈')" })),
 			market: Type.Optional(Type.Union(VENUES.map((v) => Type.Literal(v)), { description: "binance=코인 · krx=국장 · us=미장. 비우면 심볼로 추정 (6자리=국장)" })),
-			symbol: Type.Optional(Type.String({ description: "코인 ETHUSDT · 국장 005930 · 미장 AAPL" })),
+			symbol: Type.Optional(Type.String({ description: "코인 ETHUSDT · 국장 005930 · 미장 AAPL (Binance 미국 주식도 AAPL + market us)" })),
+			bStock: Type.Optional(Type.Boolean({ description: "사용자가 bStock(토큰화 주식, AAPLBUSDT)을 원한다고 **직접** 말했을 때만 true. 그냥 '주식' 이면 쓰지 않는다" })),
 			interval: Type.Optional(Type.Union(INTERVALS.map((i) => Type.Literal(i)), { description: "봉 간격 — 사용자가 말하지 않으면 되묻는다" })),
 			session: Type.Optional(
 				Type.Union([Type.Literal("regular"), Type.Literal("extended")], {
@@ -383,14 +440,14 @@ export function createWatchTools(deps: WatchToolDeps) {
 			expiresDays: Type.Optional(Type.Integer({ description: `만료까지 일수 (기본 ${DEFAULT_EXPIRES_DAYS}, 최대 ${MAX_EXPIRES_DAYS})` })),
 			id: Type.Optional(Type.String({ description: "pause 대상 id (list 결과)" })),
 			protect: Type.Optional(ProtectT),
-			broker: Type.Optional(Type.Union([Type.Literal("kis"), Type.Literal("toss"), Type.Literal("binance")], { description: "action=protect — 보유한 증권사 (두 곳 다 있으면 묻는다). 코인은 binance 뿐" })),
+			broker: Type.Optional(Type.Union([Type.Literal("kis"), Type.Literal("toss"), Type.Literal("binance"), Type.Literal("binance_stock")], { description: "action=protect — 보유한 곳 (여럿이면 묻는다). 코인은 binance, Binance 에서 산 미국 주식은 binance_stock (market us)" })),
 			shares: Type.Optional(Type.Integer({ description: "action=protect — 보호할 주 수 (비우면 매도 가능 수량 전부)" })),
 			qty: Type.Optional(Type.Number({ description: "action=protect — 코인만: 보호할 코인 수량 (비우면 free 잔고 전부)" })),
 			order: Type.Optional(
 				Type.Object(
 					{
 						side: Type.Union([Type.Literal("BUY"), Type.Literal("SELL")]),
-						broker: Type.Optional(Type.Union([Type.Literal("kis"), Type.Literal("toss"), Type.Literal("binance")], { description: "주문 계좌 — 주식 계좌가 두 곳이면 사용자에게 묻는다. 코인은 binance 뿐 (비워도 된다)" })),
+						broker: Type.Optional(Type.Union([Type.Literal("kis"), Type.Literal("toss"), Type.Literal("binance"), Type.Literal("binance_stock")], { description: "주문 계좌 — 여럿이면 사용자에게 묻는다. 코인은 binance 뿐 (비워도 된다). 미장은 kis·toss·binance_stock(Binance 미국 주식 — '바이낸스로 주식' 은 이것)" })),
 						shares: Type.Optional(Type.Integer({ description: "주식만: 주 수" })),
 						qty: Type.Optional(Type.Number({ description: "코인만: 코인 수량 (예: 0.01 = 0.01 BTC) — 수량 단위로 내림" })),
 						amount: Type.Optional(Type.Number({ description: "금액 (국장 원, 미장 달러, 코인 USDT) — 최악 허용가로 나눠 내림하므로 이 금액을 넘지 않는다" })),
@@ -427,6 +484,8 @@ export function createWatchTools(deps: WatchToolDeps) {
 			// 미장 티커는 점·하이픈이 있을 수 있다 (BRK.B), 코인·국장은 영숫자만
 			const symbol = venue === "us" ? raw.replace(/[^A-Z0-9.-]/g, "") : raw.replace(/[^A-Z0-9]/g, "");
 			if (!params.interval) throw new Error("interval(봉 간격)이 필요합니다 — 사용자에게 몇 분봉·시간봉·일봉·주봉 기준인지 물어보세요.");
+			// Binance — 쌍 전체여야 한다. bStock(토큰화 주식)이면 배지·경고
+			const bs = venue === "binance" ? await binanceSymbol(symbol) : null;
 			// 프리셋이면 펼친다 — 저장되는 건 펼친 조건 (평가기는 프리셋을 모른다)
 			let presetName: string | null = null;
 			let presetMeta: Condition["preset"];
@@ -483,6 +542,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 			if (params.order) {
 				const o = params.order;
 				const crypto = venue === "binance";
+				if (crypto) await tokenGate(symbol, params.bStock);
 				const grid = crypto ? await cryptoOrderGrid(symbol) : null;
 				const unit = unitOf(venue, symbol);
 				const off = deps.autoTradeOff?.();
@@ -498,6 +558,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 					);
 				}
 				const d = ORDER_DEFAULTS[o.side];
+				const eqGrid = target.broker === "binance_stock" ? await equityOrderGrid(symbol) : null;
 				if (crypto && o.shares !== undefined) throw new Error("코인은 shares 대신 qty(코인 수량)·amount(USDT)로 정합니다");
 				if (!crypto && o.qty !== undefined) throw new Error("주식은 qty 대신 shares(주)로 정합니다");
 				const size: OrderSize | null =
@@ -518,7 +579,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 				protectLineText = protect ? `체결 후 자동: ${protectRuleText(protect)} — 체결 수량·평단으로 손절·익절을 한 트리거로 겁니다` : null;
 				const cur = currencyOf(venue);
 				const money = (v: number) => (cur === "USD" ? `$${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : moneyText(v, cur));
-				const pctx = grid ? { grid } : { market: cur === "KRW" ? ("KR" as const) : ("US" as const) };
+				const pctx = grid ? { grid } : eqGrid ? { grid: eqGrid } : { market: cur === "KRW" ? ("KR" as const) : ("US" as const) };
 				let estimate: string | null = null;
 				if (last && "amount" in size) {
 					const p = planOrder(rule, { ...pctx, ref: last.close });
@@ -536,7 +597,11 @@ export function createWatchTools(deps: WatchToolDeps) {
 					else if ("amount" in size && size.amount > lim) orderWarnings.push(`주문 금액 ${money(size.amount)} 이 하루 한도 ${money(lim)} 보다 커서 신호가 와도 주문하지 않습니다.`);
 				}
 				if (params.session === "extended") orderWarnings.push("확장 세션 봉이라도 주문은 정규장에만 냅니다 — 장 밖 신호는 알림만.");
-				if (crypto) orderWarnings.push("코인은 24시간 — 조건이 맞으면 밤·주말에도 확인 없이 주문합니다.");
+				if (crypto) orderWarnings.push(`${bs ? "bStock 도 코인처럼" : "코인은"} 24시간 — 조건이 맞으면 밤·주말에도 확인 없이 주문합니다.`);
+				if (eqGrid) {
+					orderWarnings.push(...BINANCE_STOCK_WARNINGS);
+					if ("amount" in size) orderWarnings.push("금액 주문은 소수점 주식으로 삽니다 (최소 5 USDC). 자동 매매 주문은 정규장(RTH) 지정가만 냅니다.");
+				}
 				orderView = {
 					side: o.side,
 					account: target.accountLabel,
@@ -569,6 +634,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 				...(channels.length ? [] : ["알림 채널이 없어 앱 화면에서만 알립니다 — 설정 → 연결 → 알림 (텔레그램)"]),
 				...(bars.length < warm + 10 ? ["봉이 적어 미리보기를 믿기 어렵습니다 (상장 초기 종목?)"] : []),
 				...orderWarnings,
+				...(bs ? bStockWarnings(bs, true) : []),
 			];
 			const card: WatchConfirmCard = {
 				kind: "watch-confirm-card",
@@ -578,7 +644,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 				text: conditionText(condition),
 				preset: presetName,
 				feed: feed && isStock(venue) ? FEED_LABEL(venue, feed) : null,
-				venue: VENUE_LABEL[condition.market.venue],
+				venue: venueLabel(condition.market.venue, bs),
 				interval: condition.interval,
 				limits: spec.limits,
 				lastClose: last?.close ?? null,

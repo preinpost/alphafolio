@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { migrate } from "@alphafolio/ledger";
-import { cryptoGrid, VenueUnknown, type Book, type ExecVenue, type Grid, type OrderTarget, type TriggerSpec, type VenueMarket, type VenueOrderState, type VenuePlace, type WatchBar } from "@alphafolio/broker";
+import { cryptoGrid, equityGrid, parseEquityRules, VenueUnknown, type Book, type ExecVenue, type Grid, type OrderTarget, type TriggerSpec, type VenueMarket, type VenueOrderState, type VenuePlace, type WatchBar } from "@alphafolio/broker";
 import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d1.ts";
 import { OrderTokenGuard } from "../src/order-tokens.ts";
 import { OrderRunner } from "../src/order-runner.ts";
@@ -603,3 +603,60 @@ describe("코인 자동 매매 (Binance 현물)", () => {
 		assert.match(last().message.lines!.join(" "), /최소 주문금액.*부스러기는 팔 수 없어 보호를 끝냅니다/);
 	});
 });
+
+describe("Binance 미국 주식 직접 거래 (binance_stock)", () => {
+	/** 2026-09-28 (월) 10:30 뉴욕 — 정규장 */
+	const NY_OPEN = Date.parse("2026-09-28T10:30:00-04:00");
+	const BSTOCK: OrderTarget = { broker: "binance_stock", account: "5t0c4a1b2c3d", accountLabel: "Binance 미국 주식 (키 5t0c4a)" };
+	const AAPL = parseEquityRules({ symbols: [{ symbol: "AAPL", tradability: "BUY_SELL", fractionable: true, stepSize: "0.000000001", minNotional: "5" }] })!;
+	const spec = (over: Partial<TriggerSpec> = {}): TriggerSpec => ({
+		name: "애플 돌파 매수 (Binance)",
+		condition: { market: { venue: "us", symbol: "AAPL", feed: { provider: "kis" } }, interval: "1m", when: "bar_close", all: [{ left: "close", op: ">", right: 332 }], confirmBars: 1, fire: "on_enter" },
+		action: { kind: "order", target: BSTOCK, order: { side: "BUY", size: { amount: 100 }, worstPct: 1, urgency: "immediate", deadlineSec: 30 }, protect: { stop: { pct: 5 }, interval: "1m" } },
+		limits: { maxFires: 1, cooldownSec: 0, expiresAt: new Date(NY_OPEN + 30 * 86_400_000).toISOString() },
+		conversationId: null,
+		...over,
+	});
+
+	beforeEach(async () => {
+		clock = NY_OPEN;
+		venue.market = "US";
+		venue.grid = equityGrid(AAPL);
+		venue.symbol = "AAPL";
+		venue.ob = { bids: [{ price: 332.4, volume: 120 }], asks: [{ price: 332.5, volume: 40 }], at: 0 };
+		await trades.setLimit("ms", "USD", 1000);
+	});
+
+	it("금액 매수 → 소수점 주식, USD 한도, 체결 수량으로 보호 (소수점)", async () => {
+		const id = await arm(spec());
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(NY_OPEN - MIN, 332.6), closeAt: NY_OPEN });
+		// 중간가 332.45 × 1.01 = 335.7745 → 335.77, 100 / 335.77 = 0.297823… → 0.297822914
+		assert.deepEqual(
+			venue.placed.map((p) => [p.side, p.quantity]),
+			[["BUY", 0.297822914]],
+		);
+		const [x] = await trades.recent("ms");
+		assert.deepEqual([x!.state, x!.currency, x!.broker, x!.day], ["filled", "USD", "binance_stock", "2026-09-28"]);
+		assert.match(last().message.lines!.join("\n"), /매수 0\.297822914\/0\.297822914주 · 평균 \$332\.50/);
+		const p = store.list("ms").find((t) => t.action.kind === "order" && t.action.position?.parentId === id)!;
+		assert.ok(p.action.kind === "order");
+		assert.deepEqual(p.action.position, { shares: 0.297822914, avgPrice: 332.5, stopPrice: 315.87, takePrice: null, parentId: id });
+		assert.match(last().message.lines!.join("\n"), /보호 켬 .*0\.297823주/);
+		// 손절 — 체결 내역 추정 보유가 같으면 전부 팔고 끝
+		sellable = 0.297822914;
+		venue.placed = [];
+		venue.ob = { bids: [{ price: 315, volume: 100 }], asks: [{ price: 315.2, volume: 100 }], at: 0 };
+		await runner.submit({ trigger: p, bar: bar(NY_OPEN, 315.5), closeAt: NY_OPEN + MIN });
+		assert.deepEqual(venue.placed.map((v) => [v.side, v.quantity]), [["SELL", 0.297822914]]);
+		assert.equal(store.get("ms", p.id)!.state, "done");
+	});
+
+	it("장 밖이면 주문하지 않는다 (자동 매매는 정규장 지정가만)", async () => {
+		clock = Date.parse("2026-09-28T18:00:00-04:00");
+		const id = await arm(spec({ action: { kind: "order", target: BSTOCK, order: { side: "BUY", size: { amount: 100 }, worstPct: 1, urgency: "immediate", deadlineSec: 30 } } }));
+		await runner.submit({ trigger: store.get("ms", id)!, bar: bar(clock - 2 * MIN), closeAt: clock - MIN });
+		assert.equal(venue.placed.length, 0);
+		assert.match(last().message.lines!.join(" "), /정규장 밖/);
+	});
+});
+

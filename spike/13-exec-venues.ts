@@ -1,7 +1,7 @@
 /**
  * 체결 어댑터 실측 (PLAN §40 2단계) — **조회만** 한다. 주문·취소는 보내지 않는다.
  *
- *   1. 호가: KIS 국장(005930) · KIS 미장(AAPL 나스닥, ORCL 뉴욕) · 토스 국장·미장 · Binance 현물(BTCUSDT·ETHUSDT, 공개 — 키 불필요)
+ *   1. 호가: KIS 국장(005930) · KIS 미장(AAPL 나스닥, ORCL 뉴욕) · 토스 국장·미장 · Binance 현물(BTCUSDT·ETHUSDT·bStock AAPLBUSDT, 공개 — 키 불필요) · Binance 미국 주식(AAPL·NVDA, 키 있으면)
  *      — 정렬, 호가 단위, 최우선 호가 차이
  *   2. 상태 조회 경로: KIS 오늘 일별 체결(TTTC0081R) · 미장 체결 내역(TTTS3035R) 이 규격 파라미터로 통과하는가 (건수만 출력)
  *
@@ -9,6 +9,9 @@
  * KIS 토큰 캐시가 없으면 멈춘다 (발급 때 문자가 간다). 계좌 정보·주문 내용은 출력하지 않는다.
  */
 import {
+	binanceStockVenue,
+	equityOpenOrders,
+	equityPosition,
 	binanceVenue,
 	callKisApi,
 	gridOf,
@@ -93,6 +96,22 @@ if (toss) {
 // 호가·종목 규칙은 공개 — 빈 키로 (서명 경로는 부르지 않는다)
 await probe("Binance BTCUSDT", () => binanceVenue({ key: "", secret: "" }, "BTCUSDT"));
 await probe("Binance ETHUSDT", () => binanceVenue({ key: "", secret: "" }, "ETHUSDT"));
+// bStock (토큰화 미국 주식) — 같은 현물 쌍
+await probe("Binance AAPLBUSDT", () => binanceVenue({ key: "", secret: "" }, "AAPLBUSDT"));
+// Binance 미국 주식 직접 거래 — 키가 있으면 (규칙·호가는 키만, 미체결·보유 추정은 서명 조회. 주문은 보내지 않는다)
+const bKey = secrets.get("BINANCE_API_KEY", user);
+const bin = bKey ? { key: bKey, secret: secrets.get("BINANCE_API_SECRET", user) ?? "" } : null;
+if (bin) {
+	await probe("Binance 미국 주식 AAPL", () => binanceStockVenue(bin, "AAPL"));
+	await probe("Binance 미국 주식 NVDA", () => binanceStockVenue(bin, "NVDA"));
+	try {
+		const open = await equityOpenOrders(bin);
+		const pos = await equityPosition(bin, "AAPL");
+		console.log(`  Binance 미국 주식 서명 조회: 미체결 ${open.length}건 · AAPL 체결 내역 보유 추정 ${pos.qty}주`);
+	} catch (err) {
+		console.log(`  Binance 미국 주식 서명 조회: 실패 — ${err instanceof Error ? err.message : err}`);
+	}
+}
 
 console.log("\n2. 상태 조회 경로 (건수만)");
 if (kis) {

@@ -42,7 +42,8 @@ export function moneyText(v: number, c: TradeCurrency): string {
 
 /** 수량 표시 — 12주 · 0.015 BTC (지수 표기 없이) */
 export function qtyText(q: number, unit: string): string {
-	if (unit === "주") return `${q.toLocaleString("en-US")}주`;
+	// 소수점 주식(Binance 미국 주식)도 — 0.297823주
+	if (unit === "주") return `${q.toLocaleString("en-US", { maximumFractionDigits: 6 })}주`;
 	return `${q.toLocaleString("en-US", { maximumFractionDigits: 8 })} ${unit}`;
 }
 

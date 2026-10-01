@@ -120,7 +120,8 @@ export interface TriggerLimits {
  * account: 토스 = accountSeq, KIS = 계좌번호 지문(해시 앞 12자리 — 계좌번호를 트리거에 남기지 않는다)
  */
 export interface OrderTarget {
-	broker: "kis" | "toss" | "binance";
+	/** binance = 현물(코인·bStock), binance_stock = Binance 미국 주식 직접 거래 (Nest·Alpaca) */
+	broker: "kis" | "toss" | "binance" | "binance_stock";
 	/** 토스 accountSeq · KIS 계좌번호 지문 · Binance API 키 지문 */
 	account: string;
 	/** 표시용 ("한국투자 ****-01") */

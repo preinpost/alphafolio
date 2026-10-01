@@ -12,6 +12,8 @@ import { describe, it } from "node:test";
 import { createWatchTools, type WatchConfirmCard } from "../src/triggers/tool.ts";
 import type { Condition, OrderTarget, TriggerSpec, WatchBar } from "../src/triggers/types.ts";
 import { cryptoGrid } from "../src/triggers/venues/binance.ts";
+import { equityGrid } from "../src/triggers/venues/binance-stock.ts";
+import { parseEquityRules } from "../src/binance/stocks.ts";
 import type { SymbolRules } from "../src/binance/trade.ts";
 
 const D = 86_400_000;
@@ -21,6 +23,8 @@ const KIS: OrderTarget = { broker: "kis", account: "aaa", accountLabel: "한국�
 const TOSS: OrderTarget = { broker: "toss", account: "7", accountLabel: "토스 ****1234" };
 const BINANCE: OrderTarget = { broker: "binance", account: "f00dcafe0000", accountLabel: "Binance 현물 (키 f00dca)" };
 /** ETHUSDT 규칙 요약 — tick 0.01, step 0.0001, 최소 5 USDT */
+/** AAPLBUSDT (bStock) 실측 규칙 — tick 0.01, step 0.001, 최소 5 USDT */
+const AAPLB_RULES = (): SymbolRules => ({ ...ETH_RULES, symbol: "AAPLBUSDT", base: "AAPLB", stepSize: "0.00100000", minQty: "0.00100000" });
 const ETH_RULES: SymbolRules = {
 	symbol: "ETHUSDT", status: "TRADING", base: "ETH", quote: "USDT", orderTypes: ["LIMIT", "MARKET"], spot: true,
 	tickSize: "0.01000000", minPrice: "0.01", maxPrice: "1000000", stepSize: "0.00010000", minQty: "0.00010000", maxQty: "9000",
@@ -170,7 +174,9 @@ describe("코인 자동 매매 (Binance 현물 USDT 마켓)", () => {
 			tradeLimits: async () => o.limits ?? { KRW: 10_000_000, USD: null, USDT: 1000 },
 			autoTradeOff: () => o.off ?? null,
 			position: async () => o.position ?? { sellable: 0.53217, avgPrice: null },
-			cryptoRules: async (symbol) => (symbol === "ETHUSDT" ? cryptoGrid(ETH_RULES) : null),
+			cryptoRules: async (symbol) => (symbol === "ETHUSDT" ? cryptoGrid(ETH_RULES) : symbol === "AAPLBUSDT" ? cryptoGrid(AAPLB_RULES()) : null),
+			bStock: async (symbol) => (symbol === "AAPLBUSDT" ? { symbol, ticker: "AAPL", token: "AAPLB" } : null),
+			binanceHint: async (raw) => (/(USDT|USDC|BTC|ETH)$/.test(raw) ? null : `Binance 심볼은 쌍 전체로 주세요 — ${raw} 후보: ${raw}BUSDT (bStock) · ${raw}USDT (코인)`),
 			now: () => Date.parse("2026-09-28T01:00:00Z"),
 		});
 		const run = async (p: Record<string, unknown>) => (await tool!.execute("id", p as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }>; details: WatchConfirmCard };
@@ -232,4 +238,90 @@ describe("코인 자동 매매 (Binance 현물 USDT 마켓)", () => {
 		await assert.rejects(coin().run({ action: "protect", symbol: "ETHUSDT", qty: 1, protect: { stopPrice: 2400 } }), /매도 가능 수량/);
 		await assert.rejects(coin().run({ action: "protect", symbol: "ETHUSDT", shares: 1, protect: { stopPrice: 2400 } }), /qty\(코인 수량\)/);
 	});
+
+	it("bStock(AAPLBUSDT) 주문은 bStock: true 없이는 거절 — 실제 주식 쪽을 알려 준다 (알림만이면 된다)", async () => {
+		const p = { action: "prepare", symbol: "AAPLBUSDT", interval: "1h", all: [{ left: "close", op: ">", right: 2700 }] };
+		await assert.rejects(coin().run({ ...p, order: { side: "BUY", amount: 100 } }), /AAPL 주식이 아니라 bStock.*market: 'us' \+ order\.broker: 'binance_stock'/);
+		await assert.rejects(coin().run({ action: "protect", symbol: "AAPLBUSDT", protect: { stopPrice: 300 } }), /bStock: true/);
+		const alert = await coin().run(p);
+		assert.equal(alert.details.venue, "Binance bStock · AAPL");
+	});
+
+	it("bStock(AAPLBUSDT) — bStock: true 면 코인과 같은 길, 배지·경고, 토큰 수량", async () => {
+		const { run, prepared } = coin({ position: { sellable: 1.2345, avgPrice: null } });
+		const r = await run({ action: "prepare", symbol: "AAPLBUSDT", bStock: true, interval: "1h", all: [{ left: "close", op: ">", right: 2700 }], order: { side: "BUY", amount: 100 } });
+		const a = prepared[0]!.action;
+		assert.ok(a.kind === "order");
+		assert.deepEqual(a.target, BINANCE);
+		assert.equal(prepared[0]!.condition.market.venue, "binance");
+		assert.equal(r.details.venue, "Binance bStock · AAPL");
+		// 2,600 × 1.01 = 2,626 → 100 / 2,626 = 0.03808 → 0.038 AAPLB (수량 단위 0.001)
+		assert.match(r.details.order?.estimate ?? "", /약 0\.038 AAPLB/);
+		assert.ok(r.details.warnings.some((w) => /토큰화 증권/.test(w)));
+		assert.ok(r.details.warnings.some((w) => /bStock 도 코인처럼 24시간/.test(w)));
+		const p = await run({ action: "protect", symbol: "AAPLBUSDT", bStock: true, protect: { stopPrice: 300 } });
+		assert.equal(p.details.order?.size, "1.234 AAPLB (매도 가능 1.2345 AAPLB)");
+		assert.ok(p.details.warnings.some((w) => /나스닥 AAPL 시세가 아닙니다/.test(w)));
+	});
+
+	it("쌍이 아닌 Binance 티커는 고르지 않고 후보를 알린다 (알림만이어도)", async () => {
+		await assert.rejects(coin().run({ action: "prepare", market: "binance", symbol: "STX", interval: "1h", all: [{ left: "close", op: ">", right: 1 }] }), /STXBUSDT \(bStock\) · STXUSDT \(코인\)/);
+		await assert.rejects(coin().run({ action: "protect", market: "binance", symbol: "AAPL", protect: { stopPrice: 300 } }), /쌍 전체로/);
+	});
 });
+
+describe("Binance 미국 주식 직접 거래 (broker: binance_stock)", () => {
+	const BSTOCK: OrderTarget = { broker: "binance_stock", account: "5t0c4a1b2c3d", accountLabel: "Binance 미국 주식 (키 5t0c4a)" };
+	const usBars = (n: number): WatchBar[] => Array.from({ length: n }, (_, i) => ({ t: T0 + i * D, open: 330, high: 335, low: 325, close: 332.5, volume: 100 }));
+	function us(o: { targets?: OrderTarget[]; position?: { sellable: number; avgPrice: number | null } } = {}) {
+		const prepared: TriggerSpec[] = [];
+		const [tool] = createWatchTools({
+			prepareWatch: (s) => (prepared.push(s), { token: "tok", expiresAt: 99 }),
+			listWatches: async () => [],
+			pauseWatch: async () => {
+				throw new Error("no");
+			},
+			channels: () => ["telegram"],
+			fetchBars: async (_c: Condition, limit: number) => usBars(300).slice(-limit),
+			feeds: () => ({ kis: true, toss: false }),
+			orderTargets: async () => o.targets ?? [KIS, BINANCE, BSTOCK],
+			tradeLimits: async () => ({ KRW: null, USD: 1000, USDT: null }),
+			position: async () => o.position ?? { sellable: 0.75, avgPrice: 300 },
+			equityGrid: async (symbol) => (symbol === "AAPL" ? equityGrid(parseEquityRules({ symbols: [{ symbol: "AAPL", tradability: "BUY_SELL", fractionable: true, stepSize: "0.000000001", minNotional: "5" }] })!) : null),
+			now: () => Date.parse("2026-09-28T01:00:00Z"),
+		});
+		const run = async (p: Record<string, unknown>) => (await tool!.execute("id", p as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }>; details: WatchConfirmCard };
+		return { run, prepared };
+	}
+	const ubase = { action: "prepare", symbol: "AAPL", market: "us", interval: "1d", all: [{ left: "close", op: ">", right: 340 }] };
+
+	it("미장 계좌가 여럿이면 묻는다 (Binance 현물 계정은 미장 후보가 아니다)", async () => {
+		await assert.rejects(us().run({ ...ubase, order: { side: "BUY", amount: 100 } }), /kis = 한국투자 \*\*\*\*78-01 · binance_stock = Binance 미국 주식/);
+	});
+
+	it("금액 매수 — 소수점 주식 추정, 조건 봉은 증권 키 시세, 한도는 USD", async () => {
+		const { run, prepared } = us();
+		const r = await run({ ...ubase, order: { side: "BUY", amount: 100, broker: "binance_stock" } });
+		const s = prepared[0]!;
+		assert.ok(s.action.kind === "order");
+		assert.deepEqual(s.action.target, BSTOCK);
+		assert.deepEqual(s.condition.market.feed, { provider: "kis" });
+		// 332.5 × 1.01 = 335.825 → 335.82 (0.01 내림), 100 / 335.82 = 0.297778571 주
+		assert.match(r.details.order?.estimate ?? "", /약 0\.297779주|약 0\.297778주/);
+		assert.equal(r.details.order?.dailyLimit, "$1,000");
+		assert.ok(r.details.warnings.some((w) => /Nest Trading/.test(w)));
+		assert.ok(r.details.warnings.some((w) => /tokenize=false/.test(w)));
+		await assert.rejects(us().run({ ...ubase, symbol: "ZZZZ", order: { side: "BUY", amount: 100, broker: "binance_stock" } }), /거래할 수 없는 미국 주식/);
+	});
+
+	it("가진 주식 보호 — 체결 내역 추정 수량(소수점)·평단으로 %", async () => {
+		const { run, prepared } = us({ targets: [BSTOCK] });
+		const r = await run({ action: "protect", symbol: "AAPL", market: "us", protect: { stopPct: 5 } });
+		const a = prepared[0]!.action;
+		assert.ok(a.kind === "order");
+		assert.deepEqual(a.position, { shares: 0.75, avgPrice: 300, stopPrice: 285, takePrice: null, parentId: null });
+		assert.equal(r.details.order?.size, "0.75주 (매도 가능 0.75주)");
+		assert.ok(r.details.warnings.some((w) => /체결 내역으로 추정/.test(w)));
+	});
+});
+

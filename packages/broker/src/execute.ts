@@ -11,6 +11,7 @@
 import { describeAction, type OrderAction } from "./actions.ts";
 import { kisChangeOrder, kisPlaceOrder } from "./kis/orders.ts";
 import { executeBinance } from "./binance/trade.ts";
+import { equityCancel, equityPlace } from "./binance/stocks.ts";
 import type { BrokerAccess } from "./portfolio.ts";
 import { defaultAccountSeq } from "./toss/api.ts";
 import {
@@ -49,6 +50,11 @@ function sane(a: OrderAction): void {
 		// 문자열 10진수 — 양수인지만 (단위 보정은 준비 단계에서 끝났다)
 		for (const [what, v] of Object.entries(a)) {
 			if (/quantity|Qty|price|Price/.test(what) && typeof v === "string" && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
+		}
+	}
+	if (a.kind === "binance-stock-place") {
+		for (const [what, v] of [["수량", a.quantity], ["금액", a.notional], ["가격", a.price]] as const) {
+			if (v !== undefined && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
 		}
 	}
 	if (a.kind === "conditional-create" || a.kind === "conditional-modify") {
@@ -115,6 +121,24 @@ export async function executeOrderAction(action: OrderAction, nonce: string, acc
 		case "binance-oto":
 		case "binance-cancel-all":
 			return executeBinance(action, nonce, need(access.binance, "Binance"));
+		case "binance-stock-place": {
+			// nonce 를 clientOrderId 로 (32자로 채운다). tokenize=false — 토큰으로 바꾸지 않는다
+			const r = await equityPlace(need(access.binance, "Binance"), {
+				symbol: action.symbol,
+				side: action.side,
+				orderType: action.type,
+				...(action.price ? { price: action.price } : {}),
+				...(action.quantity ? { quantity: action.quantity } : {}),
+				...(action.notional ? { notional: action.notional } : {}),
+				...(action.type === "LIMIT" ? { session: action.session ?? "RTH" } : {}),
+				quoteAsset: action.quote,
+				clientOrderId: nonce,
+			});
+			return { message: "주문이 접수되었습니다 (체결은 Binance 앱·주문 목록에서 확인)", orderId: r.orderId };
+		}
+		case "binance-stock-cancel":
+			await equityCancel(need(access.binance, "Binance"), action.original.orderId);
+			return { message: "취소가 접수되었습니다", orderId: action.original.orderId };
 	}
 }
 

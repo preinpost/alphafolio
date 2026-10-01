@@ -62,6 +62,8 @@ export interface ConditionalOrderCard {
 /** Binance 현물 확인 카드 (PLAN §36) — 값은 문자열 10진수 (거래소 단위로 보정됨) */
 export interface BinanceOrderCard {
 	kind: "binance-order-card";
+	/** stock = Binance 미국 주식 직접 거래 (값의 base 는 티커, quote 는 USDC). 없으면 현물 */
+	market?: "spot" | "stock";
 	ok: boolean;
 	token: string | null;
 	expiresAt: number | null;
@@ -78,9 +80,9 @@ export interface BinanceOrderCard {
 	lastPrice: string | null;
 	balance: { asset: string; free: string } | null;
 	minNotional: string | null;
-	original: { orderId: number; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string } | null;
+	original: { orderId: number | string; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string } | null;
 	lines: Array<{ label: string; text: string; pct: number | null }>;
-	orders: Array<{ orderId: number; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string }>;
+	orders: Array<{ orderId: number | string; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string }>;
 	warnings: string[];
 	errors: string[];
 }

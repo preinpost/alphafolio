@@ -180,6 +180,47 @@ export interface BinanceCancelAllAction extends BinanceBase {
 	count: number;
 }
 
+// ── Binance 미국 주식 직접 거래 (Nest·Alpaca, `/sapi/v1/equity`) — 값은 문자열 10진수 ──
+
+export interface BinanceStockPlaceAction {
+	kind: "binance-stock-place";
+	broker: "binance_stock";
+	/** 미국 티커 (AAPL) */
+	symbol: string;
+	/** 대금 자산 (USDC) */
+	quote: string;
+	side: OrderSide;
+	type: OrderType;
+	/** 주 수 (소수점 가능 — stepSize 로 내림). 시장가 매수면 없다 */
+	quantity?: string;
+	/** 시장가 매수 금액 (USDC) */
+	notional?: string;
+	/** 지정가 (소수 2자리) */
+	price?: string;
+	/** 지정가 세션 — RTH(정규장) · EXTENDED(프리·애프터) · 24H */
+	session?: "RTH" | "EXTENDED" | "24H";
+	estimatedQuote: string;
+}
+
+/** 원주문 — 서버가 미체결 조회로 채운다 (주문번호는 UUID) */
+export interface BinanceStockOriginal {
+	orderId: string;
+	side: OrderSide;
+	type: string;
+	price: string;
+	qty: string;
+	filledQty: string;
+}
+
+export interface BinanceStockCancelAction {
+	kind: "binance-stock-cancel";
+	broker: "binance_stock";
+	symbol: string;
+	original: BinanceStockOriginal;
+}
+
+export type BinanceStockAction = BinanceStockPlaceAction | BinanceStockCancelAction;
+
 export type BinanceAction =
 	| BinancePlaceAction
 	| BinanceCancelAction
@@ -195,7 +236,8 @@ export type OrderAction =
 	| ConditionalCreateAction
 	| ConditionalModifyAction
 	| ConditionalCancelAction
-	| BinanceAction;
+	| BinanceAction
+	| BinanceStockAction;
 
 /** 로그 한 줄 — 금액·계좌 없이 무엇을 하는지만 */
 export function describeAction(a: OrderAction): string {
@@ -224,5 +266,9 @@ export function describeAction(a: OrderAction): string {
 			return `binance OTO ${a.symbol} ${a.quantity}`;
 		case "binance-cancel-all":
 			return `binance 전체 취소 ${a.symbol} (${a.count}건)`;
+		case "binance-stock-place":
+			return `binance 미국 주식 ${a.symbol} ${a.side} ${a.type} ${a.quantity ? `${a.quantity}주` : `${a.notional} ${a.quote}`}`;
+		case "binance-stock-cancel":
+			return `binance 미국 주식 취소 ${a.symbol} ${a.original.orderId.slice(0, 12)}`;
 	}
 }

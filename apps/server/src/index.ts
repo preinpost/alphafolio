@@ -37,6 +37,9 @@ import {
 	type Condition,
 	cryptoAutoProblem,
 	currencyOf,
+	equityGrid,
+	equityPosition,
+	equityRules,
 	orderTarget,
 	targetSellable,
 	targetVenue,
@@ -188,6 +191,7 @@ async function main(): Promise<void> {
 		}
 		// 코인은 Binance 계정으로만, 주식은 증권 계좌로만
 		if ((venue === "binance") !== (spec.action.target.broker === "binance")) return "시장과 주문 계좌가 맞지 않습니다 — 다시 준비해 주세요";
+		if (spec.action.target.broker === "binance_stock" && venue !== "us") return "Binance 미국 주식 계좌는 미장 감시에만 씁니다 — 다시 준비해 주세요";
 		// 보호 트리거는 횟수가 아니라 남은 수량으로 끝난다
 		if (spec.limits.maxFires === null && !spec.action.position) return "자동 매매 감시는 최대 횟수가 필요합니다";
 		if (spec.action.position && spec.action.order.side !== "SELL") return "보호는 매도만 합니다";
@@ -397,7 +401,7 @@ async function main(): Promise<void> {
 			// 자동 매매 — 주문 계좌(키가 있는 곳)·하루 한도·서버 설정
 			orderTargets: async () => {
 				const out: OrderTarget[] = [];
-				for (const b of ["kis", "toss", "binance"] as const) {
+				for (const b of ["kis", "toss", "binance", "binance_stock"] as const) {
 					try {
 						out.push(await orderTarget(brokerAccess(user), b));
 					} catch {
@@ -407,9 +411,22 @@ async function main(): Promise<void> {
 				return out;
 			},
 			tradeLimits: () => tradeStore.limits(user),
+			equityGrid: async (symbol) => {
+				const b = dataCreds(user).binance;
+				if (!b) return null;
+				const r = await equityRules(b, symbol);
+				return r && r.tradability !== "NONE" ? equityGrid(r) : null;
+			},
 			// 보유 종목 보호 — 매도 가능 수량(그 계좌) + 평단(잔고)
 			position: async (symbol, target) => {
 				const a = brokerAccess(user);
+				// Binance 미국 주식 — 보유 API 가 없어 체결 내역으로 (수량·평단)
+				if (target.broker === "binance_stock") {
+					const b = dataCreds(user).binance;
+					if (!b) throw new Error("Binance 키가 없습니다 — 설정 → 코인 (Binance)");
+					const p = await equityPosition(b, symbol);
+					return { sellable: p.qty, avgPrice: p.avgPrice };
+				}
 				const sellable = await targetSellable(a, target, symbol);
 				const pf = await fetchPortfolio(a).catch(() => null);
 				const h = pf?.holdings.find((x) => x.symbol.toUpperCase() === symbol.toUpperCase() && x.broker === target.broker);

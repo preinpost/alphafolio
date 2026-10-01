@@ -309,7 +309,10 @@ const tz = (v: string): string => (v.includes(".") ? v.replace(/0+$/, "").replac
 /** Binance 현물 — 신규·취소·재주문·OCO·OTO·전체 취소 (값은 거래소 단위로 보정된 문자열) */
 export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 	const c = useConfirm(card.token, card.expiresAt, card.ok);
-	const pair = `${card.base}/${card.quote}`;
+	// 미국 주식 직접 거래 — 수량은 주, 대금은 USDC
+	const stock = card.market === "stock";
+	const pair = stock ? `${card.base} 미국 주식` : `${card.base}/${card.quote}`;
+	const unit = stock ? "주" : ` ${card.base}`;
 	const verb = { place: "주문", cancel: "취소", replace: "재주문", oco: "등록", oto: "등록", cancel_all: "취소" }[card.action];
 	if (!card.ok) return <Problems title={`Binance ${verb}을 준비하지 못했습니다 — ${pair}`} errors={card.errors} />;
 	const sideLabel = card.side === "BUY" ? "매수" : card.side === "SELL" ? "매도" : "";
@@ -332,8 +335,8 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 				<div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3">
 					<span className={`text-sm ${sideClass}`}>
 						{sideLabel}{" "}
-						{card.quantity ? `${card.quantity} ${card.base}` : `${card.quoteQuantity} ${card.quote} 어치`} ·{" "}
-						{card.type === "LIMIT" ? `지정가 ${card.price} ${card.quote}` : "시장가"}
+						{card.quantity ? `${card.quantity}${unit}` : `${card.quoteQuantity} ${card.quote} 어치`} ·{" "}
+						{card.type === "LIMIT" ? (stock ? `지정가 $${card.price}` : `지정가 ${card.price} ${card.quote}`) : "시장가"}
 					</span>
 					{card.estimatedQuote && (
 						<span className="text-sm text-ink">
@@ -345,7 +348,8 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 			{card.action === "cancel" && card.original && (
 				<div className="mt-2 text-sm text-ink">
 					<span className={card.original.side === "BUY" ? "text-up" : "text-down"}>{card.original.side === "BUY" ? "매수" : "매도"}</span>{" "}
-					{tz(card.original.origQty)} {card.base} @ {tz(card.original.price)} {card.quote} 주문을 <b>취소</b>합니다
+					{tz(card.original.origQty)}
+					{unit} @ {tz(card.original.price)} {stock ? "USD" : card.quote} 주문을 <b>취소</b>합니다
 				</div>
 			)}
 			{card.action === "cancel_all" && (
@@ -354,7 +358,9 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 					<ul className="mt-1 space-y-0.5 text-xs text-muted">
 						{card.orders.slice(0, 5).map((o) => (
 							<li key={o.orderId}>
-								· {o.side === "BUY" ? "매수" : "매도"} {tz(o.origQty)} {card.base} @ {tz(o.price)} {card.quote}
+								· {o.side === "BUY" ? "매수" : "매도"} {tz(o.origQty)}
+								{unit} @ {tz(o.price)} {stock ? "USD" : card.quote}
+								{stock ? ` (${String(o.orderId).slice(0, 8)})` : ""}
 							</li>
 						))}
 						{card.orders.length > 5 && <li>· 외 {card.orders.length - 5}건</li>}
@@ -379,7 +385,7 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 				</div>
 			)}
 			<div className="mt-2 text-[11px] text-faint">
-				{card.lastPrice ? `현재가 ${card.lastPrice} ${card.quote}` : ""}
+				{card.lastPrice ? `현재가 ${card.lastPrice} ${stock ? "USD" : card.quote}` : ""}
 				{card.balance ? ` · 잔고 ${card.balance.asset} ${card.balance.free}` : ""}
 				{card.minNotional ? ` · 최소 주문 ${card.minNotional} ${card.quote}` : ""}
 				{card.original ? ` · 원주문 #${card.original.orderId}` : ""}
