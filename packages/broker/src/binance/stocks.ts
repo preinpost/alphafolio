@@ -13,6 +13,7 @@
  *
  * 매수 대금은 기본 USDC (quoteAsset), 매도 대금도 USDC. 테스트넷은 없다 (실전 api.binance.com 만).
  * ⚠️ 쓰기 경로는 /order/place · /order/cancel 둘뿐 — 약관 동의(/account/disclaimer)·토큰 전환(mint/redeem)은 부르지 않는다.
+ *    Funding 지갑(`POST /sapi/v1/asset/get-funding-asset`)은 POST 지만 조회다 — binance_stock_account 가 잔고 표시에만 쓴다.
  */
 import { floorToStep } from "./decimal.ts";
 import { plainDecimal } from "../triggers/venues/binance.ts";
@@ -287,6 +288,8 @@ export async function equityCancel(c: BinanceCreds, orderId: string, opts: Stock
 // ── 보유 (체결 내역으로 추정) ───────────────────────────────
 
 export interface EquityFill {
+	/** 종목 — 전 종목 조회(symbol 없이)에서 묶을 때 쓴다 */
+	symbol?: string;
 	side: "BUY" | "SELL";
 	qty: string;
 	price: string;
@@ -312,17 +315,27 @@ export function netPosition(fills: EquityFill[], step = "0.000000001"): { qty: n
 	return { qty: left, avgPrice: left > 0 && cost > 0 ? Number((cost / qty).toPrecision(12)) : null };
 }
 
-/** 종목의 체결 전부 (기간 from~지금, 100건씩) */
-export async function equityFills(c: BinanceCreds, symbol: string, from: number, opts: StockCallOptions & { maxPages?: number } = {}): Promise<EquityFill[]> {
+/** 종목의 체결 전부 (기간 from~지금, 100건씩). symbol 이 null 이면 전 종목 */
+export async function equityFills(c: BinanceCreds, symbol: string | null, from: number, opts: StockCallOptions & { maxPages?: number } = {}): Promise<EquityFill[]> {
 	const now = opts.now?.() ?? Date.now();
 	const out: EquityFill[] = [];
 	for (let page = 1; page <= (opts.maxPages ?? 20); page++) {
-		const r = (await equityCall(c, "GET", "/trade/history", { startTime: String(from), endTime: String(now), symbol, current: String(page), size: "100" }, "signed", opts)) as {
+		const q: Record<string, string> = { startTime: String(from), endTime: String(now), current: String(page), size: "100" };
+		if (symbol) q.symbol = symbol;
+		const r = (await equityCall(c, "GET", "/trade/history", q, "signed", opts)) as {
 			total?: number;
 			rows?: Array<Record<string, unknown>>;
 		} | null;
 		const rows = r?.rows ?? [];
-		for (const x of rows) out.push({ side: String(x.side) === "SELL" ? "SELL" : "BUY", qty: String(x.qty ?? "0"), price: String(x.price ?? "0"), at: Number(x.executionAt ?? 0) });
+		for (const x of rows) {
+			out.push({
+				symbol: String(x.symbol ?? symbol ?? ""),
+				side: String(x.side) === "SELL" ? "SELL" : "BUY",
+				qty: String(x.qty ?? "0"),
+				price: String(x.price ?? "0"),
+				at: Number(x.executionAt ?? 0),
+			});
+		}
 		if (rows.length < 100 || out.length >= Number(r?.total ?? 0)) break;
 	}
 	return out;
@@ -335,4 +348,77 @@ export async function equityPosition(c: BinanceCreds, symbol: string, opts: Stoc
 	const now = opts.now?.() ?? Date.now();
 	const from = rules.listingTime ?? now - 365 * 86_400_000;
 	return netPosition(await equityFills(c, symbol, from, opts), rules.stepSize);
+}
+
+/** Binance 미국 주식 서비스 공개(2026-08) 전 — 전 종목 체결 조회의 시작점 */
+export const EQUITY_SINCE = Date.UTC(2026, 7, 1);
+
+export interface EquityHolding {
+	symbol: string;
+	qty: number;
+	avgPrice: number | null;
+	fills: number;
+}
+
+/** 전 종목 체결 → 종목별 남은 수량·평단 (다 판 종목은 뺀다). 순수 */
+export function holdingsFromFills(fills: EquityFill[]): EquityHolding[] {
+	const by = new Map<string, EquityFill[]>();
+	for (const f of fills) {
+		if (!f.symbol) continue;
+		by.set(f.symbol, [...(by.get(f.symbol) ?? []), f]);
+	}
+	return [...by.entries()]
+		.map(([symbol, fs]) => ({ symbol, ...netPosition(fs), fills: fs.length }))
+		.filter((h) => h.qty > 0)
+		.sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+/** 보유 추정 — 전 종목 (체결 내역으로) */
+export async function equityHoldings(c: BinanceCreds, opts: StockCallOptions & { from?: number } = {}): Promise<EquityHolding[]> {
+	return holdingsFromFills(await equityFills(c, null, opts.from ?? EQUITY_SINCE, opts));
+}
+
+// ── Funding 지갑 ────────────────────────────────────────────
+
+export interface FundingAsset {
+	asset: string;
+	free: string;
+	locked: string;
+	freeze: string;
+	withdrawing: string;
+}
+
+export function parseFunding(body: unknown): FundingAsset[] {
+	const s = (v: unknown): string => (v === undefined || v === null || v === "" ? "0" : String(v));
+	return (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : [])
+		.filter((x) => x.asset)
+		.map((x) => ({ asset: String(x.asset), free: s(x.free), locked: s(x.locked), freeze: s(x.freeze), withdrawing: s(x.withdrawing) }));
+}
+
+/**
+ * Funding 지갑 잔고 — `POST /sapi/v1/asset/get-funding-asset`. POST 지만 **조회**다 (돈을 움직이지 않는다).
+ * Binance Pay·Card·Gift Card·Stock Token 자산이 여기 있다.
+ */
+export async function fundingAssets(c: BinanceCreds, opts: StockCallOptions = {}): Promise<FundingAsset[]> {
+	if (c.testnet) throw new BinanceStockError("Funding 지갑은 테스트넷이 없습니다 — 실전 키로만 됩니다", 400);
+	const f: FetchLike = opts.fetch ?? ((u, i) => fetch(u, i));
+	const { url, init } = signedRequest("POST", "/sapi/v1/asset/get-funding-asset", {}, c, opts.now?.() ?? Date.now());
+	let res: Response;
+	try {
+		res = await f(url, init);
+	} catch (err) {
+		throw new BinanceStockError(`Funding 지갑 연결 실패: ${scrub(err instanceof Error ? err.message : String(err), c)}`, 0);
+	}
+	const text = await res.text().catch(() => "");
+	let body: unknown = null;
+	try {
+		body = text ? JSON.parse(text) : [];
+	} catch {
+		throw new BinanceStockError(`Funding 지갑 응답을 읽지 못했습니다 (HTTP ${res.status}): ${scrub(text.slice(0, 160), c)}`, res.ok ? 0 : res.status);
+	}
+	const o = body as { code?: number; msg?: string } | null;
+	if (!res.ok || (o && !Array.isArray(o) && typeof o.code === "number" && o.code < 0)) {
+		throw new BinanceStockError(`Funding 지갑 조회 실패 (HTTP ${res.status}${o?.code !== undefined ? ` ${o.code}` : ""}): ${scrub(String(o?.msg ?? text.slice(0, 160)), c)}`, res.status || 400, o?.code);
+	}
+	return parseFunding(body);
 }

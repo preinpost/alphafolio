@@ -290,3 +290,65 @@ describe("확인 카드 실행 — binance-stock-place", () => {
 		);
 	});
 });
+
+describe("계좌 조회 (binance_stock_account)", () => {
+	it("보유 — 전 종목 체결을 종목별로, 다 판 종목은 뺀다", async () => {
+		const { holdingsFromFills } = await import("../src/binance/stocks.ts");
+		const h = holdingsFromFills([
+			{ symbol: "PANW", side: "BUY", qty: "0.2", price: "400", at: 1 },
+			{ symbol: "PANW", side: "BUY", qty: "0.05", price: "420", at: 2 },
+			{ symbol: "AAPL", side: "BUY", qty: "1", price: "200", at: 1 },
+			{ symbol: "AAPL", side: "SELL", qty: "1", price: "210", at: 3 },
+		]);
+		assert.deepEqual(h.map((x) => x.symbol), ["PANW"]);
+		assert.equal(h[0]!.qty, 0.25);
+		assert.equal(h[0]!.avgPrice, 404);
+		assert.equal(h[0]!.fills, 2);
+	});
+
+	it("괴리 — 중간가·사면·팔면·호가 폭, 호가나 본주가 없으면 null", async () => {
+		const { premiumOf } = await import("../src/binance/stock-account-tool.ts");
+		const p = premiumOf({ bid: 405.61, ask: 406.43 }, 406.7)!;
+		assert.equal(p.binance, 406.02);
+		assert.equal(p.pct, -0.17);
+		assert.equal(p.askPct, -0.07);
+		assert.equal(p.bidPct, -0.27);
+		assert.equal(p.spreadPct, 0.2);
+		assert.equal(premiumOf({ bid: 0, ask: 410 }, 400)!.pct, 2.5, "한쪽만 있으면 그 값");
+		assert.equal(premiumOf(null, 400), null);
+		assert.equal(premiumOf({ bid: 1, ask: 1 }, 0), null);
+	});
+
+	it("Funding — POST 서명 조회, 응답 파싱", async () => {
+		const { fundingAssets } = await import("../src/binance/stocks.ts");
+		const seen: Array<{ url: string; method?: string }> = [];
+		const out = await fundingAssets(CREDS, {
+			now: () => 1_700_000_000_000,
+			fetch: async (url, init) => {
+				seen.push({ url, method: init?.method });
+				return new Response(JSON.stringify([{ asset: "USDC", free: "100.71", locked: "0", freeze: "0", withdrawing: "0", btcValuation: "0" }, { asset: "PANWB", free: "0.5" }]));
+			},
+		});
+		assert.equal(seen[0]!.method, "POST");
+		assert.match(seen[0]!.url, /\/sapi\/v1\/asset\/get-funding-asset\?timestamp=1700000000000&recvWindow=5000&signature=[0-9a-f]{64}$/);
+		assert.deepEqual(out[0], { asset: "USDC", free: "100.71", locked: "0", freeze: "0", withdrawing: "0" });
+		assert.equal(out[1]!.locked, "0", "빠진 필드는 0");
+		await assert.rejects(
+			fundingAssets(CREDS, { fetch: async () => new Response(JSON.stringify({ code: -2015, msg: "Invalid API-key" }), { status: 401 }) }),
+			/Funding 지갑 조회 실패 \(HTTP 401 -2015\)/,
+		);
+	});
+
+	it("전 종목 체결 조회는 symbol 을 보내지 않는다", async () => {
+		const { equityFills } = await import("../src/binance/stocks.ts");
+		const urls: string[] = [];
+		const fills = await equityFills(CREDS, null, 1, {
+			fetch: async (url) => {
+				urls.push(url);
+				return new Response(JSON.stringify({ total: 1, rows: [{ symbol: "PANW", side: "BUY", qty: "0.25", price: "404", executionAt: 5 }] }));
+			},
+		});
+		assert.doesNotMatch(urls[0]!, /[?&]symbol=/);
+		assert.equal(fills[0]!.symbol, "PANW");
+	});
+});

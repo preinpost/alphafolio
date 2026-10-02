@@ -20,6 +20,7 @@ import type { TossContext } from "./toss/client.ts";
 import { getConditionalOrder, listOrders, type TossOrder } from "./toss/orders.ts";
 import { createBinanceOrderTool } from "./binance/order-tool.ts";
 import { createBinanceStockOrderTool } from "./binance/stock-order-tool.ts";
+import { createBinanceStockAccountTool } from "./binance/stock-account-tool.ts";
 
 // ── details 계약 — UI 렌더러가 이 모양에 의존한다 (protocol/src/orders.ts 와 같은 모양) ──
 
@@ -371,7 +372,7 @@ export function createOrderTools(deps: OrderToolDeps) {
 		},
 	});
 
-	return [orderChange, orderConditional, createBinanceOrderTool(deps), createBinanceStockOrderTool(deps)];
+	return [orderChange, orderConditional, createBinanceOrderTool(deps), createBinanceStockOrderTool(deps), createBinanceStockAccountTool(deps)];
 }
 
 function legView(l: unknown): ConditionalLegView {
@@ -383,7 +384,7 @@ function legView(l: unknown): ConditionalLegView {
 	};
 }
 
-export const ORDER_TOOL_NAMES = ["order_change", "order_conditional", "binance_order", "binance_stock_order"] as const;
+export const ORDER_TOOL_NAMES = ["order_change", "order_conditional", "binance_order", "binance_stock_order", "binance_stock_account"] as const;
 
 // 테스트용 재노출
 export type { KisContext, TossContext };
