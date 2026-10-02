@@ -352,3 +352,45 @@ describe("계좌 조회 (binance_stock_account)", () => {
 		assert.equal(fills[0]!.symbol, "PANW");
 	});
 });
+
+describe("수수료 (order/history fee)", () => {
+	it("주문 파싱 — fee·createdAt, 없으면 null", () => {
+		const o = parseEquityOrder({ orderId: "a", symbol: "PANW", fee: "0.02", createdAt: 1_759_400_000_000, filledQty: "0.25" });
+		assert.equal(o.fee, "0.02");
+		assert.equal(o.createdAt, 1_759_400_000_000);
+		const bare = parseEquityOrder({ orderId: "b" });
+		assert.equal(bare.fee, null);
+		assert.equal(bare.createdAt, null);
+	});
+
+	it("종목별 합계 — 체결 없는 주문은 뺀다, 체결 금액 = filledQty × avgFilledPrice", async () => {
+		const { feesFromOrders } = await import("../src/binance/stocks.ts");
+		const f = feesFromOrders([
+			parseEquityOrder({ orderId: "1", symbol: "PANW", side: "BUY", filledQty: "0.2", avgFilledPrice: "400", fee: "0.01" }),
+			parseEquityOrder({ orderId: "2", symbol: "PANW", side: "SELL", filledQty: "0.1", avgFilledPrice: "420", fee: "0.02" }),
+			parseEquityOrder({ orderId: "3", symbol: "PANW", side: "BUY", filledQty: "0", status: "CANCELED", fee: "0.5" }),
+			parseEquityOrder({ orderId: "4", symbol: "AAPL", side: "BUY", filledQty: "1", avgFilledPrice: "200" }),
+		]);
+		assert.deepEqual(f, [
+			{ symbol: "AAPL", fee: 0, filled: 200, orders: 1 },
+			{ symbol: "PANW", fee: 0.03, filled: 122, orders: 2 },
+		]);
+	});
+
+	it("내역 조회 — GET /order/history 서명, 전 종목이면 symbol 없음, 페이지를 넘긴다", async () => {
+		const { equityOrderHistory } = await import("../src/binance/stocks.ts");
+		const urls: string[] = [];
+		const rows = Array.from({ length: 100 }, (_, i) => ({ orderId: `o${i}`, symbol: "PANW", filledQty: "1", fee: "0" }));
+		const out = await equityOrderHistory(CREDS, null, 1, {
+			fetch: async (url) => {
+				urls.push(url);
+				const page = Number(new URL(url).searchParams.get("current"));
+				return new Response(JSON.stringify({ total: 101, rows: page === 1 ? rows : [{ orderId: "last", symbol: "PANW", fee: "0.01" }] }));
+			},
+		});
+		assert.equal(urls.length, 2);
+		assert.match(urls[0]!, /\/sapi\/v1\/equity\/order\/history\?startTime=1&endTime=\d+&current=1&size=100&timestamp=\d+&recvWindow=5000&signature=[0-9a-f]{64}$/);
+		assert.equal(out.length, 101);
+		assert.equal(out[100]!.fee, "0.01");
+	});
+});

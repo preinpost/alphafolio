@@ -6,6 +6,7 @@
  *   보유   체결 내역(전 종목, 매수 − 매도)으로 추정 — Binance 에 보유 API 가 없다
  *   괴리   Binance 호가(bid·ask, ~5초 지연) vs 본주 현재가(KIS·토스 — market_price 와 같은 길)
  *   토큰   Funding·현물에 있는 bStock(AAPLB 등) — 현물 AAPLBUSDT 가격 vs 본주 (1토큰 = 1주 가정)
+ *   수수료 /sapi/v1/equity/order/history 의 fee (주문별 누적 USD) — 종목별 합계·체결 금액 대비 %, 최근 체결 주문
  *   미체결 /sapi/v1/equity/order/open-orders
  *
  * 한 곳이 실패해도 나머지는 보여 주고, 빠진 것은 경고로 알린다 (portfolio.ts 와 같은 원칙).
@@ -15,13 +16,27 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { BrokerAccess } from "../portfolio.ts";
 import { fetchQuote } from "../quote.ts";
 import { bStockOf } from "./bstocks.ts";
-import { equityHoldings, equityOpenOrders, equityQuote, fundingAssets, type EquityHolding, type EquityOrder, type FundingAsset } from "./stocks.ts";
+import {
+	EQUITY_SINCE,
+	equityHoldings,
+	equityOpenOrders,
+	equityOrderHistory,
+	equityQuote,
+	feesFromOrders,
+	fundingAssets,
+	type EquityFees,
+	type EquityHolding,
+	type EquityOrder,
+	type FundingAsset,
+} from "./stocks.ts";
 import { freeBalances, lastPrice, type BinanceCreds } from "./trade.ts";
 
 const CASH = ["USDC", "USDT"];
 /** 한 번에 괴리를 볼 종목 수 — 호가·본주 시세를 종목마다 두 번씩 부른다 */
 const MAX_SYMBOLS = 15;
 const MAX_TOKENS = 10;
+/** 최근 체결 주문 몇 건을 보여 줄지 */
+const RECENT_FILLED = 5;
 
 export interface Premium {
 	/** Binance 중간가 (bid·ask 중 하나만 있으면 그 값) */
@@ -59,6 +74,7 @@ export function premiumOf(q: { bid: number; ask: number } | null, underlying: nu
 const sign = (n: number): string => `${n >= 0 ? "+" : ""}${n}%`;
 const usd = (n: number): string => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const qtyText = (n: number): string => String(Number(n.toPrecision(10)));
+const feePct = (fee: number, filled: number): string => `${Number(((fee / filled) * 100).toFixed(4))}%`;
 
 function cashLines(label: string, rows: Array<{ asset: string; free: string; locked?: string }>): string[] {
 	const hit = rows.filter((r) => CASH.includes(r.asset));
@@ -91,6 +107,8 @@ export interface BinanceStockAccountDetails {
 	spot: Record<string, string> | null;
 	rows: Row[];
 	tokens: TokenRow[];
+	fees: EquityFees[] | null;
+	recent: EquityOrder[];
 	open: EquityOrder[] | null;
 	warnings: string[];
 }
@@ -112,8 +130,8 @@ export function createBinanceStockAccountTool(deps: { brokers: BrokerAccess }) {
 		label: "Binance 미국 주식 계좌",
 		description:
 			"Binance **미국 주식 직접 거래** 계좌를 조회한다 (조회만). Funding·현물 지갑의 USDC·USDT 잔고, 보유 주식(체결 내역으로 추정한 수량·평단·평가손익), " +
-			"Binance 호가와 본주(나스닥·NYSE) 현재가의 괴리(%), 보유 bStock 토큰, 미체결 주문. " +
-			"사용자가 바이낸스 주식 잔고·보유·괴리·프리미엄·USDC 를 물으면 이 툴. symbols 로 보유하지 않은 종목의 괴리도 본다 (예 'PANW,NVDA'). " +
+			"Binance 호가와 본주(나스닥·NYSE) 현재가의 괴리(%), 보유 bStock 토큰, 실제로 낸 수수료(주문 내역 fee — 종목별 합계·%·최근 체결), 미체결 주문. " +
+			"사용자가 바이낸스 주식 잔고·보유·괴리·프리미엄·USDC·수수료를 물으면 이 툴. symbols 로 보유하지 않은 종목의 괴리도 본다 (예 'PANW,NVDA'). " +
 			"주문은 binance_stock_order.",
 		parameters: Type.Object({
 			symbols: Type.Optional(Type.String({ description: "괴리를 볼 미국 티커, 콤마 구분 (보유 종목은 자동 포함) — 예 'PANW,NVDA'" })),
@@ -128,12 +146,18 @@ export function createBinanceStockAccountTool(deps: { brokers: BrokerAccess }) {
 					return null;
 				});
 
-			const [funding, spot, holdings, open] = await Promise.all([
+			const [funding, spot, holdings, open, history] = await Promise.all([
 				soft("Funding 지갑", fundingAssets(creds)),
 				soft("현물 지갑", freeBalances(creds)),
 				soft("체결 내역(보유 추정)", equityHoldings(creds)),
 				soft("미체결", equityOpenOrders(creds)),
+				soft("주문 내역(수수료)", equityOrderHistory(creds, null, EQUITY_SINCE)),
 			]);
+			const fees = history ? feesFromOrders(history) : null;
+			const recent = (history ?? [])
+				.filter((o) => Number(o.filledQty) > 0)
+				.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+				.slice(0, RECENT_FILLED);
 
 			const asked = (params.symbols ?? "")
 				.split(/[,\s]+/)
@@ -227,15 +251,32 @@ export function createBinanceStockAccountTool(deps: { brokers: BrokerAccess }) {
 				}
 			}
 
+			if (fees) {
+				const fee = fees.reduce((a, e) => a + e.fee, 0);
+				const filled = fees.reduce((a, e) => a + e.filled, 0);
+				lines.push("", `수수료 (주문 내역 fee, 체결된 주문 ${fees.reduce((a, e) => a + e.orders, 0)}건)`);
+				for (const e of fees) lines.push(`- ${e.symbol}: $${e.fee} / 체결 ${usd(e.filled)}${e.filled > 0 ? ` (${feePct(e.fee, e.filled)})` : ""} · ${e.orders}건`);
+				if (fees.length === 0) lines.push("- 체결된 주문 없음");
+				else lines.push(`  합계 $${Number(fee.toFixed(6))} / 체결 ${usd(filled)}${filled > 0 ? ` (${feePct(fee, filled)})` : ""}`);
+				for (const o of recent) {
+					const at = o.createdAt ? new Date(o.createdAt).toISOString().slice(0, 16).replace("T", " ") : "—";
+					lines.push(`  · ${at} UTC ${o.symbol} ${o.side === "BUY" ? "매수" : "매도"} ${o.filledQty}주 @ ${o.avgFilledPrice ? `$${o.avgFilledPrice}` : "—"} · ${o.orderType} ${o.session ?? ""} · 수수료 ${o.fee === null ? "응답에 없음" : `$${o.fee}`}`);
+				}
+				lines.push("  ※ 호가 폭(스프레드)은 수수료에 안 들어간다 — 위 괴리의 '호가 폭' 참고");
+			}
+
 			if (open) {
 				lines.push("", `미체결 ${open.length}건`);
 				for (const o of open) {
-					lines.push(`- ${o.symbol} ${o.side === "BUY" ? "매수" : "매도"} ${o.qty ? `${o.qty}주` : `${o.notional} USDC`}${o.limitPrice ? ` @ $${o.limitPrice}` : " 시장가"} · 체결 ${o.filledQty} · ${o.status} (orderId=${o.orderId})`);
+					lines.push(
+						`- ${o.symbol} ${o.side === "BUY" ? "매수" : "매도"} ${o.qty ? `${o.qty}주` : `${o.notional} USDC`}${o.limitPrice ? ` @ $${o.limitPrice}` : " 시장가"} · 체결 ${o.filledQty} · ${o.status}` +
+							`${o.fee && Number(o.fee) > 0 ? ` · 수수료(예약) $${o.fee}` : ""} (orderId=${o.orderId})`,
+					);
 				}
 			}
 			if (warnings.length) lines.push("", ...warnings.map((w) => `⚠️ ${w}`));
 
-			const details: BinanceStockAccountDetails = { kind: "binance-stock-account", funding, spot, rows, tokens, open, warnings };
+			const details: BinanceStockAccountDetails = { kind: "binance-stock-account", funding, spot, rows, tokens, fees, recent, open, warnings };
 			return { content: [{ type: "text" as const, text: lines.join("\n") }], details };
 		},
 	});

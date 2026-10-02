@@ -8,6 +8,7 @@
  *          timeInForce DAY·GTC (IOC 없음). clientOrderId 32~36자. **tokenize 기본 true** — 보내지 않으면 산 주식이 bStock 토큰이 된다 → 늘 false
  *   취소   POST /order/cancel (orderId) — 응답 status S/F 는 접수 여부일 뿐, 결과는 /order/detail
  *   상태   GET  /order/detail (orderId 또는 clientOrderId) — status NEW·ACCEPTED·PARTIALLY_FILLED·FILLED·CANCELED·EXPIRED·REJECTED, filledQty, avgFilledPrice
+ *   내역   GET  /order/history — 주문 단위, **fee (수수료 USD 누적)** 가 여기 있다 (detail·open-orders 에도)
  *   체결   GET  /trade/history — **보유 수량 API 가 없다.** 매도 가능 수량은 체결 내역(매수 − 매도)으로 추정한다 (앱에서 bStock 으로 바꾼 건 빠지지 않는다 →
  *          넘치면 거래소가 거절한다)
  *
@@ -115,6 +116,10 @@ export interface EquityOrder {
 	avgFilledPrice: string | null;
 	status: string;
 	session: string | null;
+	/** 수수료 누적 (USD) — 응답에 없으면 null */
+	fee: string | null;
+	/** 생성 시각 (ms) — 내역 조회에서만 */
+	createdAt: number | null;
 }
 
 export function parseEquityOrder(o: Record<string, unknown>): EquityOrder {
@@ -132,6 +137,8 @@ export function parseEquityOrder(o: Record<string, unknown>): EquityOrder {
 		avgFilledPrice: s(o.avgFilledPrice),
 		status: String(o.status ?? ""),
 		session: s(o.session),
+		fee: s(o.fee),
+		createdAt: o.createdAt === undefined || o.createdAt === null || !Number.isFinite(Number(o.createdAt)) ? null : Number(o.createdAt),
 	};
 }
 
@@ -370,6 +377,53 @@ export function holdingsFromFills(fills: EquityFill[]): EquityHolding[] {
 	return [...by.entries()]
 		.map(([symbol, fs]) => ({ symbol, ...netPosition(fs), fills: fs.length }))
 		.filter((h) => h.qty > 0)
+		.sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+/** 주문 내역 (기간 from~지금, 100건씩, 최근 것부터일 수 있다 — 순서는 쓰지 않는다). symbol 이 null 이면 전 종목 */
+export async function equityOrderHistory(
+	c: BinanceCreds,
+	symbol: string | null,
+	from: number,
+	opts: StockCallOptions & { maxPages?: number; orderStatus?: string } = {},
+): Promise<EquityOrder[]> {
+	const now = opts.now?.() ?? Date.now();
+	const out: EquityOrder[] = [];
+	for (let page = 1; page <= (opts.maxPages ?? 20); page++) {
+		const q: Record<string, string> = { startTime: String(from), endTime: String(now), current: String(page), size: "100" };
+		if (symbol) q.symbol = symbol;
+		if (opts.orderStatus) q.orderStatus = opts.orderStatus;
+		const r = (await equityCall(c, "GET", "/order/history", q, "signed", opts)) as { total?: number; rows?: Array<Record<string, unknown>> } | null;
+		const rows = r?.rows ?? [];
+		out.push(...rows.map(parseEquityOrder));
+		if (rows.length < 100 || out.length >= Number(r?.total ?? 0)) break;
+	}
+	return out;
+}
+
+export interface EquityFees {
+	symbol: string;
+	/** 수수료 합계 (USD) */
+	fee: number;
+	/** 체결된 금액 합계 (USD) — 수수료율 계산용 */
+	filled: number;
+	orders: number;
+}
+
+/** 주문 내역 → 종목별 수수료 합계 (체결이 있는 주문만). 순수 */
+export function feesFromOrders(orders: EquityOrder[]): EquityFees[] {
+	const by = new Map<string, EquityFees>();
+	for (const o of orders) {
+		const qty = Number(o.filledQty) || 0;
+		if (!(qty > 0) || !o.symbol) continue;
+		const e = by.get(o.symbol) ?? { symbol: o.symbol, fee: 0, filled: 0, orders: 0 };
+		e.fee += Number(o.fee) || 0;
+		e.filled += qty * (Number(o.avgFilledPrice) || 0);
+		e.orders += 1;
+		by.set(o.symbol, e);
+	}
+	return [...by.values()]
+		.map((e) => ({ ...e, fee: Number(e.fee.toFixed(6)), filled: Number(e.filled.toFixed(2)) }))
 		.sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
