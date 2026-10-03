@@ -12,6 +12,7 @@ import { describeAction, type OrderAction } from "./actions.ts";
 import { kisChangeOrder, kisPlaceOrder } from "./kis/orders.ts";
 import { executeBinance } from "./binance/trade.ts";
 import { equityCancel, equityPlace } from "./binance/stocks.ts";
+import { executeWalletTransfer, validAmount } from "./binance/wallet.ts";
 import type { BrokerAccess } from "./portfolio.ts";
 import { defaultAccountSeq } from "./toss/api.ts";
 import {
@@ -56,6 +57,10 @@ function sane(a: OrderAction): void {
 		for (const [what, v] of [["수량", a.quantity], ["금액", a.notional], ["가격", a.price]] as const) {
 			if (v !== undefined && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
 		}
+	}
+	if (a.kind === "binance-transfer") {
+		if (!validAmount(a.amount)) throw new Error(`이동 수량이 올바르지 않습니다: ${a.amount}`);
+		if (a.from === a.to) throw new Error("보내는 지갑과 받는 지갑이 같습니다");
 	}
 	if (a.kind === "conditional-create" || a.kind === "conditional-modify") {
 		pos(a.quantity, "수량");
@@ -139,6 +144,8 @@ export async function executeOrderAction(action: OrderAction, nonce: string, acc
 		case "binance-stock-cancel":
 			await equityCancel(need(access.binance, "Binance"), action.original.orderId);
 			return { message: "취소가 접수되었습니다", orderId: action.original.orderId };
+		case "binance-transfer":
+			return executeWalletTransfer(action, need(access.binance, "Binance"));
 	}
 }
 

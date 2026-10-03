@@ -482,6 +482,7 @@ async function main() {
 		"order_change",
 		"order_conditional",
 		"binance_order",
+		"binance_wallet",
 		"kis_find",
 		"kis_call",
 		"toss_query",

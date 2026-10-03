@@ -221,6 +221,32 @@ export interface BinanceStockCancelAction {
 
 export type BinanceStockAction = BinanceStockPlaceAction | BinanceStockCancelAction;
 
+// ── Binance 지갑 간 이동 (같은 계정 내부 — 외부 출금 아님, binance/wallet.ts) ──
+
+export type WalletName = "SPOT" | "FUNDING" | "EARN";
+
+/** 지갑 쌍으로 정해지는 API — 준비 단계에서 서버가 고른다 */
+export type TransferRoute =
+	| { kind: "universal"; type: "MAIN_FUNDING" | "FUNDING_MAIN" }
+	| { kind: "redeem"; destAccount: "SPOT" | "FUND" }
+	| { kind: "subscribe"; sourceAccount: "SPOT" | "FUND" };
+
+export interface BinanceTransferAction {
+	kind: "binance-transfer";
+	broker: "binance";
+	from: WalletName;
+	to: WalletName;
+	/** 예: USDT */
+	asset: string;
+	/** 옮길 수량 (문자열 10진수). all 이면 준비 시점의 이동 가능 전량 */
+	amount: string;
+	/** 전량 — Earn 환매는 redeemAll (이자가 붙어 준비 시점보다 많다) */
+	all: boolean;
+	route: TransferRoute;
+	/** Earn 유연 상품 ID — 환매는 보유 내역, 예치는 상품 목록에서 서버가 찾은 값 */
+	productId?: string;
+}
+
 export type BinanceAction =
 	| BinancePlaceAction
 	| BinanceCancelAction
@@ -237,7 +263,8 @@ export type OrderAction =
 	| ConditionalModifyAction
 	| ConditionalCancelAction
 	| BinanceAction
-	| BinanceStockAction;
+	| BinanceStockAction
+	| BinanceTransferAction;
 
 /** 로그 한 줄 — 금액·계좌 없이 무엇을 하는지만 */
 export function describeAction(a: OrderAction): string {
@@ -270,5 +297,7 @@ export function describeAction(a: OrderAction): string {
 			return `binance 미국 주식 ${a.symbol} ${a.side} ${a.type} ${a.quantity ? `${a.quantity}주` : `${a.notional} ${a.quote}`}`;
 		case "binance-stock-cancel":
 			return `binance 미국 주식 취소 ${a.symbol} ${a.original.orderId.slice(0, 12)}`;
+		case "binance-transfer":
+			return `binance 지갑 이동 ${a.from}→${a.to} ${a.asset} ${a.all ? "전량" : a.amount}`;
 	}
 }

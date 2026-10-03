@@ -8,8 +8,8 @@
 
 // ── 카드 (툴 결과 details) ──────────────────────────────────────────────
 
-import type { BinanceOrderCard, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
-export type { BinanceOrderCard, ConditionalLegView, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
+import type { BinanceOrderCard, BinanceTransferCard, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
+export type { BinanceOrderCard, BinanceTransferCard, ConditionalLegView, ConditionalOrderCard, OrderChangeCard } from "./orders.ts";
 
 /** 현재가 — 투자 화면의 종목 조회 (/api/quote) */
 export interface QuoteDto {
@@ -161,6 +161,7 @@ export type UICard =
 	| OrderChangeCard
 	| ConditionalOrderCard
 	| BinanceOrderCard
+	| BinanceTransferCard
 	| McpConfirmCard
 	| WatchConfirmCard;
 

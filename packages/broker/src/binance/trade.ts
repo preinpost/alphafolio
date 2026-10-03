@@ -2,7 +2,8 @@
  * Binance 현물 거래 — 주문·취소·재주문·OCO·OTO·전체 취소 (PLAN §36).
  *
  * ⚠️ place/cancel/… 실행 함수는 **실제 돈을 움직인다.** 서버의 확인 실행 경로(execute.ts)에서만 호출한다.
- * 이 모듈이 호출하는 쓰기 경로는 아래 여섯 개가 전부다 — 출금·이체·마진·전환 등 자금 이동 API 는 이 코드에 없다
+ * 이 모듈이 호출하는 쓰기 경로는 아래 여섯 개가 전부다 — 출금·마진·전환 등 자금 이동 API 는 이 코드에 없다
+ * (같은 계정 지갑 간 이동은 wallet.ts — 역시 확인 카드 경로로만)
  * (범용 조회 data_call 도 쓰기를 모두 거절한다).
  *   POST /api/v3/order · DELETE /api/v3/order · POST /api/v3/order/cancelReplace
  *   POST /api/v3/orderList/oco · POST /api/v3/orderList/oto · DELETE /api/v3/openOrders
@@ -85,7 +86,7 @@ export function signedRequest(
 	};
 }
 
-async function signed(method: "GET" | "POST" | "DELETE", path: string, params: Record<string, string>, c: BinanceCreds, label: string): Promise<unknown> {
+export async function signed(method: "GET" | "POST" | "DELETE", path: string, params: Record<string, string>, c: BinanceCreds, label: string): Promise<unknown> {
 	const { url, init } = signedRequest(method, path, params, c);
 	return readJson(await fetch(url, init), c, label);
 }

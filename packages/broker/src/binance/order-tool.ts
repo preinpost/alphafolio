@@ -217,7 +217,7 @@ export function createBinanceOrderTool(deps: { brokers: BrokerAccess; prepareOrd
 			"수량은 기준 자산(BTC 등), 가격은 호가 자산(USDT 등). 거래소 단위에 맞춰 서버가 내림 보정한다. " +
 			"**미국 주식은 이 툴이 아니다** — 바이낸스로 애플·엔비디아 등 주식을 사고팔면 binance_stock_order (실제 주식). " +
 			"bStock(토큰화 증서, AAPLBUSDT 같은 티커+B+USDT)은 사용자가 bStock·토큰을 원한다고 직접 말했을 때만 bStock: true 와 함께 (아니면 툴이 거절한다). " +
-			"출금·이체·마진·선물은 지원하지 않는다. 사용자가 명시적으로 요청했을 때만 호출한다.",
+			"출금·마진·선물은 지원하지 않는다 (지갑 간 이동은 binance_wallet). 사용자가 명시적으로 요청했을 때만 호출한다.",
 		parameters: Type.Object({
 			action: Type.Union([Type.Literal("place"), Type.Literal("cancel"), Type.Literal("replace"), Type.Literal("oco"), Type.Literal("oto"), Type.Literal("cancel_all")]),
 			symbol: Type.String({ description: "코인 쌍 — 예: BTCUSDT (BTC/USDT 도 된다)" }),

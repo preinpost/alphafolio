@@ -57,6 +57,7 @@ const EXACT: Record<string, ToolFlavor> = {
   toss_balance: "vault",
   binance_account: "vault",
   binance_stock_account: "vault",
+  binance_wallet: "vault",
 
   toss_order: "order",
   toss_orders: "order",

@@ -6,7 +6,7 @@
  *    (외부 웹·뉴스 본문에 심긴 지시문이 주문으로 이어지지 않게 하는 장치)
  */
 import { useEffect, useState } from "react";
-import type { BinanceOrderCard, ConditionalOrderCard, OrderChangeCard, OrderPreviewCard } from "@alphafolio/protocol";
+import type { BinanceOrderCard, BinanceTransferCard, ConditionalOrderCard, OrderChangeCard, OrderPreviewCard } from "@alphafolio/protocol";
 import { api } from "../../lib/api.ts";
 
 function money(value: number, currency: "KRW" | "USD"): string {
@@ -392,6 +392,41 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 			</div>
 			<Warnings items={card.warnings} />
 			<ConfirmBar c={c} verb={verb} />
+		</div>
+	);
+}
+
+const WALLET_LABEL = { SPOT: "현물", FUNDING: "펀딩", EARN: "Earn 유연 예치" } as const;
+
+/** Binance 지갑 간 이동 — 같은 계정 안 (현물·펀딩·Earn). 외부 출금이 아니다 */
+export function BinanceTransferCardView({ card }: { card: BinanceTransferCard }) {
+	const c = useConfirm(card.token, card.expiresAt, card.ok);
+	const route = `${WALLET_LABEL[card.from]} → ${WALLET_LABEL[card.to]}`;
+	if (!card.ok) return <Problems title={`Binance 지갑 이동을 준비하지 못했습니다 — ${route}${card.asset ? ` ${card.asset}` : ""}`} errors={card.errors} />;
+
+	return (
+		<div className="mt-2 rounded-xl border-2 border-accent/60 bg-inset p-4">
+			<div className="flex items-center justify-between gap-3">
+				<span className="truncate text-sm font-semibold text-ink">
+					{card.asset} 지갑 이동 <span className="text-xs font-normal text-muted">같은 계정 내부</span>
+				</span>
+				<BrokerBadge broker="binance" />
+			</div>
+			<div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3">
+				<span className="text-sm text-ink">
+					<b>{WALLET_LABEL[card.from]}</b> → <b>{WALLET_LABEL[card.to]}</b>
+				</span>
+				<span className="text-sm text-ink">
+					<b>{card.all ? `전량 (약 ${card.amount})` : card.amount}</b> {card.asset}
+				</span>
+			</div>
+			<div className="mt-2 text-[11px] text-faint">
+				{card.available ? `${WALLET_LABEL[card.from]} 이동 가능 ${card.available} ${card.asset}` : ""}
+				{card.productId ? ` · Earn 상품 ${card.productId}` : ""}
+				{card.api ? ` · ${card.api}` : ""}
+			</div>
+			<Warnings items={card.warnings} />
+			<ConfirmBar c={c} verb="옮기기" />
 		</div>
 	);
 }

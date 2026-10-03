@@ -7,7 +7,7 @@
 import type { UICard } from "@alphafolio/protocol";
 import { McpConfirmCardView } from "./McpCards.tsx";
 import { WatchConfirmCardView } from "./WatchCards.tsx";
-import { BinanceOrderCardView, ConditionalOrderCardView, OrderChangeCardView, OrderPreviewCardView } from "./OrderCards.tsx";
+import { BinanceOrderCardView, BinanceTransferCardView, ConditionalOrderCardView, OrderChangeCardView, OrderPreviewCardView } from "./OrderCards.tsx";
 
 export function CardView({ card }: { card: UICard }) {
 	switch (card.kind) {
@@ -19,6 +19,8 @@ export function CardView({ card }: { card: UICard }) {
 			return <ConditionalOrderCardView card={card} />;
 		case "binance-order-card":
 			return <BinanceOrderCardView card={card} />;
+		case "binance-transfer-card":
+			return <BinanceTransferCardView card={card} />;
 		case "watch-confirm-card":
 			return <WatchConfirmCardView card={card} />;
 		case "mcp-confirm-card":

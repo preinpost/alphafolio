@@ -59,6 +59,30 @@ export interface ConditionalOrderCard {
 	errors: string[];
 }
 
+/**
+ * Binance 지갑 간 이동 확인 카드 — 같은 계정 안 (현물·펀딩·Earn 유연), 외부 출금이 아니다.
+ * 이동 가능 수량·Earn 상품 ID 는 준비 단계에서 서버가 Binance 에서 조회한 값이다.
+ */
+export interface BinanceTransferCard {
+	kind: "binance-transfer-card";
+	ok: boolean;
+	token: string | null;
+	expiresAt: number | null;
+	from: "SPOT" | "FUNDING" | "EARN";
+	to: "SPOT" | "FUNDING" | "EARN";
+	asset: string;
+	/** 옮길 수량 — 전량이면 준비 시점의 이동 가능 수량 */
+	amount: string | null;
+	all: boolean;
+	/** 보내는 지갑의 이동 가능 수량 */
+	available: string | null;
+	productId: string | null;
+	/** 표시용 — 어떤 API 로 나가는지 */
+	api: string | null;
+	warnings: string[];
+	errors: string[];
+}
+
 /** Binance 현물 확인 카드 (PLAN §36) — 값은 문자열 10진수 (거래소 단위로 보정됨) */
 export interface BinanceOrderCard {
 	kind: "binance-order-card";
