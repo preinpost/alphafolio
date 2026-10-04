@@ -11,7 +11,7 @@ import { evaluateTiming, type Horizon, type TimingInput, type TimingResult } fro
 import { position52w, sectionNote, settle, skipped } from "../research.ts";
 import { marketOf } from "../orders.ts";
 import { fetchChart, fetchQuote } from "../quote.ts";
-import { fetchPortfolio, NoBrokerConfiguredError } from "../portfolio.ts";
+import { fetchPortfolio, NoBrokerConfiguredError, STOCK_SOURCES } from "../portfolio.ts";
 import { NaverCredentialsMissingError, searchNews, type NaverCredentials } from "../news.ts";
 import type { BrokerToolDeps, FinancialsDetails, TimingCardResult, TimingDetails, ResearchFinancials, ResearchNews, ResearchDetails } from "./contracts.ts";
 import { money } from "./format.ts";
@@ -235,7 +235,7 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 
 			// 보유·총자산과 재무는 없어도 판정은 한다 (각각 해당 층·수량 제안만 빠진다)
 			const [portfolio, fin] = await Promise.all([
-				fetchPortfolio(deps.brokers).catch((err: unknown) => {
+				fetchPortfolio(deps.brokers, { sources: STOCK_SOURCES }).catch((err: unknown) => {
 					notes.push(`보유 조회 실패 — 보유 반영·수량 제안 생략 (${err instanceof Error ? err.message.slice(0, 60) : err})`);
 					return null;
 				}),
@@ -361,7 +361,7 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 						),
 				settle(
 					async () => {
-						const p = await fetchPortfolio(deps.brokers);
+						const p = await fetchPortfolio(deps.brokers, { sources: STOCK_SOURCES });
 						const h = p.holdings.find((x) => x.symbol === symbol);
 						return h ? { quantity: h.quantity, avgPrice: h.avgPrice, profitPct: h.profitPct, valueKrw: h.valueKrw } : null;
 					},

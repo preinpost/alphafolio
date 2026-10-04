@@ -9,7 +9,7 @@ import type { IndicatorSnapshot } from "../indicators.ts";
 import type { TimingResult } from "../timing.ts";
 import type { Section } from "../research.ts";
 import type { OrderSide, OrderType } from "../orders.ts";
-import type { Holding, Quote } from "../normalize.ts";
+import type { CryptoHolding, Holding, ManualHolding, Quote } from "../normalize.ts";
 import type { Mover } from "../movers.ts";
 import type { PortfolioSignalRow } from "../portfolio-signals.ts";
 
@@ -135,6 +135,11 @@ export interface HoldingsDetails {
 	cashUsd: number;
 	profitKrw: number;
 	usdKrw: number;
+	crypto: CryptoHolding[];
+	manual: ManualHolding[];
+	cryptoValueKrw: number;
+	/** 원화 환산 총자산 — 주식·예수금·달러·코인 */
+	netWorthKrw: number;
 }
 
 export interface MoversDetails {
@@ -189,6 +194,9 @@ export interface OverviewDetails {
 	cashKrw: number;
 	cashUsd: number;
 	profitKrw: number;
+	/** 코인 평가 (원화 환산) — investKrw 에는 들어가지 않는다 */
+	cryptoKrw: number;
+	netWorthKrw: number;
 	income: number;
 	expense: number;
 	surplus: number;

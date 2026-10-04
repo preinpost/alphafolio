@@ -7,6 +7,8 @@
  * 시점: 평일 KST 16:00 이후 하루 1회. 장 마감(15:30)과 시간외 단일가 이후라 국내 종가가
  * 확정돼 있다. 해외 종목은 이 시각 기준 직전 미국 종가다 (매일 같은 기준이라 비교에는 문제없다).
  * 서버가 그 시각에 꺼져 있었으면 켜진 뒤 첫 점검에서 찍는다. 빠진 날은 복원하지 않는다.
+ *
+ * 연결된 계좌 전부(코인 포함)를 찍는다 (PLAN §41). 코인은 24시간 움직이지만 같은 시각에 찍으니 비교에는 문제없다.
  */
 import { d1Query, ensureMigrated, type D1Config } from "@alphafolio/ledger";
 import { fetchPortfolio, NoBrokerConfiguredError, type BrokerAccess, type PortfolioSummary } from "@alphafolio/broker";
@@ -64,9 +66,17 @@ export interface SnapshotHolding {
 	valueKrw: number;
 }
 
+/** 계좌별 합계 — 계좌 구성이 바뀐 날·일부 계좌가 빠진 날을 추이 차트가 구분한다 */
+export interface SnapshotSource {
+	id: string;
+	status: string;
+	valueKrw: number;
+}
+
 export interface PortfolioSnapshot {
 	member: string;
 	date: string;
+	/** 주식 + 원화 예수금 — 0011 부터 주식에 Binance 미국 주식·bStock 이 들어간다 (추이는 netKrw 로 본다) */
 	totalKrw: number;
 	stockKrw: number;
 	cashKrw: number;
@@ -74,6 +84,10 @@ export interface PortfolioSnapshot {
 	usdKrw: number;
 	brokers: string[];
 	holdings: SnapshotHolding[];
+	/** 총자산 — 주식·예수금·달러·코인 원화 환산 (0011 이전 행은 null) */
+	netKrw: number | null;
+	cryptoKrw: number | null;
+	sources: SnapshotSource[] | null;
 }
 
 interface Row {
@@ -85,7 +99,10 @@ interface Row {
 	profit_krw: number;
 	usd_krw: number;
 	brokers: string;
-	holdings_json: string;
+	holdings_json?: string;
+	net_krw: number | null;
+	crypto_krw: number | null;
+	sources_json: string | null;
 }
 
 function fromRow(r: Row): PortfolioSnapshot {
@@ -98,8 +115,22 @@ function fromRow(r: Row): PortfolioSnapshot {
 		profitKrw: r.profit_krw,
 		usdKrw: r.usd_krw,
 		brokers: r.brokers ? r.brokers.split(",") : [],
-		holdings: JSON.parse(r.holdings_json) as SnapshotHolding[],
+		holdings: r.holdings_json ? (JSON.parse(r.holdings_json) as SnapshotHolding[]) : [],
+		netKrw: r.net_krw ?? null,
+		cryptoKrw: r.crypto_krw ?? null,
+		sources: r.sources_json ? (JSON.parse(r.sources_json) as SnapshotSource[]) : null,
 	};
+}
+
+/**
+ * 저장하면 안 되는 상태인가 (순수). 환율이 없으면 달러·코인 자산이 0원으로 들어가 그날 총자산이 푹 꺼진다 —
+ * 틀린 점을 남기느니 다음 점검(30분 뒤)에 다시 찍는다.
+ */
+export function snapshotProblem(p: PortfolioSummary): string | null {
+	const usdAssets =
+		p.holdings.some((h) => h.currency === "USD") || p.cashUsd > 0 || p.crypto.some((c) => c.valueUsd !== null) || p.manual.some((m) => m.currency === "USD");
+	if (p.usdKrw === 0 && usdAssets) return "환율을 얻지 못해 달러·코인 자산을 원화로 환산할 수 없어 저장하지 않았습니다.";
+	return null;
 }
 
 export function toSnapshot(member: string, date: string, p: PortfolioSummary): PortfolioSnapshot {
@@ -112,6 +143,9 @@ export function toSnapshot(member: string, date: string, p: PortfolioSummary): P
 		profitKrw: p.profitKrw,
 		usdKrw: p.usdKrw,
 		brokers: [...p.brokers],
+		netKrw: p.netWorthKrw,
+		cryptoKrw: p.cryptoValueKrw,
+		sources: p.sources.map((x) => ({ id: x.id, status: x.status, valueKrw: x.valueKrw })),
 		holdings: p.holdings.map((h) => ({
 			broker: h.broker,
 			symbol: h.symbol,
@@ -143,12 +177,14 @@ export class SnapshotStore {
 		await d1Query(
 			await this.cfg(),
 			`INSERT INTO portfolio_snapshots
-			   (member, date, total_krw, stock_krw, cash_krw, profit_krw, usd_krw, brokers, holdings_json, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			   (member, date, total_krw, stock_krw, cash_krw, profit_krw, usd_krw, brokers, holdings_json, created_at,
+			    net_krw, crypto_krw, sources_json)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(member, date) DO UPDATE SET
 			   total_krw = excluded.total_krw, stock_krw = excluded.stock_krw, cash_krw = excluded.cash_krw,
 			   profit_krw = excluded.profit_krw, usd_krw = excluded.usd_krw, brokers = excluded.brokers,
-			   holdings_json = excluded.holdings_json, created_at = excluded.created_at`,
+			   holdings_json = excluded.holdings_json, created_at = excluded.created_at,
+			   net_krw = excluded.net_krw, crypto_krw = excluded.crypto_krw, sources_json = excluded.sources_json`,
 			[
 				s.member,
 				s.date,
@@ -160,6 +196,9 @@ export class SnapshotStore {
 				s.brokers.join(","),
 				JSON.stringify(s.holdings),
 				new Date().toISOString(),
+				s.netKrw,
+				s.cryptoKrw,
+				s.sources ? JSON.stringify(s.sources) : null,
 			],
 		);
 	}
@@ -184,10 +223,14 @@ export class SnapshotStore {
 		return row ? fromRow(row) : null;
 	}
 
-	async range(member: string, from: string, to: string): Promise<PortfolioSnapshot[]> {
+	/** summary 면 보유 종목(holdings_json)을 읽지 않는다 — 추이 차트는 합계만 쓴다 */
+	async range(member: string, from: string, to: string, opts: { summary?: boolean } = {}): Promise<PortfolioSnapshot[]> {
+		const cols = opts.summary
+			? "member, date, total_krw, stock_krw, cash_krw, profit_krw, usd_krw, brokers, net_krw, crypto_krw, sources_json"
+			: "*";
 		const r = await d1Query<Row>(
 			await this.cfg(),
-			"SELECT * FROM portfolio_snapshots WHERE member = ? AND date >= ? AND date <= ? ORDER BY date",
+			`SELECT ${cols} FROM portfolio_snapshots WHERE member = ? AND date >= ? AND date <= ? ORDER BY date`,
 			[member, from, to],
 		);
 		return r.results.map(fromRow);
@@ -250,6 +293,8 @@ export class SnapshotScheduler {
 				snapshot,
 			};
 		}
+		const problem = snapshotProblem(portfolio);
+		if (problem) return { saved: false, reason: problem, snapshot };
 		await this.opts.store.save(snapshot);
 		return { saved: true, snapshot };
 	}
@@ -263,9 +308,13 @@ export class SnapshotScheduler {
 				try {
 					const last = await this.opts.store.lastDate(user);
 					if (!shouldSnapshot(now, last)) continue;
-					const { snapshot: snap } = await this.takeNow(user);
+					const { saved, reason, snapshot: snap } = await this.takeNow(user);
+					if (!saved) {
+						console.warn(`[snapshot] ${user} ${snap.date} 건너뜀: ${reason}`);
+						continue;
+					}
 					console.log(
-						`[snapshot] ${user} ${snap.date} 총 ${Math.round(snap.totalKrw).toLocaleString("ko-KR")}원 · ${snap.holdings.length}종목`,
+						`[snapshot] ${user} ${snap.date} 총자산 ${Math.round(snap.netKrw ?? snap.totalKrw).toLocaleString("ko-KR")}원 · ${snap.holdings.length}종목`,
 					);
 				} catch (err) {
 					// 증권 키가 없는 사용자는 조용히 건너뛴다 (가계부만 쓰는 구성원)

@@ -31,8 +31,8 @@ export interface QuoteDto {
 }
 
 export interface BrokerHolding {
-	/** 어느 증권사 계좌인가 (KIS·토스를 함께 쓰면 합산되므로 구분이 필요하다) */
-	broker: "kis" | "toss";
+	/** 어느 계좌인가 (여러 곳을 함께 쓰면 합산되므로 구분이 필요하다). binance = 미국 주식·bStock */
+	broker: "kis" | "toss" | "binance";
 	symbol: string;
 	name: string;
 	market: "domestic" | "overseas";
@@ -44,6 +44,94 @@ export interface BrokerHolding {
 	profit: number;
 	profitPct: number;
 	valueKrw: number;
+	/** 추정 잔고·주식이 아닌 것 (체결 내역 추정 · bStock 토큰). avgPrice 0 = 평단 모름 */
+	note?: string;
+}
+
+/** 코인 잔고 — 지갑을 합친 자산별 */
+export interface CryptoHoldingDto {
+	source: "binance";
+	asset: string;
+	quantity: number;
+	wallets: Array<{ wallet: string; quantity: number }>;
+	priceUsd: number | null;
+	valueUsd: number | null;
+	valueKrw: number;
+	stable: boolean;
+	/** 평단 추정 (USD, 현물 체결 이동평균) — 입금·보상분은 원가를 몰라 costCoverage < 1 */
+	avgPriceUsd: number | null;
+	costCoverage: number | null;
+	profitUsd: number | null;
+	profitPct: number | null;
+}
+
+/** 직접 입력 자산 — API 가 없는 곳(은행·연금·부동산·다른 거래소). deposit 은 현금성, 나머지는 배분에서 "기타" */
+export type ManualKind = "deposit" | "pension" | "real_estate" | "investment" | "other";
+
+export interface ManualAssetDto {
+	id: string;
+	name: string;
+	kind: ManualKind;
+	currency: "KRW" | "USD";
+	amount: number;
+	memo: string | null;
+	/** 마지막으로 고친 때 (ISO) */
+	updatedAt: string;
+}
+
+/** 계좌(출처)별 합계 — 금액은 원화 환산 */
+export interface PortfolioSourceDto {
+	id: string;
+	label: string;
+	status: "ok" | "partial" | "failed" | "skipped";
+	valueKrw: number;
+	stockKrw: number;
+	cashKrw: number;
+	cryptoKrw: number;
+	otherKrw: number;
+	warnings: string[];
+	error?: string;
+}
+
+/** /api/portfolio — 여러 계좌를 합친 자산 현황 */
+export interface PortfolioDto {
+	/** 주식 (KIS·토스) */
+	holdings: BrokerHolding[];
+	brokers: string[];
+	stockValueKrw: number;
+	/** 원화 예수금 */
+	cashKrw: number;
+	/** 달러 예수금 (환산 전) */
+	cashUsd: number;
+	profitKrw: number;
+	usdKrw: number;
+	/** 환율 출처 — "토스" · "KIS" · "ECB 2026-10-02" */
+	fxSource: string | null;
+	warnings: string[];
+	crypto: CryptoHoldingDto[];
+	/** 직접 입력 자산 (원화 환산 포함) */
+	manual: Array<ManualAssetDto & { valueKrw: number }>;
+	cryptoValueKrw: number;
+	/** 총자산 — 주식·예수금·달러·코인·직접 입력을 원화로 환산한 합계 */
+	netWorthKrw: number;
+	allocation: { domesticStock: number; overseasStock: number; crypto: number; cash: number; other: number };
+	sources: PortfolioSourceDto[];
+}
+
+/** /api/portfolio/history?summary=1 — 일별 스냅샷 합계 (추이 차트) */
+export interface PortfolioSnapshotDto {
+	date: string;
+	/** 주식 + 원화 예수금 */
+	totalKrw: number;
+	stockKrw: number;
+	cashKrw: number;
+	usdKrw: number;
+	/** 증권사 (0011 이전 행의 계좌 구성) */
+	brokers: string[];
+	/** 총자산 (원화 환산) — 0011 이전 행은 null */
+	netKrw: number | null;
+	cryptoKrw: number | null;
+	sources: Array<{ id: string; status: string; valueKrw: number }> | null;
 }
 
 /**

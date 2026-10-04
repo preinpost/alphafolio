@@ -4,14 +4,16 @@ import type {
 	ConversationListItem,
 	MeDto,
 	SignupInviteDto,
-	BrokerHolding,
 	BrokerOrder,
 	LedgerBudgetRow,
 	LedgerInviteDto,
 	LedgerMemberDto,
 	LedgerSummaryRow,
 	LedgerTransaction,
+	ManualAssetDto,
 	MyLedgerDto,
+	PortfolioDto,
+	PortfolioSnapshotDto,
 	QuoteDto,
 } from "@alphafolio/protocol";
 import { API_BASE, clearToken, getToken } from "./auth.ts";
@@ -223,17 +225,17 @@ export const api = {
 	sessions: () => request<ConversationListItem[]>("/api/sessions"),
 	deleteSession: (id: string) => request<{ deleted: true }>(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
-	portfolio: () =>
-		request<{
-			holdings: BrokerHolding[];
-			brokers: string[];
-			stockValueKrw: number;
-			cashKrw: number;
-			cashUsd: number;
-			profitKrw: number;
-			usdKrw: number;
-			warnings: string[];
-		}>("/api/portfolio"),
+	portfolio: () => request<PortfolioDto>("/api/portfolio"),
+	/** 직접 입력 자산 — 내 것만 */
+	manualAssets: () => request<{ items: ManualAssetDto[] }>("/api/assets/manual"),
+	addManualAsset: (a: Omit<ManualAssetDto, "id" | "updatedAt">) =>
+		request<ManualAssetDto>("/api/assets/manual", { method: "POST", body: JSON.stringify(a) }),
+	updateManualAsset: (id: string, a: Partial<Omit<ManualAssetDto, "id" | "updatedAt">>) =>
+		request<ManualAssetDto>(`/api/assets/manual/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(a) }),
+	deleteManualAsset: (id: string) => request<{ deleted: true }>(`/api/assets/manual/${encodeURIComponent(id)}`, { method: "DELETE" }),
+	/** 일별 스냅샷 합계 (보유 종목 없이) */
+	portfolioHistory: (from: string, to: string) =>
+		request<{ items: PortfolioSnapshotDto[] }>(`/api/portfolio/history?${query({ from, to, summary: "1" })}`),
 
 	quote: (symbol: string) => request<QuoteDto>(`/api/quote?symbol=${encodeURIComponent(symbol)}`),
 

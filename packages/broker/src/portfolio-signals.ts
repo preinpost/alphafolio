@@ -1,5 +1,5 @@
 /** 보유 종목 기술적 점검 유스케이스. SDK·도구 스키마·채팅 출력에 의존하지 않는다. */
-import { fetchPortfolio, type BrokerAccess } from "./portfolio.ts";
+import { fetchPortfolio, STOCK_SOURCES, type BrokerAccess } from "./portfolio.ts";
 import { fetchChart } from "./quote.ts";
 import { analyze } from "./indicators.ts";
 
@@ -26,7 +26,7 @@ export interface PortfolioInspection {
 }
 
 export async function inspectPortfolioSignals(brokers: BrokerAccess): Promise<PortfolioInspection> {
-	const portfolio = await fetchPortfolio(brokers);
+	const portfolio = await fetchPortfolio(brokers, { sources: STOCK_SOURCES });
 	const targets = portfolio.holdings.slice(0, PORTFOLIO_SIGNAL_LIMIT);
 	const rows: PortfolioSignalRow[] = [];
 	const skipped: string[] = [];

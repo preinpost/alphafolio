@@ -2010,3 +2010,70 @@ Binance 앱의 미국 주식(Nest Trading(ADGM) → Alpaca 체결·보관, 실�
   주식 문장 5개는 늘 binance_stock_order·watch_alert(binance_stock), "AAPLB 토큰(bStock)" 만 binance_order AAPLBUSDT bStock: true.
   파라미터 실수("0.1주" 를 notional 0.1 · "현재가 근처" 를 price 1)는 검증이 거절 — 거절문에 현재 호가·고칠 값을 넣자 모델이 숫자로 되묻는다.
 
+
+## 41. 통합 자산 현황 — 계좌 어댑터 · Binance 코인 (2026-10-04, 1단계)
+
+KIS·토스·Binance 에 흩어진 자산을 투자 탭 한 화면에서 본다. 계좌는 앞으로 더 붙는다 — 붙일 때마다 집계·화면을 고치지 않게 출처를 어댑터로 뺐다.
+
+### 구조
+
+- `packages/broker/src/sources/` — `AssetSource { id, label, connect(access) }`. connect 는 `null`(미설정, 경고 없음) · `{ skipped }`(연결됐지만 합계 제외) · `{ run }`.
+  출처는 **원래 통화 그대로** 돌려주고, 환율·환산·합계·배분은 `portfolio.ts` 한 곳에서 한다. 새 계좌 = 파일 하나 + `ASSET_SOURCES` 에 등록.
+- **환율은 하나만**: 토스(실시간) → KIS(고시) 순 (`pickUsdKrw`). 해외 주식·달러 예수금·코인이 같은 환율로 원화가 된다 —
+  예전엔 KIS 해외 종목이 KIS 환율(약 0.6% 낮음)로 따로 환산됐다.
+- **기존 필드의 뜻은 그대로** (§30): `holdings`(주식만) · `stockValueKrw` · `cashKrw`(원화) · `cashUsd`(환산 전). 환산 합계는 새 필드에만 —
+  `crypto[]` · `cryptoValueKrw` · `netWorthKrw`(주식+예수금+달러+코인) · `allocation`(국내주식·해외주식·코인·현금성) · `sources[]`(계좌별 상태·합계).
+- 코인을 `holdings` 에 섞지 않은 이유: 보유 점검·타점·리서치·매도 계좌 고르기가 holdings 를 주식으로 보고 차트·평단을 부른다.
+- 주식만 보는 곳은 `fetchPortfolio(access, { sources: STOCK_SOURCES })` — 보유 점검·타점·리서치·주문 준비·감시 보호(position)·**스냅샷**.
+  Binance 를 부르지 않고, 코인 경고도 섞이지 않는다.
+- 계좌마다 제한 시간 20초 — 느린 계좌가 전체를 막지 않고 `failed` 로 표시된다.
+
+### Binance
+
+- 잔고: 현물(LD* 제외) · 펀딩 · Earn 유연 (`wallet.ts` 그대로) + **Earn 고정** (`/sapi/v1/simple-earn/locked/position`, 새로 — 실측 전).
+  free + locked(주문·동결)를 모두 센다. 지갑을 하나도 못 읽으면 출처 전체 `failed`, 일부면 `partial` + 경고.
+- 가격: `/api/v3/ticker/price` 전 종목 한 번 (묶음 조회는 없는 심볼 하나에 통째로 거절된다). {자산}USDT → USDC → FDUSD, 스테이블은 마켓이 없어도 1.
+  못 찾은 자산은 0 으로 만들지 않고 `valueUsd: null` + "합계에서 뺀 자산" 경고.
+- USDT 등 스테이블코인은 배분에서 **현금성**. 평단 API 가 없어 코인 손익은 없다.
+- 테스트넷 키는 모의 잔고라 `skipped` (요청하지 않는다).
+- 미국 주식(equity)·bStock 분류·선물·마진은 아직 없다 (2단계).
+
+### 화면 · 챗
+
+- 투자 탭: 총자산(원화 환산) → 배분 막대 → 계좌 카드(비중·주식/코인/현금·상태, 누르면 그 계좌만) → 경고 → 미체결 → 보유(주식 + 코인, 1달러 미만 접기) → 시세 조회.
+- `portfolio_holdings` 는 코인 목록과 "총자산 (원화 환산 합계)" 를 덧붙인다. `finance_overview` 는 코인을 투자자산 합계와 **따로** 적는다.
+- 테스트 +15 (`portfolio-sources.test.ts`): 가격·지갑 합치기·환율 우선순위·배분, 토스+Binance 집계, Binance 만(환율 없음), 지갑 일부·전체 실패, 테스트넷, STOCK_SOURCES, 미설정, 제한 시간.
+
+### 2단계 (2026-10-04) — 추이 · Binance 주식 · 종목별 보기
+
+- **Binance 미국 주식**: 보유 API 가 없어 체결 내역(`equityHoldings`, 2026-08 부터)으로 수량·평단 추정 → `holdings` (`broker: "binance"`, `note: "체결 내역 추정"`).
+  가격은 Binance 호가 중간값, 비면(장 밖·거래정지) 본주 시세(KIS·토스), 둘 다 없으면 평가 0 + 경고. 조회 실패는 코인을 살리고 partial.
+- **bStock 토큰**(AAPLB 등): 기준가 계산 방식(`bStockOf`, 6시간 캐시)으로 확인되면 코인에서 빼고 해외주식으로 (`symbol` = 원래 티커, 평단 모름).
+  확인이 실패하면 코인으로 남긴다 — 금액은 같고 분류만 다르다. 후보는 B 로 끝나고 {자산}USDT 마켓이 있는 것 최대 10개.
+- `Holding.broker` 를 `SourceId` 로 넓혔다. 주문·타점·리서치·보호는 `STOCK_SOURCES` 로 조회하므로 binance 잔고를 보지 않는다 (매도 계좌 고르기는 kis·toss 만 남기는 타입 가드).
+- **스냅샷** (마이그레이션 0011): 전체 계좌를 찍고 `net_krw`(총자산) · `crypto_krw` · `sources_json`([{id,status,valueKrw}]) 를 더 남긴다. `total_krw` 는 주식+원화 예수금 그대로
+  (주식에 Binance 주식이 들어가는 점만 다르다). 환율이 없는데 달러·코인 자산이 있으면 **저장하지 않는다** (`snapshotProblem` — 0원 환산으로 그날이 꺼져 보이는 것보다 30분 뒤 재시도가 낫다).
+  `/api/portfolio/history?summary=1` 은 holdings_json 을 읽지 않는다.
+- **추이 차트** (`NetWorthChart`, SVG): 1개월·3개월·1년. 계좌 구성(ok·partial 계좌 id 집합, 0011 이전 행은 `legacy:증권사`)이 바뀐 점에서 선을 끊고 점선 —
+  계좌를 붙인 날의 점프를 수익으로 보이지 않게. 계좌가 통째로 빠진(failed) 날은 속이 빈 빨간 점. 기간 변동은 구성이 같을 때만.
+- **전일 대비·이번 달**: 지금 총자산 vs 오늘 이전 / 이번 달 1일 이전 마지막 스냅샷 — 구성이 같고 누락 없는 점만. 입출금이 섞인다고 밝힌다 (수익률 아님).
+- **종목별 보기**: 시장·통화·심볼이 같으면 계좌와 상관없이 한 줄 (KIS AAPL + 토스 AAPL + Binance AAPL·bStock). 손익률은 평단을 아는 잔고로만, 하나도 모르면 표시하지 않는다.
+- 웹에 단위 테스트를 처음 붙였다 (`apps/web/test`, 순수 함수 `lib/portfolio.ts` 만). 테스트 +6 브로커 · +3 서버 · +8 웹.
+
+### 3단계 (2026-10-04) — 직접 입력 · 코인 평단 · KIS 달러 · 공개 환율
+
+- **직접 입력 자산** (마이그레이션 0012 `manual_assets`, member 단위 — 증권 키처럼 개인, 가계부처럼 공유하지 않는다): 이름 · 종류(예금·현금 / 연금 / 부동산 / 기타 투자 / 기타) ·
+  통화(KRW·USD) · 금액 · 메모. 계좌 어댑터 하나(`sources/manual.ts`, 접근자 `BrokerAccess.manual` — D1 이 없으면 안 넘긴다)로 붙어서
+  총자산·배분·계좌 카드("직접 입력")·스냅샷에 그대로 들어간다. 예금은 현금성, 나머지는 배분의 새 칸 **기타**.
+  하나도 없으면 run 이 null → 카드도 스냅샷 계좌 구성도 생기지 않는다. 직접 입력만 있어도 투자 탭이 뜬다.
+  REST `/api/assets/manual` (GET·POST · PATCH·DELETE `/<id>`), 남의 것은 404, 한 사람 50개. 에이전트는 읽기만 (`portfolio_holdings`·`finance_overview`) — 고치는 도구는 만들지 않았다 (도구 수).
+  화면: 보유 목록 아래에 줄로, 누르면 그 자리에서 수정·삭제(확인), "+ 직접 입력 자산 추가". 시세가 아니라 마지막으로 고친 날을 보여 주고 90일이 넘으면 빨갛게.
+- **코인 평단**: `GET /api/v3/myTrades` ({자산}USDT·USDC·FDUSD 중 있는 마켓, fromId=0 부터 1000건씩 최대 5쪽)의 이동평균.
+  매수 수수료를 그 코인으로 냈으면 받은 수량에서 빼고, 달러로 냈으면 원가에 더한다. 평가금액 상위 15개·1달러 이상·스테이블 제외, 10분 캐시.
+  입금·Convert·Earn 보상분은 체결이 없어 원가를 모른다 → `costCoverage`(체결로 설명되는 수량 / 보유) 와 그만큼만의 손익. 95% 미만이면 화면에 "일부".
+  주식 평가손익(`profitKrw`)에는 넣지 않는다.
+- **KIS 달러 예수금**: CTRP6504R output2 USD 행의 `frcr_drwg_psbl_amt_1`(외화출금가능금액). `frcr_dncl_amt_2`(외화예수금액2)는 설명이 "외화사용가능금액"이라
+  통합증거금이면 원화 환산분이 섞여 원화 예수금과 두 번 셀 위험이 있어 쓰지 않았다. **실측 전.**
+- **공개 환율**: 증권 계좌(토스·KIS)에서 환율을 못 얻었고 달러 자산이 있을 때만 Frankfurter(ECB, 전 영업일, 키 없음, 1시간 캐시).
+  화면 환율 옆에 출처(`fxSource`: 토스 · KIS · ECB 날짜). Binance 만 쓰는 사용자도 원화 총자산·스냅샷이 생긴다.
+- 테스트 +11 브로커 · +6 서버.

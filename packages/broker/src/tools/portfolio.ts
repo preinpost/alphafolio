@@ -5,7 +5,9 @@ import { ensureMigrated, resolveLedger, resolvePeriod, summary as ledgerSummary 
 import { fetchPortfolio } from "../portfolio.ts";
 import { inspectPortfolioSignals } from "../portfolio-signals.ts";
 import type { BrokerToolDeps, HoldingsDetails, OverviewDetails, PortfolioSignalsDetails } from "./contracts.ts";
-import { won, usdCash, cashText, money, signed } from "./format.ts";
+import { won, usd, usdCash, cashText, money, signed } from "./format.ts";
+import type { CryptoHolding, ManualHolding } from "../normalize.ts";
+import { walletLabel } from "../sources/index.ts";
 
 const PERIOD_ENUM = Type.Union(
 	[
@@ -21,13 +23,53 @@ const PERIOD_ENUM = Type.Union(
 	{ description: "조회 기간 (기본 this_month)" },
 );
 
+const qty = (n: number): string => String(Number(n.toPrecision(8)));
+
+/** 코인 목록 — 1달러 미만 잔돈은 개수만 */
+function cryptoText(crypto: readonly CryptoHolding[], totalKrw: number): string {
+	const shown = crypto.filter((c) => c.valueUsd === null || c.valueUsd >= 1).slice(0, 20);
+	const rest = crypto.length - shown.length;
+	const lines = shown.map(
+		(c) =>
+			`- ${c.asset}${c.stable ? " (스테이블)" : ""} ${qty(c.quantity)} · ` +
+			(c.valueUsd === null ? "시세 없음" : `${usd(c.valueUsd)}${c.valueKrw > 0 ? ` ≈ ${won(c.valueKrw)}` : ""}`) +
+			(c.avgPriceUsd !== null && c.profitPct !== null
+				? ` · 평단 ${usd(c.avgPriceUsd)} (${c.profitPct >= 0 ? "+" : ""}${c.profitPct}%${c.costCoverage !== null && c.costCoverage < 0.95 ? `, 보유의 ${Math.round(c.costCoverage * 100)}%만 체결로 설명 — 나머지는 원가 모름` : ""})`
+				: "") +
+			` · ${c.wallets.map((w) => walletLabel(w.wallet)).join("·")}`,
+	);
+	return (
+		`코인 (Binance) ${crypto.length}종 · 평가 ${won(totalKrw)} (달러 시세를 원화로 환산 · 평단은 현물 체결로 추정, 입금·보상분은 원가를 모른다)\n` +
+		lines.join("\n") +
+		(rest > 0 ? `\n… 외 ${rest}종 (1달러 미만 잔돈 등)` : "")
+	);
+}
+
+const MANUAL_KIND: Record<ManualHolding["kind"], string> = { deposit: "예금·현금", pension: "연금", real_estate: "부동산", investment: "기타 투자", other: "기타" };
+
+/** 직접 입력 자산 — 사용자가 적어 둔 금액이라 시세가 아니다 */
+function manualText(manual: readonly ManualHolding[]): string {
+	const total = manual.reduce((s, m) => s + m.valueKrw, 0);
+	return (
+		`직접 입력 자산 ${manual.length}개 · ${won(total)} (사용자가 적어 둔 금액 — 시세가 아니다)\n` +
+		manual
+			.map(
+				(m) =>
+					`- ${m.name} (${MANUAL_KIND[m.kind]}) ${m.currency === "USD" ? `${usd(m.amount)}${m.valueKrw > 0 ? ` ≈ ${won(m.valueKrw)}` : ""}` : won(m.amount)}` +
+					` · ${m.updatedAt.slice(0, 10)} 기준${m.memo ? ` · ${m.memo}` : ""}`,
+			)
+			.join("\n")
+	);
+}
+
 export function createPortfolioTools(deps: BrokerToolDeps) {
 	const portfolioHoldings = defineTool({
 		name: "portfolio_holdings",
 		label: "보유 종목",
 		description:
-			"증권 계좌의 보유 종목과 평가금액을 조회한다 (KIS·토스 모두, 국내+해외, 원화 환산). " +
-			"'내 주식', '얼마 벌었어', '포트폴리오' 같은 질문에 쓴다. 조회 전용이며 주문은 하지 않는다.",
+			"연결된 계좌의 보유 자산과 평가금액을 조회한다 — 증권(KIS·토스, 국내+해외), Binance 미국 주식(체결 내역 추정)·bStock 토큰, 코인(Binance 현물·펀딩·Earn, 평단 추정), " +
+			"투자 탭에서 직접 입력한 자산(예금·연금·부동산 등), 원화 환산 총자산. " +
+			"'내 주식', '내 코인', '얼마 벌었어', '포트폴리오', '총자산' 같은 질문에 쓴다. 조회 전용이며 주문은 하지 않는다.",
 		parameters: Type.Object({}),
 		execute: async () => {
 			const p = await fetchPortfolio(deps.brokers);
@@ -40,42 +82,50 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 				cashUsd: p.cashUsd,
 				profitKrw: p.profitKrw,
 				usdKrw: p.usdKrw,
+				crypto: p.crypto,
+				manual: p.manual,
+				cryptoValueKrw: p.cryptoValueKrw,
+				netWorthKrw: p.netWorthKrw,
 			};
 
-			if (p.holdings.length === 0) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text:
-								`보유 종목이 없습니다. 예수금 ${cashText(p.cashKrw, p.cashUsd)}` +
-								(p.warnings.length > 0 ? `\n\n⚠️ ${p.warnings.join("\n⚠️ ")}` : ""),
-						},
-					],
-					details,
-				};
+			const sections: string[] = [];
+			// 증권 계좌가 아예 연결되지 않았고 주식도 없으면 (코인만) 주식 줄을 쓰지 않는다
+			const hasStockAccount = p.sources.some((s) => s.id === "kis" || s.id === "toss");
+			if (hasStockAccount && p.holdings.length === 0) {
+				sections.push(`보유 종목이 없습니다. 예수금 ${cashText(p.cashKrw, p.cashUsd)}`);
+			} else if (p.holdings.length > 0) {
+				// 채팅에 카드가 없으니 목록을 싣는다 — 너무 많으면 평가금액 상위만 (나머지는 투자 탭)
+				const top = p.holdings
+					.slice(0, 30)
+					.map(
+						(h) =>
+							`- ${h.name} (${h.symbol}) ${h.quantity}주 · ` +
+							(h.avgPrice > 0 ? `평단 ${money(h.avgPrice, h.currency)} · ` : "평단 모름 · ") +
+							`현재 ${money(h.price, h.currency)} · 평가 ${won(h.valueKrw)}` +
+							(h.avgPrice > 0 ? ` (${h.profitPct >= 0 ? "+" : ""}${h.profitPct}%)` : "") +
+							(h.broker === "binance" ? ` · Binance${h.note ? ` ${h.note}` : ""}` : ""),
+					);
+				sections.push(
+					`보유 ${p.holdings.length}종목 · 평가금액 ${won(p.stockValueKrw)} · ` +
+						`평가손익 ${signed(p.profitKrw, "KRW")} · 예수금 ${cashText(p.cashKrw, p.cashUsd)}` +
+						(p.usdKrw > 0 ? ` (환율 ${p.usdKrw.toLocaleString("ko-KR")}원)` : "") +
+						`\n\n${top.join("\n")}` +
+						(p.holdings.length > top.length ? `\n… 외 ${p.holdings.length - top.length}종목 (여기엔 없음 — 전체는 투자 탭에서)` : ""),
+				);
 			}
 
-			// 채팅에 카드가 없으니 목록을 싣는다 — 너무 많으면 평가금액 상위만 (나머지는 투자 탭)
-			const top = p.holdings
-				.slice(0, 30)
-				.map(
-					(h) =>
-						`- ${h.name} (${h.symbol}) ${h.quantity}주 · 평단 ${money(h.avgPrice, h.currency)} · 현재 ${money(h.price, h.currency)} · ` +
-						`평가 ${won(h.valueKrw)} (${h.profitPct >= 0 ? "+" : ""}${h.profitPct}%)`,
-				);
+			if (p.crypto.length > 0) sections.push(cryptoText(p.crypto, p.cryptoValueKrw));
+			if (p.manual.length > 0) sections.push(manualText(p.manual));
+			// 계좌가 여럿이면 환산 합계 — 달러·코인을 원화로 바꾼 값이라고 밝힌다
+			if (p.crypto.length > 0 || p.manual.length > 0 || p.sources.length > 1) {
+				sections.push(`총자산 (원화 환산 합계 — 주식·예수금·달러·코인·직접 입력) ${won(p.netWorthKrw)}`);
+			}
 
 			return {
 				content: [
 					{
 						type: "text" as const,
-						text:
-							`보유 ${p.holdings.length}종목 · 평가금액 ${won(p.stockValueKrw)} · ` +
-							`평가손익 ${signed(p.profitKrw, "KRW")} · 예수금 ${cashText(p.cashKrw, p.cashUsd)}` +
-							(p.usdKrw > 0 ? ` (환율 ${p.usdKrw.toLocaleString("ko-KR")}원)` : "") +
-							`\n\n${top.join("\n")}` +
-							(p.holdings.length > top.length ? `\n… 외 ${p.holdings.length - top.length}종목 (여기엔 없음 — 전체는 투자 탭에서)` : "") +
-							(p.warnings.length > 0 ? `\n\n⚠️ ${p.warnings.join("\n⚠️ ")}` : ""),
+						text: sections.join("\n\n") + (p.warnings.length > 0 ? `\n\n⚠️ ${p.warnings.join("\n⚠️ ")}` : ""),
 					},
 				],
 				details,
@@ -135,7 +185,7 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 		name: "finance_overview",
 		label: "자산 현황",
 		description:
-			"투자자산(증권 평가금액·예수금)과 가계부 현금흐름(수입·지출·잉여)을 한 번에 본다. " +
+			"투자자산(증권 평가금액·예수금·코인)과 가계부 현금흐름(수입·지출·잉여)을 한 번에 본다. " +
 			"'자산 현황', '순자산', '이번 달 여유 얼마나 되지', '적립식으로 얼마 넣을 수 있어' 같은 질문에 쓴다. " +
 			"현금흐름은 사용자의 기본 가계부 기준이다 (공유 가계부면 멤버 전체).",
 		parameters: Type.Object({
@@ -170,6 +220,8 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 				cashKrw: p?.cashKrw ?? 0,
 				cashUsd: p?.cashUsd ?? 0,
 				profitKrw: p?.profitKrw ?? 0,
+				cryptoKrw: p?.cryptoValueKrw ?? 0,
+				netWorthKrw: p?.netWorthKrw ?? 0,
 				income,
 				expense,
 				surplus,
@@ -184,6 +236,15 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 						(p.cashUsd > 0 ? `달러 예수금 ${usdCash(p.cashUsd)} (투자자산 합계에는 미포함, 원화로 환산해 말하지 않는다) · ` : "") +
 						`평가손익 ${signed(p.profitKrw, "KRW")}`,
 				);
+				if (p.crypto.length > 0) {
+					lines.push(`코인 ${won(p.cryptoValueKrw)} (Binance, 달러 시세를 원화로 환산 — 위 투자자산 합계에는 미포함)`);
+				}
+				if (p.manual.length > 0) {
+					lines.push(`직접 입력 자산 ${won(p.manual.reduce((s, m) => s + m.valueKrw, 0))} (예금·연금·부동산 등 사용자가 적어 둔 금액 — 위 투자자산 합계에는 미포함)`);
+				}
+				if (p.crypto.length > 0 || p.manual.length > 0) {
+					lines.push(`총자산 (원화 환산 합계 — 주식·예수금·달러·코인·직접 입력) ${won(p.netWorthKrw)}`);
+				}
 				for (const w of p.warnings) lines.push(`⚠️ ${w}`);
 			} else {
 				lines.push(

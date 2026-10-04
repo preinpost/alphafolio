@@ -163,6 +163,17 @@ export async function lastPrice(symbol: string, c?: BinanceCreds): Promise<strin
 	return r.price;
 }
 
+/** 전 종목 현재가 (symbol → price) — 잔고 평가용. 묶음 조회는 없는 심볼이 하나만 섞여도 통째로 거절돼서 전체를 받는다 (weight 4) */
+export async function tickerPrices(c?: BinanceCreds): Promise<Map<string, number>> {
+	const r = (await publicGet("/api/v3/ticker/price", {}, c)) as Array<{ symbol?: string; price?: string }>;
+	const out = new Map<string, number>();
+	for (const t of Array.isArray(r) ? r : []) {
+		const p = Number(t.price);
+		if (t.symbol && Number.isFinite(p) && p > 0) out.set(t.symbol, p);
+	}
+	return out;
+}
+
 /** 자산별 주문 가능 잔고(free) */
 export async function freeBalances(c: BinanceCreds): Promise<Record<string, string>> {
 	const r = (await signed("GET", "/api/v3/account", { omitZeroBalances: "true" }, c, "잔고 조회")) as { balances?: Array<{ asset: string; free: string }> };

@@ -283,6 +283,36 @@ CREATE TABLE IF NOT EXISTS trade_limits (
 );
 `.trim(),
 	},
+	{
+		// 통합 자산 현황 (PLAN §41). 스냅샷에 코인·달러까지 원화로 환산한 총자산과 계좌별 합계를 함께 남긴다.
+		// total_krw(주식 + 원화 예수금)의 뜻은 그대로. 이전 행은 NULL — 추이 차트는 total_krw 로 대신 그리고 구성 변경을 표시한다.
+		// sources_json: [{ id, status, valueKrw }] — 계좌 구성이 바뀐 날·일부 계좌가 빠진 날을 차트가 구분한다.
+		id: "0011_snapshot_networth",
+		sql: `
+ALTER TABLE portfolio_snapshots ADD COLUMN net_krw REAL;
+ALTER TABLE portfolio_snapshots ADD COLUMN crypto_krw REAL;
+ALTER TABLE portfolio_snapshots ADD COLUMN sources_json TEXT;
+`.trim(),
+	},
+	{
+		// 직접 입력 자산 (PLAN §41 3단계) — API 가 없는 곳(은행·연금·부동산·다른 거래소)의 금액. 사용자 개인 것 (가계부와 달리 공유하지 않는다).
+		// kind: deposit(현금성) · pension · real_estate · investment · other. amount 는 currency 단위 그대로.
+		id: "0012_manual_assets",
+		sql: `
+CREATE TABLE IF NOT EXISTS manual_assets (
+  id          TEXT PRIMARY KEY,
+  member      TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  currency    TEXT NOT NULL,
+  amount      REAL NOT NULL,
+  memo        TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manual_assets_member ON manual_assets(member);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

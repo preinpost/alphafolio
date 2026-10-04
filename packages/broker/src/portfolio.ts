@@ -1,199 +1,251 @@
 /**
- * 포트폴리오 집계 — 여러 증권사 잔고를 합쳐 원화 기준으로 정리한다.
+ * 포트폴리오 집계 — 여러 계좌(증권사·코인 거래소) 잔고를 합쳐 원화 기준으로 정리한다.
+ *
+ * 계좌별 조회는 `sources/` 의 어댑터가 하고, 여기서는 환율 하나를 골라 환산·합계·배분만 한다.
  *
  * 한 곳이 실패해도(계좌 미개설, 권한 없음 등) 전체를 실패시키지 않는다.
  * 대신 warnings 에 담아 **무엇이 빠졌는지 그대로 알린다** — 조용히 0원으로
  * 처리하면 자산이 줄어든 것처럼 보여서 더 위험하다.
  *
- * 설정하지 않은 증권사는 경고를 내지 않는다 (안 쓰는 브로커를 매번 알릴 이유가 없다).
+ * 설정하지 않은 계좌는 경고를 내지 않는다 (안 쓰는 계좌를 매번 알릴 이유가 없다).
  */
-import { domesticBalance, overseasBalance } from "./kis/api.ts";
 import type { KisContext } from "./kis/client.ts";
-import {
-	toDomesticHoldings,
-	toOverseasHoldings,
-	toTossHoldings,
-	type BrokerId,
-	type Holding,
-	type PortfolioSummary,
+import type {
+	Allocation,
+	BrokerId,
+	CryptoHolding,
+	Holding,
+	ManualAsset,
+	ManualHolding,
+	PortfolioSummary,
+	SourceId,
+	SourceSummary,
 } from "./normalize.ts";
-import { defaultAccountSeq, tossBuyingPower, tossExchangeRate, tossHoldings } from "./toss/api.ts";
+import { ASSET_SOURCES, type AssetSource, type SourceResult } from "./sources/index.ts";
+import { publicUsdKrw } from "./sources/fx.ts";
+import { reason } from "./sources/types.ts";
 import type { TossContext } from "./toss/client.ts";
 
 /**
- * 사용 가능한 증권사 접근자. **설정된 것만** 넘긴다.
+ * 사용 가능한 계좌 접근자. **설정된 것만** 넘긴다.
  * 컨텍스트 생성이 호출 시점에 일어나므로, 사용자가 키를 나중에 넣어도 재시작이 필요 없다.
  */
 export interface BrokerAccess {
 	kis?: () => KisContext;
 	toss?: () => TossContext;
-	/** Binance 현물 — 거래(binance_order)에만 쓴다. 키가 없으면 만들 때 throw */
+	/** Binance — 거래와 잔고 조회에 쓴다. 키가 없으면 만들 때 throw */
 	binance?: () => { key: string; secret: string; testnet?: boolean };
+	/** 직접 입력 자산 목록 (서버 D1) — 저장소가 없으면 넘기지 않는다 */
+	manual?: () => Promise<ManualAsset[]>;
 }
 
 export class NoBrokerConfiguredError extends Error {
-	constructor() {
+	constructor(withCrypto = true) {
 		super(
-			"연결된 증권 계정이 없습니다. 설정 화면의 '증권 (KIS)' 또는 '증권 (토스)' 에서 키를 입력하세요. " +
+			(withCrypto ? "연결된 계좌가 없습니다. 설정 화면의 '증권 (KIS)'·'증권 (토스)'·'코인 (Binance)' 에서 키를 입력하세요. " : "연결된 증권 계정이 없습니다. 설정 화면의 '증권 (KIS)' 또는 '증권 (토스)' 에서 키를 입력하세요. ") +
 				"키는 사용자별로 저장됩니다.",
 		);
 		this.name = "NoBrokerConfiguredError";
 	}
 }
 
-function reason(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+/** 주식만 보는 곳(주문·타점·리서치·보유 점검·스냅샷)이 쓰는 출처 — 코인 거래소를 부르지 않는다 */
+export const STOCK_SOURCES: readonly SourceId[] = ["kis", "toss"];
+
+/** 환율은 이 순서로 하나만 고른다 — 토스는 실시간, KIS 는 고시 환율이라 해외 종목이 낮게 잡힌다 (TODO.md) */
+const FX_PRIORITY: readonly SourceId[] = ["toss", "kis"];
+
+const SOURCE_TIMEOUT_MS = 20_000;
+
+export interface PortfolioOptions {
+	/** 조회할 출처 — 생략하면 연결된 전부 */
+	sources?: readonly SourceId[];
+	/** 출처 하나의 제한 시간 — 느린 계좌가 전체를 막지 않게 */
+	timeoutMs?: number;
 }
 
-interface BrokerResult {
-	holdings: Holding[];
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`${Math.round(ms / 1000)}초 안에 응답이 없어 건너뛰었습니다`)), ms);
+	});
+	return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+const isStockBroker = (id: SourceId): id is BrokerId => id === "kis" || id === "toss";
+
+/** 출처별 결과 → 환율 하나 (순수) */
+export function pickUsdKrw(results: ReadonlyArray<{ id: SourceId; usdKrw: number }>): number {
+	return pickFx(results)?.rate ?? 0;
+}
+
+function pickFx(results: ReadonlyArray<{ id: SourceId; usdKrw: number }>): { rate: number; id: SourceId } | null {
+	const order = [...FX_PRIORITY, ...results.map((r) => r.id).filter((id) => !FX_PRIORITY.includes(id))];
+	for (const id of order) {
+		const r = results.find((x) => x.id === id && x.usdKrw > 0);
+		if (r) return { rate: r.usdKrw, id };
+	}
+	return null;
+}
+
+/** 직접 입력 자산 → 원화 (순수). USD 인데 환율이 없으면 0 */
+export function manualKrw(m: ManualAsset, usdKrw: number): number {
+	return m.currency === "KRW" ? Math.round(m.amount) : Math.round(m.amount * usdKrw);
+}
+
+/** 자산 배분 (순수) — 합계가 총자산이다 */
+export function allocationOf(p: {
+	holdings: readonly Holding[];
+	crypto: readonly CryptoHolding[];
+	manual?: readonly ManualAsset[];
 	cashKrw: number;
-	/** KIS 는 지금 쓰는 잔고 API 에 외화 예수금이 없어 0 (TODO) */
 	cashUsd: number;
 	usdKrw: number;
-	warnings: string[];
+}): Allocation {
+	const a: Allocation = { domesticStock: 0, overseasStock: 0, crypto: 0, cash: 0, other: 0 };
+	for (const h of p.holdings) {
+		if (h.market === "domestic") a.domesticStock += h.valueKrw;
+		else a.overseasStock += h.valueKrw;
+	}
+	for (const c of p.crypto) {
+		if (c.stable) a.cash += c.valueKrw;
+		else a.crypto += c.valueKrw;
+	}
+	for (const m of p.manual ?? []) {
+		if (m.kind === "deposit") a.cash += manualKrw(m, p.usdKrw);
+		else a.other += manualKrw(m, p.usdKrw);
+	}
+	a.cash += p.cashKrw + Math.round(p.cashUsd * p.usdKrw);
+	return a;
 }
 
-async function fetchKis(ctx: KisContext): Promise<BrokerResult> {
-	const warnings: string[] = [];
+const sumAllocation = (a: Allocation): number => a.domesticStock + a.overseasStock + a.crypto + a.cash + a.other;
 
-	// 두 호출은 독립이므로 병렬로 — 레이트 리밋은 client 가 앱키 단위로 잡는다
-	const [domestic, overseas] = await Promise.allSettled([domesticBalance(ctx), overseasBalance(ctx)]);
-
-	let holdings: Holding[] = [];
-	let cashKrw = 0;
-	let usdKrw = 0;
-
-	if (domestic.status === "fulfilled") {
-		const parsed = toDomesticHoldings(domestic.value);
-		holdings = holdings.concat(parsed.holdings);
-		cashKrw = parsed.cashKrw;
-	} else {
-		warnings.push(`KIS 국내 잔고를 불러오지 못했습니다: ${reason(domestic.reason)}`);
-	}
-
-	if (overseas.status === "fulfilled") {
-		const parsed = toOverseasHoldings(overseas.value);
-		holdings = holdings.concat(parsed.holdings);
-		if (parsed.usdKrw) usdKrw = parsed.usdKrw;
-		else if (parsed.holdings.length > 0) {
-			warnings.push("KIS 해외 보유종목의 환율을 찾지 못해 원화 환산이 빠졌습니다.");
-		}
-	} else {
-		warnings.push(`KIS 해외 잔고를 불러오지 못했습니다: ${reason(overseas.reason)}`);
-	}
-
-	return { holdings, cashKrw, cashUsd: 0, usdKrw, warnings };
+interface Settled {
+	source: AssetSource;
+	/** null = 실패·제외 · "empty" = 조회해 보니 쓸 게 없음 (카드 없음) */
+	result: SourceResult | null | "empty";
+	status: SourceSummary["status"];
+	error?: string;
 }
 
-async function fetchToss(ctx: TossContext): Promise<BrokerResult> {
-	const warnings: string[] = [];
-	const seq = await defaultAccountSeq(ctx);
+export async function fetchPortfolio(access: BrokerAccess, opts: PortfolioOptions = {}): Promise<PortfolioSummary> {
+	const wanted = ASSET_SOURCES.filter((s) => !opts.sources || opts.sources.includes(s.id));
+	const timeoutMs = opts.timeoutMs ?? SOURCE_TIMEOUT_MS;
 
-	const [holdingsRes, cashRes, usdCashRes, rateRes] = await Promise.allSettled([
-		tossHoldings(ctx, seq),
-		tossBuyingPower(ctx, seq, "KRW"),
-		tossBuyingPower(ctx, seq, "USD"),
-		tossExchangeRate(ctx),
-	]);
-
-	// 환율을 먼저 확보해야 USD 종목을 원화로 환산할 수 있다
-	let usdKrw = 0;
-	if (rateRes.status === "fulfilled") {
-		const r = Number(rateRes.value.midRate ?? rateRes.value.rate);
-		if (Number.isFinite(r) && r > 0) usdKrw = r;
-	}
-
-	let holdings: Holding[] = [];
-	if (holdingsRes.status === "fulfilled") {
-		holdings = toTossHoldings(holdingsRes.value, usdKrw);
-		if (usdKrw === 0 && holdings.some((h) => h.currency === "USD")) {
-			warnings.push("토스 환율 조회에 실패해 해외 종목의 원화 환산이 빠졌습니다.");
-		}
-	} else {
-		warnings.push(`토스 보유종목을 불러오지 못했습니다: ${reason(holdingsRes.reason)}`);
-	}
-
-	let cashKrw = 0;
-	if (cashRes.status === "fulfilled") {
-		const c = Number(cashRes.value.cashBuyingPower);
-		if (Number.isFinite(c)) cashKrw = c;
-	} else {
-		warnings.push(`토스 예수금을 불러오지 못했습니다: ${reason(cashRes.reason)}`);
-	}
-
-	let cashUsd = 0;
-	if (usdCashRes.status === "fulfilled") {
-		const c = Number(usdCashRes.value.cashBuyingPower);
-		if (Number.isFinite(c)) cashUsd = c;
-	} else {
-		warnings.push(`토스 달러 예수금을 불러오지 못했습니다: ${reason(usdCashRes.reason)}`);
-	}
-
-	return { holdings, cashKrw, cashUsd, usdKrw, warnings };
-}
-
-export async function fetchPortfolio(access: BrokerAccess): Promise<PortfolioSummary> {
-	const tasks: Array<{ id: BrokerId; run: Promise<BrokerResult> }> = [];
-
-	// 컨텍스트 생성 자체가 throw 할 수 있다(자격증명 누락) — 그건 "미설정"으로 본다
-	if (access.kis) {
+	const pending: Array<Promise<Settled>> = [];
+	for (const source of wanted) {
+		let conn: ReturnType<AssetSource["connect"]>;
+		// 접근자가 throw 하면(자격증명 누락) 미설정으로 본다
 		try {
-			tasks.push({ id: "kis", run: fetchKis(access.kis()) });
+			conn = source.connect(access);
 		} catch {
-			/* 미설정 — 경고하지 않는다 */
+			conn = null;
+		}
+		if (!conn) continue;
+		if ("skipped" in conn) {
+			pending.push(Promise.resolve({ source, result: null, status: "skipped", error: conn.skipped }));
+			continue;
+		}
+		const run = conn.run;
+		pending.push(
+			withTimeout(Promise.resolve().then(run), timeoutMs).then(
+				(result): Settled =>
+					result === null ? { source, result: "empty", status: "ok" } : { source, result, status: result.warnings.length > 0 ? "partial" : "ok" },
+				(err: unknown): Settled => ({ source, result: null, status: "failed", error: reason(err) }),
+			),
+		);
+	}
+
+	const noAccount = (): NoBrokerConfiguredError => new NoBrokerConfiguredError(!opts.sources || opts.sources.includes("binance"));
+	if (pending.length === 0) throw noAccount();
+
+	const settled = (await Promise.all(pending)).filter((s) => s.result !== "empty");
+	// 직접 입력만 연결돼 있고 그마저 비었으면 — 연결된 계좌가 없는 것과 같다
+	if (settled.length === 0) throw noAccount();
+	const ok = settled.filter((s): s is Settled & { result: SourceResult } => s.result !== null && s.result !== "empty");
+
+	const needsFx = ok.some(
+		({ result: r }) =>
+			r.holdings.some((h) => h.currency === "USD") ||
+			r.cashUsd > 0 ||
+			r.crypto.some((c) => c.valueUsd !== null) ||
+			r.manual.some((m) => m.currency === "USD"),
+	);
+	const picked = pickFx(ok.map((s) => ({ id: s.source.id, usdKrw: s.result.usdKrw })));
+	let usdKrw = picked?.rate ?? 0;
+	let fxSource: string | null = picked ? (ok.find((s) => s.source.id === picked.id)?.source.label ?? picked.id) : null;
+	// 증권 계좌 환율이 없을 때만 공개 환율 (Binance 만 연결한 경우 등)
+	if (!picked && needsFx) {
+		const pub = await publicUsdKrw();
+		if (pub) {
+			usdKrw = pub.rate;
+			fxSource = `ECB ${pub.date}`;
 		}
 	}
-	if (access.toss) {
-		try {
-			tasks.push({ id: "toss", run: fetchToss(access.toss()) });
-		} catch {
-			/* 미설정 */
+
+	// 환율 하나로 다시 환산한다 — 출처마다 다른 환율이 섞이면 같은 종목이 계좌마다 다른 원화가 된다
+	for (const { result } of ok) {
+		if (usdKrw > 0) {
+			for (const h of result.holdings) if (h.currency === "USD") h.valueKrw = Math.round(h.value * usdKrw);
 		}
+		for (const c of result.crypto) c.valueKrw = c.valueUsd !== null && usdKrw > 0 ? Math.round(c.valueUsd * usdKrw) : 0;
 	}
 
-	if (tasks.length === 0) throw new NoBrokerConfiguredError();
-
-	const settled = await Promise.allSettled(tasks.map((t) => t.run));
-
-	let holdings: Holding[] = [];
-	let cashKrw = 0;
-	let cashUsd = 0;
-	let usdKrw = 0;
 	const warnings: string[] = [];
-	const brokers: BrokerId[] = [];
-
-	settled.forEach((result, i) => {
-		const id = tasks[i]!.id;
-		if (result.status === "rejected") {
-			warnings.push(`${id === "kis" ? "KIS" : "토스"} 조회 실패: ${reason(result.reason)}`);
-			return;
+	const sources: SourceSummary[] = settled.map(({ source, result, status, error }) => {
+		if (!result || result === "empty") {
+			if (status === "failed") warnings.push(`${source.label} 조회 실패: ${error}`);
+			return { id: source.id, label: source.label, status, valueKrw: 0, stockKrw: 0, cashKrw: 0, cryptoKrw: 0, otherKrw: 0, warnings: [], ...(error ? { error } : {}) };
 		}
-		brokers.push(id);
-		holdings = holdings.concat(result.value.holdings);
-		cashKrw += result.value.cashKrw;
-		cashUsd += result.value.cashUsd;
-		if (result.value.usdKrw > 0 && usdKrw === 0) usdKrw = result.value.usdKrw;
-		warnings.push(...result.value.warnings);
+		warnings.push(...result.warnings);
+		const a = allocationOf({ ...result, usdKrw });
+		return {
+			id: source.id,
+			label: source.label,
+			status,
+			valueKrw: sumAllocation(a),
+			stockKrw: a.domesticStock + a.overseasStock,
+			cashKrw: a.cash,
+			cryptoKrw: a.crypto,
+			otherKrw: a.other,
+			warnings: [...result.warnings],
+		};
 	});
 
-	// 한쪽에서만 환율을 얻었으면 아직 환산되지 않은 해외 종목에 적용한다
-	if (usdKrw > 0) {
-		for (const h of holdings) {
-			if (h.valueKrw === 0 && h.currency === "USD") h.valueKrw = Math.round(h.value * usdKrw);
-		}
+	const holdings = ok.flatMap((s) => s.result.holdings).sort((a, b) => b.valueKrw - a.valueKrw);
+	const crypto = ok.flatMap((s) => s.result.crypto).sort((a, b) => b.valueKrw - a.valueKrw || (b.valueUsd ?? -1) - (a.valueUsd ?? -1));
+	const manual: ManualHolding[] = ok
+		.flatMap((s) => s.result.manual)
+		.map((m) => ({ ...m, valueKrw: manualKrw(m, usdKrw) }))
+		.sort((a, b) => b.valueKrw - a.valueKrw);
+	const cashKrw = ok.reduce((s, x) => s + x.result.cashKrw, 0);
+	// 달러는 센트 단위로 (합산 부동소수점 잡음 제거)
+	const cashUsd = Math.round(ok.reduce((s, x) => s + x.result.cashUsd, 0) * 100) / 100;
+
+	if (usdKrw === 0 && needsFx) {
+		warnings.push("환율을 얻지 못해 달러 자산(해외 주식·달러 예수금·코인·달러 직접 입력)을 원화로 환산하지 못했습니다 — 총자산에서 빠졌습니다.");
 	}
 
 	const stockValueKrw = holdings.reduce((s, h) => s + h.valueKrw, 0);
-	const profitKrw = holdings.reduce(
-		(s, h) => s + (h.currency === "USD" ? Math.round(h.profit * usdKrw) : h.profit),
-		0,
-	);
+	const profitKrw = holdings.reduce((s, h) => s + (h.currency === "USD" ? Math.round(h.profit * usdKrw) : h.profit), 0);
+	const allocation = allocationOf({ holdings, crypto, manual, cashKrw, cashUsd, usdKrw });
 
-	holdings.sort((a, b) => b.valueKrw - a.valueKrw);
-
-	// 달러는 센트 단위로 (합산 부동소수점 잡음 제거)
-	cashUsd = Math.round(cashUsd * 100) / 100;
-
-	return { holdings, brokers, stockValueKrw, cashKrw, cashUsd, profitKrw, usdKrw, warnings };
+	return {
+		holdings,
+		brokers: ok.map((s) => s.source.id).filter(isStockBroker),
+		stockValueKrw,
+		cashKrw,
+		cashUsd,
+		profitKrw,
+		usdKrw,
+		fxSource,
+		warnings,
+		crypto,
+		manual,
+		cryptoValueKrw: crypto.reduce((s, c) => s + c.valueKrw, 0),
+		netWorthKrw: sumAllocation(allocation),
+		allocation,
+		sources,
+	};
 }

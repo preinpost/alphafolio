@@ -18,6 +18,7 @@ import {
 	fetchQuote,
 	KisCredentialsMissingError,
 	NoBrokerConfiguredError,
+	STOCK_SOURCES,
 	parseAccount,
 	TossCredentialsMissingError,
 	cancelOrder,
@@ -49,6 +50,7 @@ import {
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
 import { kstParts, SnapshotScheduler, SnapshotStore } from "./snapshots.ts";
+import { handleManualAssets, ManualAssetStore } from "./manual-assets.ts";
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
 import { APP_VERSION, loadConfig, loadDotEnv } from "./config.ts";
 import { corsFor } from "./cors.ts";
@@ -316,6 +318,9 @@ async function main(): Promise<void> {
 	 * 사용자가 쓰는 증권사 묶음. 두 곳을 다 넣어두고, 설정되지 않은 쪽은
 	 * 컨텍스트 생성에서 throw 되어 자동으로 제외된다 (안 쓰는 브로커를 매번 경고하지 않는다).
 	 */
+	// 직접 입력 자산 (PLAN §41) — 포트폴리오에 계좌 하나처럼 들어간다
+	const manualAssets = new ManualAssetStore(ledgerConfig);
+
 	const brokerAccess = (user: string): BrokerAccess => ({
 		kis: () => kisContext(user),
 		toss: () => tossContext(user),
@@ -325,6 +330,8 @@ async function main(): Promise<void> {
 			if (!b) throw new Error("Binance 키가 없습니다 — 설정 → 코인 (Binance)");
 			return b;
 		},
+		// D1 이 없으면 넘기지 않는다 (= 미설정, 경고 없음)
+		...(ledgerReady() ? { manual: () => manualAssets.list(user) } : {}),
 	});
 
 	/** 네이버 뉴스 자격증명 — 다른 키와 마찬가지로 사용자별이다. */
@@ -428,7 +435,7 @@ async function main(): Promise<void> {
 					return { sellable: p.qty, avgPrice: p.avgPrice };
 				}
 				const sellable = await targetSellable(a, target, symbol);
-				const pf = await fetchPortfolio(a).catch(() => null);
+				const pf = await fetchPortfolio(a, { sources: STOCK_SOURCES }).catch(() => null);
 				const h = pf?.holdings.find((x) => x.symbol.toUpperCase() === symbol.toUpperCase() && x.broker === target.broker);
 				return { sellable, avgPrice: h && h.avgPrice > 0 ? h.avgPrice : null };
 			},
@@ -758,7 +765,15 @@ async function main(): Promise<void> {
 				if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
 					throw new HttpError(400, "from/to 는 YYYY-MM-DD 형식이어야 합니다");
 				}
-				json(res, 200, { items: await snapshots.range(user, from, to) });
+				// summary=1 — 보유 종목 없이 합계만 (추이 차트)
+				json(res, 200, { items: await snapshots.range(user, from, to, { summary: url.searchParams.get("summary") === "1" }) });
+				return;
+			}
+
+			if (path === "/api/assets/manual" || path.startsWith("/api/assets/manual/")) {
+				const result = await handleManualAssets(req, path, user, manualAssets);
+				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
+				json(res, 200, result);
 				return;
 			}
 

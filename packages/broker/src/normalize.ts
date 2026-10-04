@@ -36,9 +36,18 @@ export interface Bar {
 
 export type BrokerId = "kis" | "toss";
 
+/**
+ * 자산 출처 — 포트폴리오에 잔고를 보태는 계좌. 증권사(BrokerId)보다 넓다.
+ * BrokerId 는 주문 경로(actions·quote)에도 쓰이므로 코인 거래소를 거기 섞지 않는다.
+ */
+export type SourceId = BrokerId | "binance" | "manual";
+
 export interface Holding {
-	/** 어느 증권사 계좌의 잔고인가 — 두 곳을 함께 쓰면 합산되므로 구분이 필요하다 */
-	broker: BrokerId;
+	/**
+	 * 어느 계좌의 잔고인가 — 여러 곳을 함께 쓰면 합산되므로 구분이 필요하다.
+	 * binance(미국 주식·bStock)는 전체 조회에만 있다 — 주문·타점이 쓰는 STOCK_SOURCES 조회에는 kis·toss 만 온다.
+	 */
+	broker: SourceId;
 	symbol: string;
 	name: string;
 	market: "domestic" | "overseas";
@@ -52,9 +61,90 @@ export interface Holding {
 	profitPct: number;
 	/** 원화 환산 평가금액 — 해외는 환율 적용, 국내는 value 와 같다 */
 	valueKrw: number;
+	/** 잔고가 추정이거나 주식이 아닌 것 (예: 체결 내역 추정 · bStock 토큰). avgPrice 0 = 평단 모름 */
+	note?: string;
+}
+
+/**
+ * 코인 잔고 — 지갑을 합친 자산별 수량과 USD 평가.
+ * 거래소가 평단을 주지 않아 손익은 없다 (입금한 코인은 원가를 알 수도 없다).
+ */
+export interface CryptoHolding {
+	source: "binance";
+	asset: string;
+	quantity: number;
+	/** 지갑별 수량 (SPOT·FUNDING·EARN·EARN_LOCKED) */
+	wallets: Array<{ wallet: string; quantity: number }>;
+	/** USD 가격 — USDT 등 달러 스테이블 마켓 기준, 스테이블코인은 1. 못 찾으면 null */
+	priceUsd: number | null;
+	valueUsd: number | null;
+	/** 원화 환산 — 가격·환율이 없으면 0 */
+	valueKrw: number;
+	/** 달러 스테이블코인 — 배분에서 현금성으로 본다 */
+	stable: boolean;
+	/**
+	 * 평단 추정 (USD) — 현물 체결({자산}USDT·USDC·FDUSD)의 이동평균. 입금·Convert·보상으로 들어온 수량은 원가를 모른다.
+	 * costCoverage = 체결로 설명되는 수량 / 보유 수량 (1 이면 전부). 손익은 체결로 설명되는 수량만큼만.
+	 */
+	avgPriceUsd: number | null;
+	costCoverage: number | null;
+	profitUsd: number | null;
+	profitPct: number | null;
+}
+
+/** 직접 입력 자산 종류 — deposit 은 현금성, 나머지는 배분에서 "기타" */
+export type ManualKind = "deposit" | "pension" | "real_estate" | "investment" | "other";
+export const MANUAL_KINDS: readonly ManualKind[] = ["deposit", "pension", "real_estate", "investment", "other"];
+
+/** 직접 입력 자산 — API 가 없는 곳(은행·연금·부동산·다른 거래소). 사용자가 적은 금액 그대로, 시세가 없다 */
+export interface ManualAsset {
+	id: string;
+	name: string;
+	kind: ManualKind;
+	currency: "KRW" | "USD";
+	amount: number;
+	memo: string | null;
+	/** 마지막으로 금액을 고친 때 (ISO) — 오래된 값인지 화면이 알린다 */
+	updatedAt: string;
+}
+
+export interface ManualHolding extends ManualAsset {
+	/** 원화 환산 — USD 인데 환율이 없으면 0 */
+	valueKrw: number;
+}
+
+/** 출처(계좌)별 합계 — 계좌 카드에 쓴다. 금액은 모두 원화 환산 */
+export interface SourceSummary {
+	id: SourceId;
+	label: string;
+	/** partial = 일부 구간만 실패 (warnings) · skipped = 연결됐지만 합계에서 뺐다 (예: 테스트넷) */
+	status: "ok" | "partial" | "failed" | "skipped";
+	valueKrw: number;
+	stockKrw: number;
+	/** 원화·달러 예수금 + 스테이블코인 */
+	cashKrw: number;
+	/** 스테이블코인을 뺀 코인 */
+	cryptoKrw: number;
+	/** 직접 입력 자산 중 현금성이 아닌 것 (연금·부동산 등) */
+	otherKrw: number;
+	warnings: string[];
+	/** failed·skipped 사유 */
+	error?: string;
+}
+
+/** 자산 배분 (원화 환산) — 합계가 netWorthKrw */
+export interface Allocation {
+	domesticStock: number;
+	overseasStock: number;
+	crypto: number;
+	/** 원화·달러 예수금 + 스테이블코인 + 직접 입력 예금 */
+	cash: number;
+	/** 직접 입력 자산 — 연금·부동산·기타 투자·기타 */
+	other: number;
 }
 
 export interface PortfolioSummary {
+	/** 주식 보유 (KIS·토스) — 주문·타점·점검이 보는 목록이라 코인은 따로 둔다 */
 	holdings: Holding[];
 	/** 실제로 조회에 성공한 증권사 */
 	brokers: BrokerId[];
@@ -63,16 +153,32 @@ export interface PortfolioSummary {
 	/** 예수금 (원화) — 국내 계좌 기준 */
 	cashKrw: number;
 	/**
-	 * 달러 예수금 (토스 매수가능금액, USD). 원화로 환산하지 않고 따로 둔다 — 미국 주식은 달러로 주문하고,
-	 * 원화 예수금과 합치면 총자산·스냅샷 기록의 뜻이 바뀐다. 두 금액은 서로를 포함하지 않는다 (실측, PLAN §30).
+	 * 달러 예수금 (토스 매수가능금액 + KIS 외화출금가능금액, USD). 원화로 환산하지 않고 따로 둔다 — 미국 주식은 달러로 주문하고,
+	 * 원화 예수금과 합치면 총자산·스냅샷 기록의 뜻이 바뀐다. 토스 두 금액은 서로를 포함하지 않는다 (실측, PLAN §30).
 	 */
 	cashUsd: number;
 	/** 평가손익 합계 (원화 환산) */
 	profitKrw: number;
 	/** 적용한 USD/KRW 환율 */
 	usdKrw: number;
+	/** 환율 출처 — "토스" · "KIS" · "ECB 2026-10-02"(증권 계좌 환율이 없을 때 공개 환율). 환율이 없으면 null */
+	fxSource: string | null;
 	/** 조회하지 못한 구간 (예: 해외 계좌 미개설) — 사용자에게 그대로 알린다 */
 	warnings: string[];
+
+	// ── 통합 현황 (여러 계좌를 원화로 환산해 모은 값) ──
+	// 위 필드(주식·원화 예수금·달러 예수금)의 뜻은 그대로 두고, 환산 합계는 여기에만 싣는다 (PLAN §30).
+	/** 코인 잔고 (평가금액 순) */
+	crypto: CryptoHolding[];
+	/** 직접 입력 자산 (금액 순) */
+	manual: ManualHolding[];
+	/** 코인 평가 합계 (스테이블코인 포함, 원화 환산) */
+	cryptoValueKrw: number;
+	/** 총자산 — 주식 + 원화·달러 예수금 + 코인 + 직접 입력 (원화 환산). 환율이 없으면 환산 못 한 것은 빠진다 */
+	netWorthKrw: number;
+	allocation: Allocation;
+	/** 연결된 계좌별 상태·합계 (미설정 계좌는 없다) */
+	sources: SourceSummary[];
 }
 
 // ── 파싱 헬퍼 ───────────────────────────────────────────────────────────
@@ -209,7 +315,7 @@ export function toDomesticHoldings(res: KisResponse): { holdings: Holding[]; cas
  * 평가금액 필드가 통화구분에 따라 의미가 바뀌는 것을 피해
  * **수량 × 현재가**로 직접 계산한다.
  */
-export function toOverseasHoldings(res: KisResponse): { holdings: Holding[]; usdKrw: number | null } {
+export function toOverseasHoldings(res: KisResponse): { holdings: Holding[]; usdKrw: number | null; cashUsd: number } {
 	const holdings: Holding[] = [];
 	let rate: number | null = null;
 
@@ -239,16 +345,16 @@ export function toOverseasHoldings(res: KisResponse): { holdings: Holding[]; usd
 		});
 	}
 
-	// 보유종목이 없어도 output2(통화별)에 최초고시환율이 온다
-	if (rate === null) {
-		for (const r of rows(res.output2)) {
-			if (String(r.crcy_cd ?? "") !== "USD") continue;
-			const v = numOrNull(r.frst_bltn_exrt);
-			if (v && v > 0) {
-				rate = v;
-				break;
-			}
-		}
+	// output2 는 통화별 — 보유종목이 없어도 최초고시환율이 온다.
+	// 달러 예수금은 외화출금가능금액(frcr_drwg_psbl_amt_1): 실제 외화만이다. 외화예수금액2(frcr_dncl_amt_2)는 설명이
+	// "외화사용가능금액"이라 통합증거금 계좌면 원화 환산분이 섞여 원화 예수금과 두 번 셀 수 있다 (실측 전 — TODO.md)
+	let cashUsd = 0;
+	for (const r of rows(res.output2)) {
+		if (String(r.crcy_cd ?? "") !== "USD") continue;
+		cashUsd = num(r.frcr_drwg_psbl_amt_1);
+		const v = numOrNull(r.frst_bltn_exrt);
+		if (rate === null && v && v > 0) rate = v;
+		break;
 	}
 
 	// 환율을 뒤늦게 찾았으면 원화 환산을 채운다
@@ -258,7 +364,7 @@ export function toOverseasHoldings(res: KisResponse): { holdings: Holding[]; usd
 		}
 	}
 
-	return { holdings, usdKrw: rate };
+	return { holdings, usdKrw: rate, cashUsd };
 }
 
 // ── 토스 ────────────────────────────────────────────────────────────────

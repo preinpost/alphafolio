@@ -5,7 +5,7 @@ import { marketOf, validateOrder, type OrderSide, type OrderType } from "../orde
 import { defaultAccountSeq, tossBuyingPower } from "../toss/api.ts";
 import { listOrders, sellableQuantity } from "../toss/orders.ts";
 import { fetchQuote } from "../quote.ts";
-import { fetchPortfolio } from "../portfolio.ts";
+import { fetchPortfolio, STOCK_SOURCES } from "../portfolio.ts";
 import type { PlaceAction } from "../actions.ts";
 import { kisBuyingPower, kisOrderExchange, kisSellable } from "../kis/orders.ts";
 import type { BrokerToolDeps, OrderPreviewDetails } from "./contracts.ts";
@@ -65,8 +65,10 @@ export function createStockOrderTools(deps: BrokerToolDeps) {
 				broker = tossCtx ? "toss" : "kis";
 			} else if (side === "SELL") {
 				// 매도는 그 종목을 가진 곳으로 — 둘 다 가졌으면 사람이 고른다
-				const pf = await fetchPortfolio(deps.brokers).catch(() => null);
-				const holders = [...new Set((pf?.holdings ?? []).filter((h) => h.symbol === symbol).map((h) => h.broker))];
+				const pf = await fetchPortfolio(deps.brokers, { sources: STOCK_SOURCES }).catch(() => null);
+				const holders = [...new Set((pf?.holdings ?? []).filter((h) => h.symbol === symbol).map((h) => h.broker))].filter(
+					(b): b is "toss" | "kis" => b === "toss" || b === "kis",
+				);
 				if (holders.length > 1) {
 					throw new Error(`${symbol} 을(를) 토스와 한국투자 모두에 보유하고 있습니다. 어느 증권사에서 팔지 사용자에게 물어 broker 를 지정하세요.`);
 				}
