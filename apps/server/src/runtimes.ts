@@ -17,16 +17,12 @@ import {
 	type AlphaFolioConversation,
 	type ThinkingLevel,
 } from "@alphafolio/agent";
-import { createLedgerTools, type D1Provider } from "@alphafolio/ledger/tools";
-import { createBrokerTools } from "@alphafolio/broker/tools";
-import { createOrderTools } from "@alphafolio/broker/order-tools";
-import { createDataTools } from "@alphafolio/broker/data-tools";
-import { createStreamTools } from "@alphafolio/broker/stream-tools";
-import { createDerivativesTools } from "@alphafolio/broker/derivatives-tools";
-import { createMcpTools } from "@alphafolio/mcp/tools";
+import type { D1Provider } from "@alphafolio/ledger/tools";
+import type { BrokerToolDeps } from "@alphafolio/broker/tools";
+import { createUserTools } from "./tool-registry.ts";
 import type { FetchLike, McpServerHandle } from "@alphafolio/mcp";
 import type { McpWriteRequest } from "@alphafolio/mcp/tools";
-import { createWatchTools, type WatchToolDeps } from "@alphafolio/broker/watch-tools";
+import type { WatchToolDeps } from "@alphafolio/broker/watch-tools";
 import type { DataCreds } from "@alphafolio/broker";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
@@ -56,7 +52,7 @@ export interface RuntimeManagerOptions {
 	 * 주문 확인 토큰 발급기. 툴은 이걸로 **준비만** 하고, 실행은 사람이
 	 * /api/orders/execute 를 호출해야 한다.
 	 */
-	prepareOrder: (user: string) => NonNullable<Parameters<typeof createBrokerTools>[0]["prepareOrder"]>;
+	prepareOrder: (user: string) => NonNullable<BrokerToolDeps["prepareOrder"]>;
 	/** 사용자가 연결한 원격 MCP 서버 — mcp_call 이 호출마다 읽는다 (설정에서 추가하면 재시작 없이) */
 	mcpServers: (user: string) => McpServerHandle[];
 	/** MCP 요청용 fetch (SSRF 방어) */
@@ -147,29 +143,7 @@ export class RuntimeManager {
 			authPath: this.opts.authPath,
 			apiKeys: this.opts.llmKeys(user),
 			excludeTools: EXCLUDED_TOOLS,
-			customTools: [
-				// 가계부는 멤버끼리 공유되지만 기록자는 사용자별로 박힌다
-				...createLedgerTools(this.opts.ledgerConfig, user),
-				// 증권 자격증명은 사용자별 — 컨텍스트를 user 로 바인딩한다
-				...createBrokerTools({
-					brokers: this.opts.brokerAccess(user),
-					ledger: this.opts.ledgerConfig,
-					member: user,
-					naver: () => this.opts.naverCreds(user),
-					prepareOrder: this.opts.prepareOrder(user),
-				}),
-				// 정정·취소·조건주문 — 역시 준비만 (확인 카드)
-				...createOrderTools({ brokers: this.opts.brokerAccess(user), prepareOrder: this.opts.prepareOrder(user) }),
-				// 해외·코인 데이터 — 조회만
-				...createDataTools({ creds: () => this.opts.dataCreds(user) }),
-				// KIS 실시간 시세 요약 · 옵션 그릭스 계산 — 조회·계산만
-				...createStreamTools({ brokers: this.opts.brokerAccess(user) }),
-				...createDerivativesTools({ brokers: this.opts.brokerAccess(user) }),
-				// 외부 MCP (TradingView 등) — 읽기는 바로, 쓰기는 확인 카드 (PLAN §38·§39)
-				...createMcpTools({ servers: () => this.opts.mcpServers(user), fetch: this.opts.mcpFetch, prepareWrite: this.opts.prepareMcpWrite(user) }),
-				// 자체 감시 — 봉 마감 조건 알림 (PLAN §40)
-				...createWatchTools(this.opts.watch(user)),
-			],
+			customTools: createUserTools(this.opts, user),
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});
 
