@@ -20,24 +20,54 @@ import type {
 	TxPatch,
 } from "./types.ts";
 
+/** 잘못된 가계부 입력 — REST에서는 400, 에이전트에서는 수정 가능한 툴 오류로 전달한다. */
+export class LedgerValidationError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "LedgerValidationError";
+	}
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
-function assertDate(value: string, field: string): void {
-	if (!DATE_RE.test(value)) throw new Error(`${field}는 YYYY-MM-DD 형식이어야 합니다: ${value}`);
+function assertDate(value: unknown, field: string): void {
+	if (typeof value !== "string" || value.length !== 10 || !DATE_RE.test(value)) {
+		throw new LedgerValidationError(`${field}는 YYYY-MM-DD 형식의 문자열이어야 합니다`);
+	}
+	const [year = 0, month = 0, day = 0] = value.split("-").map(Number);
+	const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+	// Date의 자동 날짜 보정과 Date.UTC의 0~99년 처리에 의존하지 않는다.
+	const maxDay = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+	if (year < 1 || day < 1 || day > maxDay) {
+		throw new LedgerValidationError(`${field}는 실제로 존재하는 날짜여야 합니다: ${value}`);
+	}
 }
 
-function assertMonth(value: string, field: string): void {
-	if (!MONTH_RE.test(value)) throw new Error(`${field}는 YYYY-MM 형식이어야 합니다: ${value}`);
+function assertMonth(value: unknown, field: string): void {
+	if (typeof value !== "string" || value.length !== 7 || !MONTH_RE.test(value)) {
+		throw new LedgerValidationError(`${field}는 YYYY-MM 형식의 문자열이어야 합니다`);
+	}
+	const [year = 0, month = 0] = value.split("-").map(Number);
+	if (year < 1 || month < 1 || month > 12) {
+		throw new LedgerValidationError(`${field}는 실제로 존재하는 월이어야 합니다: ${value}`);
+	}
 }
 
 function assertAmount(value: number): void {
-	if (!Number.isInteger(value)) throw new Error(`금액은 정수(원 단위)여야 합니다: ${value}`);
-	if (value <= 0) throw new Error(`금액은 양수여야 합니다 (수입/지출은 type으로 구분): ${value}`);
+	if (!Number.isInteger(value)) throw new LedgerValidationError(`금액은 정수(원 단위)여야 합니다: ${value}`);
+	if (value <= 0) throw new LedgerValidationError(`금액은 양수여야 합니다 (수입/지출은 type으로 구분): ${value}`);
+}
+
+function assertTxType(value: unknown): void {
+	if (value !== "expense" && value !== "income") {
+		throw new LedgerValidationError("type은 expense 또는 income이어야 합니다");
+	}
 }
 
 /** 입력의 (양수 금액 + type)을 DB의 부호 있는 정수로 변환. */
 function signed(amount: number, type: TxInput["type"]): number {
+	assertTxType(type);
 	return type === "expense" ? -amount : amount;
 }
 
@@ -91,12 +121,12 @@ export async function listTransactions(cfg: D1Config, ledgerId: string, filter: 
 	const where: string[] = ["ledger_id = ?"];
 	const params: D1Param[] = [ledgerId];
 
-	if (filter.from) {
+	if (filter.from !== undefined) {
 		assertDate(filter.from, "from");
 		where.push("date >= ?");
 		params.push(filter.from);
 	}
-	if (filter.to) {
+	if (filter.to !== undefined) {
 		assertDate(filter.to, "to");
 		where.push("date <= ?");
 		params.push(filter.to);
@@ -109,7 +139,8 @@ export async function listTransactions(cfg: D1Config, ledgerId: string, filter: 
 		where.push("member = ?");
 		params.push(filter.member);
 	}
-	if (filter.type) {
+	if (filter.type !== undefined) {
+		assertTxType(filter.type);
 		where.push(filter.type === "expense" ? "amount < 0" : "amount > 0");
 	}
 
@@ -158,8 +189,8 @@ export async function updateTransaction(cfg: D1Config, ledgerId: string, id: str
 		params.push(patch.date);
 	}
 	if (patch.amount !== undefined || patch.type !== undefined) {
-		const amount = patch.amount ?? Math.abs(current.amount);
-		const type = patch.type ?? (current.amount < 0 ? "expense" : "income");
+		const amount = patch.amount === undefined ? Math.abs(current.amount) : patch.amount;
+		const type = patch.type === undefined ? (current.amount < 0 ? "expense" : "income") : patch.type;
 		assertAmount(amount);
 		sets.push("amount = ?");
 		params.push(signed(amount, type));

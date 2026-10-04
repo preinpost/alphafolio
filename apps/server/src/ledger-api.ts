@@ -14,6 +14,7 @@ import {
 	ensureMigrated,
 	exportAll,
 	inviteMember,
+	LedgerValidationError,
 	ledgerOfTransaction,
 	listIncomingInvites,
 	listLedgerInvites,
@@ -101,6 +102,15 @@ export async function handleLedger(
 	/** 인증된 사용자 = 기록자. */
 	member: string,
 ): Promise<unknown | undefined> {
+	try {
+		return await handleLedgerRequest(req, url, rest, member);
+	} catch (err) {
+		if (err instanceof LedgerValidationError) throw new HttpError(400, err.message);
+		throw err;
+	}
+}
+
+async function handleLedgerRequest(req: IncomingMessage, url: URL, rest: string, member: string): Promise<unknown | undefined> {
 	const method = req.method ?? "GET";
 	const q = url.searchParams;
 	/** 대상 가계부 id — 내가 멤버인 것만 */
@@ -134,7 +144,7 @@ export async function handleLedger(
 		return addTransaction(c, await ledger(c), {
 			date: required(body.date as string, "date"),
 			amount: Number(body.amount),
-			type: (body.type as TxType) ?? "expense",
+			type: body.type === undefined ? "expense" : (body.type as TxType),
 			category: body.category as string | undefined,
 			merchant: body.merchant as string | undefined,
 			memo: body.memo as string | undefined,

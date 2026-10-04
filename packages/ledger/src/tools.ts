@@ -17,6 +17,7 @@ import {
 	budgetStatus,
 	deleteTransaction,
 	ledgerOfTransaction,
+	LedgerValidationError,
 	listTransactions,
 	setBudget,
 	summary,
@@ -92,14 +93,19 @@ const PERIOD_ENUM = Type.Union(
  */
 function resolveDate(params: { date?: string; daysAgo?: number }): string {
 	if (params.daysAgo !== undefined) return dateFromDaysAgo(params.daysAgo);
-	if (params.date) return params.date;
+	if (params.date !== undefined) return params.date;
 	return todayKST();
 }
 
 /** 기간 인자 해석 — period 우선, 없으면 from/to, 둘 다 없으면 이번 달. */
 function resolveRange(params: { period?: string; from?: string; to?: string }): { from: string; to: string } {
 	if (params.period) return resolvePeriod(params.period as Period);
-	if (params.from && params.to) return { from: params.from, to: params.to };
+	if (params.from !== undefined || params.to !== undefined) {
+		if (params.from === undefined || params.to === undefined) {
+			throw new LedgerValidationError("절대 기간을 지정하려면 from과 to가 모두 필요합니다");
+		}
+		return { from: params.from, to: params.to };
+	}
 	return resolvePeriod("this_month");
 }
 
@@ -154,9 +160,12 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 		label: "가계부 기록",
 		description:
 			"가계부에 거래 한 건을 기록한다. 사용자가 자연어로 말한 지출/수입을 구조화해서 넣는다. " +
-			`날짜를 말하지 않으면 오늘(${todayKST()})로 본다. 금액은 원 단위 양수 정수이고 수입/지출은 type으로 구분한다.`,
+			"날짜를 말하지 않으면 실행 시점의 오늘(KST)로 본다. 오늘·어제 같은 상대 날짜는 daysAgo(오늘=0, 어제=1)를 쓰고 " +
+			"사용자가 절대 날짜를 명시했을 때만 date를 쓴다. 둘 다 넣으면 daysAgo를 우선한다. " +
+			"금액은 원 단위 양수 정수이고 수입/지출은 type으로 구분한다.",
 		parameters: Type.Object({
-			date: Type.String({ description: "거래 날짜 YYYY-MM-DD" }),
+			date: Type.Optional(Type.String({ description: "거래 날짜 YYYY-MM-DD (사용자가 절대 날짜를 명시했을 때만)" })),
+			daysAgo: Type.Optional(Type.Integer({ minimum: 0, maximum: 3650, description: "KST 기준 N일 전 (오늘=0, 어제=1). 날짜 인자를 모두 생략하면 오늘" })),
 			amount: Type.Integer({ description: "금액 (원 단위 양수 정수)" }),
 			type: Type.Union([Type.Literal("expense"), Type.Literal("income")], {
 				description: "expense=지출, income=수입",
@@ -168,9 +177,10 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 			ledger: LEDGER_PARAM,
 		}),
 		execute: async (_id, params) => {
+			const date = resolveDate(params);
 			const { cfg, ledger } = await open(params.ledger);
 			const tx = await addTransaction(cfg, ledger.id, {
-				date: params.date,
+				date,
 				amount: params.amount,
 				type: params.type as TxType,
 				category: params.category,
@@ -376,7 +386,7 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 		}),
 		execute: async (_id, params) => {
 			const action = params.action as "set" | "status";
-			const month = params.month ?? currentMonthKST();
+			const month = params.month === undefined ? currentMonthKST() : params.month;
 			const { cfg, ledger } = await open(params.ledger);
 
 			if (action === "set") {
