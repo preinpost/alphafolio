@@ -36,6 +36,7 @@ import {
 	type Consensus,
 	type FinancialPeriod,
 } from "./financials.ts";
+import { coinPrice, fetchCryptoChart, normalizeCryptoSymbol, quoteAsset, type CryptoPeriod } from "./crypto-chart.ts";
 import { analyze, type IndicatorSnapshot } from "./indicators.ts";
 import type { KisContext } from "./kis/client.ts";
 import { KisCredentialsMissingError } from "./kis/types.ts";
@@ -91,6 +92,25 @@ function signed(n: number, currency: "KRW" | "USD"): string {
 	return `${n >= 0 ? "+" : "-"}${money(Math.abs(n), currency)}`;
 }
 
+/** market_technical 의 코인 경로 — fetchChart 와 같은 모양(symbol·name·bars·note)에 호가 자산을 더한다 */
+async function cryptoTechnicalChart(symbol: string, period: CryptoPeriod) {
+	const chart = await fetchCryptoChart(symbol, period).catch((err: unknown) => {
+		// "ETH" 처럼 코인 이름만 온 경우 — 모델이 심볼을 고쳐 다시 부르게 한다
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(quoteAsset(normalizeCryptoSymbol(symbol)) ? msg : `${msg} — Binance 심볼은 호가 자산까지 붙인다 (ETHUSDT)`);
+	});
+	const openBar = chart.lastOpen ? chart.bars.at(-1) : undefined;
+	return {
+		symbol: chart.symbol,
+		name: chart.symbol,
+		quote: chart.quote,
+		bars: chart.bars,
+		note:
+			"Binance 현물 기준 · 봉 경계 UTC 0시(한국 09:00)" +
+			(openBar ? ` · 마지막 봉(${openBar.date}~)은 진행 중이라 현재가·지표가 마감 전까지 바뀐다` : ""),
+	};
+}
+
 export interface BrokerToolDeps {
 	/** 증권사 접근자 — 설정된 곳만 실제로 호출된다 (KIS·토스 병행 가능). */
 	brokers: BrokerAccess;
@@ -122,7 +142,8 @@ export interface TechnicalDetails {
 	symbol: string;
 	name: string;
 	period: string;
-	currency: "KRW" | "USD";
+	/** KRW · USD · 코인은 호가 자산 (USDT 등, 모르면 "") */
+	currency: string;
 	snapshot: IndicatorSnapshot | null;
 	note?: string;
 }
@@ -460,10 +481,17 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			"기간별 시세로 기술적 지표를 계산한다 — 이동평균(5/20/60)·RSI(14)·MACD·볼린저·ATR·" +
 			"지지/저항·추세·신호 라벨. '차트 분석', '추세 어때?', 'RSI 얼마야?' 같은 **지표 확인** 요청에 쓴다. " +
 				"매수·매도 판단이나 손절가가 필요하면 이 툴이 아니라 market_timing 을 쓴다. " +
+			"코인은 market='binance' + Binance 심볼(ETHUSDT 처럼 호가 자산까지) — 키 없이 된다. " +
+			"'ETH' 처럼 코인 이름만 주식 티커로 넘기면 같은 이름의 미국 상장 상품이 걸린다. " +
 			"⚠️ 지표는 이 툴이 계산한다. 직접 계산하거나 추정하지 말고 반환된 숫자만 인용한다. " +
 			"봉 데이터는 반환하지 않으므로 개별 봉 값을 나열하려 하지 않는다.",
 		parameters: Type.Object({
-			symbol: Type.String({ description: "6자리 국내 종목코드 또는 해외 티커" }),
+			symbol: Type.String({ description: "6자리 국내 종목코드 · 해외 티커 · Binance 심볼(ETHUSDT)" }),
+			market: Type.Optional(
+				Type.Union([Type.Literal("krx"), Type.Literal("us"), Type.Literal("binance")], {
+					description: "코인은 binance (필수). 주식은 생략해도 종목코드로 알아서 찾는다",
+				}),
+			),
 			period: Type.Optional(
 				Type.Union([Type.Literal("D"), Type.Literal("W"), Type.Literal("M")], {
 					description: "D=일봉(기본), W=주봉, M=월봉",
@@ -472,8 +500,9 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 		}),
 		execute: async (_id, params) => {
 			const period = (params.period as "D" | "W" | "M" | undefined) ?? "D";
-			const chart = await fetchChart(deps.brokers, params.symbol, period);
-			const currency: "KRW" | "USD" = marketOf(chart.symbol) === "KR" ? "KRW" : "USD";
+			const chart = params.market === "binance" ? await cryptoTechnicalChart(params.symbol, period) : await fetchChart(deps.brokers, params.symbol, period);
+			const currency = "quote" in chart ? chart.quote : marketOf(chart.symbol) === "KR" ? "KRW" : "USD";
+			const fmt = (v: number): string => ("quote" in chart ? coinPrice(v, chart.quote) : money(v, currency as "KRW" | "USD"));
 			const snapshot = analyze(chart.bars);
 
 			const details: TechnicalDetails = {
@@ -494,10 +523,10 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 			}
 
 			const label = period === "D" ? "일봉" : period === "W" ? "주봉" : "월봉";
-			const ma = (v: number | null): string => (v === null ? "—" : money(v, currency));
+			const ma = (v: number | null): string => (v === null ? "—" : fmt(v));
 			const lines = [
-				`${chart.name} (${chart.symbol}) ${label} ${snapshot.bars}개 · 기준 ${snapshot.lastDate}`,
-				`현재가 ${money(snapshot.price, currency)} · 기간 ${snapshot.periodChangePct >= 0 ? "+" : ""}${snapshot.periodChangePct}%`,
+				`${chart.name === chart.symbol ? chart.symbol : `${chart.name} (${chart.symbol})`} ${label} ${snapshot.bars}개 · 기준 ${snapshot.lastDate}`,
+				`현재가 ${fmt(snapshot.price)} · 기간 ${snapshot.periodChangePct >= 0 ? "+" : ""}${snapshot.periodChangePct}%`,
 				`MA5 ${ma(snapshot.ma5)} / MA20 ${ma(snapshot.ma20)} / MA60 ${ma(snapshot.ma60)} → ${snapshot.trend}`,
 				`RSI ${snapshot.rsi ?? "—"}` +
 					(snapshot.macdHistogram !== null
@@ -505,8 +534,8 @@ export function createBrokerTools(deps: BrokerToolDeps) {
 						: ""),
 				`볼린저 ${ma(snapshot.bollingerLower)} ~ ${ma(snapshot.bollingerUpper)}` +
 					(snapshot.bollingerPct !== null ? ` (밴드 내 ${snapshot.bollingerPct}%)` : ""),
-				`지지 ${ma(snapshot.support)} / 저항 ${ma(snapshot.resistance)} · 기간 고 ${money(snapshot.periodHigh, currency)} 저 ${money(snapshot.periodLow, currency)}`,
-				snapshot.atr !== null ? `ATR ${money(snapshot.atr, currency)} (가격의 ${snapshot.atrPct}%)` : "",
+				`지지 ${ma(snapshot.support)} / 저항 ${ma(snapshot.resistance)} · 기간 고 ${fmt(snapshot.periodHigh)} 저 ${fmt(snapshot.periodLow)}`,
+				snapshot.atr !== null ? `ATR(14) ${fmt(snapshot.atr)} (가격의 ${snapshot.atrPct}%)` : "",
 				snapshot.signals.length > 0 ? `신호: ${snapshot.signals.join(" · ")}` : "신호: 특이사항 없음",
 				chart.note ?? "",
 			].filter(Boolean);

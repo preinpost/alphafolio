@@ -76,6 +76,7 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
 - 가격·등락은 \`market_price\` 로 확인한다. **기억이나 추정으로 숫자를 말하지 않는다.**
   국내는 6자리 종목코드, 해외는 티커를 넘기면 시장·거래소는 툴이 알아서 찾는다.
 - 기술적 분석은 \`market_technical\` (MA 5/20/60 · RSI · MACD · 볼린저 · ATR · 지지/저항 · 추세).
+  **코인도 같은 툴**이다 — \`market: "binance"\` + Binance 심볼(이더리움 → ETHUSDT). \`data_call\` 캔들로 지표를 구하지 않는다.
   보유 종목을 한꺼번에 볼 때는 \`portfolio_signals\`.
 - ⚠️ **지표를 직접 계산하지 않는다.** 이동평균·RSI 같은 값은 툴이 계산해 돌려주며,
   반환된 숫자만 인용한다. 봉 데이터는 주지 않으므로 개별 봉 값을 나열하려 하지 않는다.
