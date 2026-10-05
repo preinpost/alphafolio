@@ -3,14 +3,16 @@
  *
  * 검증(validateEquityOrder)은 순수 함수 — 가격 0.01 · 수량 stepSize(소수점 주식) · 최소 주문금액 · 기준가 허용 범위 · 거래 가능 방향.
  * 단위에 안 맞는 값은 내림 보정하고 카드에 알린다. 카드는 Binance 현물 카드 모양을 쓴다 (market = "stock").
+ * 본주 대비(orderGap) — Binance 호가가 본주(KIS·토스 현재가)와 벌어지는 일이 잦아, 괴리와 이 주문이 본주보다 몇 % 불리한지를 카드에 싣는다.
  */
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { BinanceStockAction, OrderAction } from "../actions.ts";
 import type { BrokerAccess } from "../portfolio.ts";
+import { fetchQuote } from "../quote.ts";
 import { cmpDec, floorToStep, mulDec, pctDiff } from "./decimal.ts";
 import type { BinanceOrderCard } from "./order-tool.ts";
-import { EQUITY_QUOTE, EQUITY_TICK, equityOpenOrders, equityPosition, equityQuote, equityRules, tradabilityProblem, type EquityRules } from "./stocks.ts";
+import { EQUITY_QUOTE, EQUITY_TICK, equityOpenOrders, equityPosition, equityQuote, equityRules, premiumOf, tradabilityProblem, type EquityRules } from "./stocks.ts";
 import type { BinanceCreds } from "./trade.ts";
 
 const trim = (v: string): string => (v.includes(".") ? v.replace(/0+$/, "").replace(/\.$/, "") : v);
@@ -113,6 +115,63 @@ export function validateEquityOrder(req: EquityRequest, rules: EquityRules, last
 	return out;
 }
 
+export type StockGap = NonNullable<BinanceOrderCard["gap"]>;
+
+/** 불리할 때 경고하는 선 (%) */
+const GAP_WARN_PCT = 1;
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * 본주 대비 (순수) — 호가·본주 시세가 없으면 null.
+ * 불리 % 는 매수면 본주보다 비싸게, 매도면 싸게 사고파는 만큼 (+ 불리 · − 유리). 시장가는 매수 ask · 매도 bid 로 본다.
+ */
+export function orderGap(
+	q: { bid: number; ask: number } | null,
+	underlying: { price: number; source: string } | null,
+	side: "BUY" | "SELL",
+	limitPrice?: string,
+): StockGap | null {
+	const p = underlying ? premiumOf(q, underlying.price) : null;
+	if (!p || !q || !underlying) return null;
+	const cost = (pct: number | null): number | null => (pct === null ? null : side === "BUY" ? pct : 0 - pct);
+	const limit = limitPrice && Number(limitPrice) > 0 ? round2(((Number(limitPrice) - underlying.price) / underlying.price) * 100) : null;
+	return {
+		bid: q.bid > 0 ? q.bid : null,
+		ask: q.ask > 0 ? q.ask : null,
+		underlying: underlying.price,
+		source: underlying.source,
+		pct: p.pct,
+		marketCostPct: cost(side === "BUY" ? p.askPct : p.bidPct),
+		limitCostPct: cost(limit),
+		spreadPct: p.spreadPct,
+	};
+}
+
+const signed = (n: number): string => `${n >= 0 ? "+" : ""}${n}%`;
+const costText = (n: number): string => (n >= 0 ? `${n}% 불리` : `${0 - n}% 유리`);
+
+/** 에이전트에게 주는 본주 대비 한 줄 */
+export function gapText(g: StockGap, side: "BUY" | "SELL"): string {
+	const verb = side === "BUY" ? "사면" : "팔면";
+	return (
+		`본주 대비: Binance 매수호가 ${g.bid ?? "—"} / 매도호가 ${g.ask ?? "—"} vs 본주 $${g.underlying} [${g.source}] → 괴리 ${signed(g.pct)}` +
+		`${g.marketCostPct !== null ? ` · 시장가로 ${verb} 본주보다 ${costText(g.marketCostPct)}` : ""}` +
+		`${g.limitCostPct !== null ? ` · 지정가로 ${verb} 본주보다 ${costText(g.limitCostPct)}` : ""}` +
+		`${g.spreadPct !== null ? ` · 호가 폭 ${g.spreadPct}%` : ""}` +
+		"\n  ※ Binance 호가는 최대 ~5초, 본주 시세는 증권사 조회 시점 — 장 마감·장 밖에는 괴리가 커 보일 수 있다"
+	);
+}
+
+/** 불리 % 가 선을 넘으면 경고 (순수) */
+export function gapWarnings(g: StockGap, side: "BUY" | "SELL", type: "LIMIT" | "MARKET"): string[] {
+	const verb = side === "BUY" ? "비싸게 삽니다" : "싸게 팝니다";
+	const out: string[] = [];
+	if (type === "MARKET" && g.marketCostPct !== null && g.marketCostPct >= GAP_WARN_PCT)
+		out.push(`시장가 — 지금 호가로는 본주($${g.underlying})보다 약 ${g.marketCostPct}% ${verb}. 지정가를 고려해 보세요.`);
+	if (type === "LIMIT" && g.limitCostPct !== null && g.limitCostPct >= GAP_WARN_PCT) out.push(`지정가가 본주($${g.underlying})보다 ${g.limitCostPct}% 불리합니다 — ${verb}.`);
+	return out;
+}
+
 function connected<T>(make: (() => T) | undefined): T | null {
 	if (!make) return null;
 	try {
@@ -149,13 +208,17 @@ export function createBinanceStockOrderTool(deps: { brokers: BrokerAccess; prepa
 			const symbol = params.symbol.trim().toUpperCase().replace(/[^A-Z.]/g, "");
 			const rules = await equityRules(creds, symbol);
 			if (!rules) throw new Error(`Binance 에서 거래할 수 없는 미국 주식입니다: ${symbol}`);
-			const q = await equityQuote(creds, symbol).catch(() => null);
+			// 본주 시세는 KIS·토스 — 없거나 실패해도 주문은 준비한다 (본주 대비만 빠진다)
+			const [q, underlying] = await Promise.all([
+				equityQuote(creds, symbol).catch(() => null),
+				params.action === "place" ? fetchQuote(deps.brokers, symbol).then((u) => ({ price: u.price, source: u.source }), () => null) : null,
+			]);
 			const last = q && q.bid > 0 && q.ask > 0 ? trim(floorToStep(String((q.bid + q.ask) / 2), "0.0001")) : q?.ask ? String(q.ask) : null;
 
 			const card: BinanceOrderCard = {
 				kind: "binance-order-card", market: "stock", ok: false, token: null, expiresAt: null, action: params.action, symbol, base: symbol, quote: EQUITY_QUOTE,
 				side: params.side ?? null, type: params.type ?? null, quantity: null, quoteQuantity: null, price: null, estimatedQuote: null,
-				lastPrice: last, balance: null, minNotional: Number(rules.minNotional) > 0 ? trim(rules.minNotional) : null,
+				lastPrice: last, balance: null, minNotional: Number(rules.minNotional) > 0 ? trim(rules.minNotional) : null, gap: null,
 				original: null, lines: [], orders: [], warnings: [], errors: [],
 			};
 			let action: BinanceStockAction | null = null;
@@ -185,6 +248,8 @@ export function createBinanceStockOrderTool(deps: { brokers: BrokerAccess; prepa
 					card.price = v.price ?? null;
 					card.estimatedQuote = v.estimated ?? null;
 					if (held !== null) card.balance = { asset: `${symbol} (체결 내역 추정)`, free: String(held) };
+					card.gap = orderGap(q, underlying, params.side, params.type === "LIMIT" ? v.price : undefined);
+					if (card.gap) card.warnings.push(...gapWarnings(card.gap, params.side, params.type));
 					if (v.errors.length === 0) {
 						action = {
 							kind: "binance-stock-place", broker: "binance_stock", symbol, quote: EQUITY_QUOTE, side: params.side, type: params.type,
@@ -196,8 +261,13 @@ export function createBinanceStockOrderTool(deps: { brokers: BrokerAccess; prepa
 			}
 			card.warnings.push("Binance 미국 주식 — Nest Trading(ADGM) → Alpaca 체결·보관. 앱에서 미국 주식 약관에 동의해 둬야 주문이 됩니다. 산 주식은 토큰(bStock)으로 바꾸지 않습니다.");
 
+			const px =
+				card.gap && card.side
+					? `\n${gapText(card.gap, card.side)}`
+					: q
+						? `\n현재 호가: 매수 $${q.bid} · 매도 $${q.ask}${last ? ` (중간 $${last})` : ""}${params.action === "place" ? " — 본주 시세를 못 받아 괴리는 못 봤다" : ""}`
+						: "";
 			if (!action || card.errors.length) {
-				const px = q ? `\n현재 호가: 매수 $${q.bid} · 매도 $${q.ask}${last ? ` (중간 $${last})` : ""}` : "";
 				return { content: [{ type: "text" as const, text: `Binance 미국 주식 ${params.action} 을(를) 준비하지 못했습니다 (${symbol}).\n${card.errors.map((e) => `- ${e}`).join("\n")}${px}` }], details: card };
 			}
 			const { token, expiresAt } = deps.prepareOrder(action);
@@ -209,7 +279,12 @@ export function createBinanceStockOrderTool(deps: { brokers: BrokerAccess; prepa
 					? `${action.side === "BUY" ? "매수" : "매도"} ${action.quantity ? `${action.quantity}주` : `${action.notional} USDC어치`} ${action.type === "LIMIT" ? `지정가 $${action.price} (${action.session})` : "시장가"}`
 					: `취소 ${action.original.orderId.slice(0, 12)}`;
 			return {
-				content: [{ type: "text" as const, text: `확인이 필요합니다 — [Binance 미국 주식] ${symbol} ${what}${card.warnings.length ? `\n⚠️ ${card.warnings.join("\n⚠️ ")}` : ""}\n화면의 카드에서 사용자가 [확인] 을 눌러야 실행됩니다.` }],
+				content: [
+					{
+						type: "text" as const,
+						text: `확인이 필요합니다 — [Binance 미국 주식] ${symbol} ${what}${action.kind === "binance-stock-place" ? px : ""}${card.warnings.length ? `\n⚠️ ${card.warnings.join("\n⚠️ ")}` : ""}\n화면의 카드에서 사용자가 [확인] 을 눌러야 실행됩니다.`,
+					},
+				],
 				details: card,
 			};
 		},

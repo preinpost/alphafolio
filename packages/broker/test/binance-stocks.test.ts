@@ -11,7 +11,7 @@
  */
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { validateEquityOrder } from "../src/binance/stock-order-tool.ts";
+import { gapText, gapWarnings, orderGap, validateEquityOrder } from "../src/binance/stock-order-tool.ts";
 import {
 	clearEquityRulesCache,
 	equityClientId,
@@ -138,6 +138,43 @@ describe("수동 주문 검증 (binance_stock_order)", () => {
 		const v = validateEquityOrder({ side: "SELL", type: "MARKET", quantity: "2" }, AAPL, "332", 1.5);
 		assert.deepEqual(v.errors, []);
 		assert.ok(v.warnings.some((w) => /보유\(1\.5주\)보다 많습니다/.test(w)));
+	});
+});
+
+describe("본주 대비 — 괴리·시장가 불리 % (binance_stock_order)", () => {
+	const q = { bid: 40.2, ask: 40.6 };
+	const u = { price: 40, source: "kis" };
+
+	it("매수 — 시장가는 ask, 본주보다 비싸면 + 불리", () => {
+		const g = orderGap(q, u, "BUY")!;
+		assert.equal(g.pct, 1);
+		assert.equal(g.marketCostPct, 1.5);
+		assert.equal(g.limitCostPct, null);
+		assert.equal(g.spreadPct, 0.99);
+		assert.deepEqual(gapWarnings(g, "BUY", "MARKET").length, 1);
+		assert.match(gapText(g, "BUY"), /괴리 \+1% · 시장가로 사면 본주보다 1\.5% 불리/);
+	});
+
+	it("매도 — 시장가는 bid, 본주보다 비싸게 팔면 − (유리)", () => {
+		const g = orderGap(q, u, "SELL")!;
+		assert.equal(g.marketCostPct, -0.5);
+		assert.deepEqual(gapWarnings(g, "SELL", "MARKET"), []);
+		assert.match(gapText(g, "SELL"), /시장가로 팔면 본주보다 0\.5% 유리/);
+	});
+
+	it("지정가 — 지정가 기준 불리 %, 선(1%)을 넘으면 경고", () => {
+		assert.equal(orderGap(q, u, "BUY", "40.2")!.limitCostPct, 0.5);
+		assert.deepEqual(gapWarnings(orderGap(q, u, "BUY", "40.2")!, "BUY", "LIMIT"), []);
+		const high = orderGap(q, u, "BUY", "40.8")!;
+		assert.equal(high.limitCostPct, 2);
+		assert.match(gapWarnings(high, "BUY", "LIMIT")[0]!, /2% 불리/);
+		assert.equal(orderGap(q, u, "SELL", "39.6")!.limitCostPct, 1);
+	});
+
+	it("본주 시세·호가가 없으면 null", () => {
+		assert.equal(orderGap(q, null, "BUY"), null);
+		assert.equal(orderGap(null, u, "BUY"), null);
+		assert.equal(orderGap({ bid: 0, ask: 0 }, u, "BUY"), null);
 	});
 });
 
@@ -307,7 +344,7 @@ describe("계좌 조회 (binance_stock_account)", () => {
 	});
 
 	it("괴리 — 중간가·사면·팔면·호가 폭, 호가나 본주가 없으면 null", async () => {
-		const { premiumOf } = await import("../src/binance/stock-account-tool.ts");
+		const { premiumOf } = await import("../src/binance/stocks.ts");
 		const p = premiumOf({ bid: 405.61, ask: 406.43 }, 406.7)!;
 		assert.equal(p.binance, 406.02);
 		assert.equal(p.pct, -0.17);

@@ -104,6 +104,20 @@ export interface BinanceOrderCard {
 	lastPrice: string | null;
 	balance: { asset: string; free: string } | null;
 	minNotional: string | null;
+	/** 미국 주식 — Binance 호가 vs 본주 현재가(KIS·토스). 본주 시세가 없거나 주문 준비가 아니면 null. 불리 % 는 + 불리 · − 유리 */
+	gap?: {
+		bid: number | null;
+		ask: number | null;
+		underlying: number;
+		source: string;
+		/** Binance 중간가 vs 본주 % */
+		pct: number;
+		/** 시장가로 지금 체결되면 (매수 ask · 매도 bid) 본주보다 불리한 % */
+		marketCostPct: number | null;
+		/** 지정가 기준 본주보다 불리한 % (지정가일 때만) */
+		limitCostPct: number | null;
+		spreadPct: number | null;
+	} | null;
 	original: { orderId: number | string; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string } | null;
 	lines: Array<{ label: string; text: string; pct: number | null }>;
 	orders: Array<{ orderId: number | string; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string }>;

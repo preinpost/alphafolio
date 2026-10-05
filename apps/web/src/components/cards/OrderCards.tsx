@@ -345,6 +345,7 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 					)}
 				</div>
 			)}
+			{card.gap && card.side && <StockGapLine gap={card.gap} side={card.side} type={card.type} />}
 			{card.action === "cancel" && card.original && (
 				<div className="mt-2 text-sm text-ink">
 					<span className={card.original.side === "BUY" ? "text-up" : "text-down"}>{card.original.side === "BUY" ? "매수" : "매도"}</span>{" "}
@@ -386,12 +387,39 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 			)}
 			<div className="mt-2 text-[11px] text-faint">
 				{card.lastPrice ? `현재가 ${card.lastPrice} ${stock ? "USD" : card.quote}` : ""}
+				{card.gap ? ` (매수호가 ${card.gap.bid ?? "—"} / 매도호가 ${card.gap.ask ?? "—"}${card.gap.spreadPct !== null ? ` · 호가 폭 ${card.gap.spreadPct}%` : ""})` : ""}
 				{card.balance ? ` · 잔고 ${card.balance.asset} ${card.balance.free}` : ""}
 				{card.minNotional ? ` · 최소 주문 ${card.minNotional} ${card.quote}` : ""}
 				{card.original ? ` · 원주문 #${card.original.orderId}` : ""}
 			</div>
 			<Warnings items={card.warnings} />
 			<ConfirmBar c={c} verb={verb} />
+		</div>
+	);
+}
+
+/** 미국 주식 — 본주 대비. Binance 호가가 본주와 벌어지는 일이 잦다 (1% 이상 불리하면 빨갛게) */
+function StockGapLine({ gap, side, type }: { gap: NonNullable<BinanceOrderCard["gap"]>; side: "BUY" | "SELL"; type: string | null }) {
+	const verb = side === "BUY" ? "사면" : "팔면";
+	const cost = (label: string, n: number) => (
+		<span>
+			{label} 본주보다{" "}
+			<b className={n >= 1 ? "text-danger" : "text-ink"}>
+				{Math.abs(n)}% {n >= 0 ? "불리" : "유리"}
+			</b>
+		</span>
+	);
+	return (
+		<div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
+			<span>
+				본주 ${gap.underlying} · 괴리{" "}
+				<b className="text-ink">
+					{gap.pct >= 0 ? "+" : ""}
+					{gap.pct}%
+				</b>
+			</span>
+			{gap.marketCostPct !== null && cost(`시장가로 ${verb}`, gap.marketCostPct)}
+			{type === "LIMIT" && gap.limitCostPct !== null && cost(`지정가로 ${verb}`, gap.limitCostPct)}
 		</div>
 	);
 }

@@ -27,10 +27,13 @@ import {
 	equityTicker,
 	feesFromOrders,
 	fundingAssets,
+	midOf,
+	premiumOf,
 	type EquityFees,
 	type EquityHolding,
 	type EquityOrder,
 	type FundingAsset,
+	type Premium,
 } from "./stocks.ts";
 import { lastPrice, type BinanceCreds } from "./trade.ts";
 import { spotWallet } from "./wallet.ts";
@@ -42,46 +45,8 @@ const MAX_TOKENS = 10;
 /** 최근 체결 주문 몇 건을 보여 줄지 */
 const RECENT_FILLED = 5;
 
-export interface Premium {
-	/** Binance 중간가 (bid·ask 중 하나만 있으면 그 값) */
-	binance: number;
-	underlying: number;
-	/** (Binance 중간가 − 본주) / 본주 % */
-	pct: number;
-	/** 지금 사면(ask) · 팔면(bid) 본주 대비 % */
-	askPct: number | null;
-	bidPct: number | null;
-	/** 호가 폭 / 중간가 % */
-	spreadPct: number | null;
-}
-
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 const rel = (a: number, b: number): number => round2(((a - b) / b) * 100);
-
-/** 호가 중간가 (순수) — 한쪽만 있으면 그 값, 비었으면 null */
-function midOf(q: { bid: number; ask: number } | null): number | null {
-	if (!q) return null;
-	const bid = q.bid > 0 ? q.bid : null;
-	const ask = q.ask > 0 ? q.ask : null;
-	return bid && ask ? (bid + ask) / 2 : (ask ?? bid);
-}
-
-/** 괴리 (순수) — 호가가 비었거나 본주 가격이 없으면 null */
-export function premiumOf(q: { bid: number; ask: number } | null, underlying: number): Premium | null {
-	if (!q || !(underlying > 0)) return null;
-	const bid = q.bid > 0 ? q.bid : null;
-	const ask = q.ask > 0 ? q.ask : null;
-	const mid = midOf(q);
-	if (!mid) return null;
-	return {
-		binance: round2(mid),
-		underlying,
-		pct: rel(mid, underlying),
-		askPct: ask ? rel(ask, underlying) : null,
-		bidPct: bid ? rel(bid, underlying) : null,
-		spreadPct: bid && ask ? round2(((ask - bid) / mid) * 100) : null,
-	};
-}
 
 const sign = (n: number): string => `${n >= 0 ? "+" : ""}${n}%`;
 const usd = (n: number): string => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;

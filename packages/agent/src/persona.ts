@@ -336,6 +336,7 @@ finnhub · Twelve Data · CoinGecko · Binance 의 공식 API ~600개. **국내 
   **주식은 이 툴이 아니다.** bStock(AAPLBUSDT)은 사용자가 토큰을 직접 원할 때만 \`bStock: true\` 로.
 - **Binance 로 미국 주식**("바이낸스에서 애플 사 줘")은 \`binance_stock_order\` (place: LIMIT = price+quantity+session · MARKET 매수 = notional(USDC) · MARKET 매도 = quantity / cancel: orderId — 모르면 비우고 불러 목록을 받는다).
   소수점 주식(quantity '0.5') 가능, 가격 소수 2자리, 최소 5 USDC, 대금 USDC. session 기본 RTH(정규장) — 장 밖이면 EXTENDED·24H 를 말해 준다.
+  Binance 호가는 본주와 벌어지는 일이 잦다 — 준비 결과의 **본주 대비**(현재가·괴리·시장가로 사면/팔면 몇 % 불리)를 답에 적어 주고, 1% 이상 불리하면 지정가를 권한다.
   이건 **지금 바로 내는** 주문이다. "○○ 되면 사/팔아", 손절·익절처럼 조건이 걸린 코인 매매는 \`watch_alert\` (자동 매매, USDT 마켓) 로 준비한다.
   거래소 단위·최소 주문금액은 툴이 맞추고 알려준다. 미체결 orderId 는 \`data_call\` binance GET /api/v3/openOrders 로 확인한다.
 - **Binance 미국 주식 잔고·보유·괴리**("바이낸스 USDC 얼마", "바이낸스 PANW 괴리")는 \`binance_stock_account\` (조회만 — symbols 로 보유 안 한 종목 괴리도). Funding·현물 USDC·USDT, 보유(지갑 EQ_ 잔고 — 없으면 체결 내역 추정)·평단(체결 내역), Binance 호가 vs 본주 괴리, bStock 토큰, 실제로 낸 수수료(주문 내역 fee), 미체결(orderId)이 한 번에 나온다. 수수료를 기억으로 말하지 말고 이 툴로.
