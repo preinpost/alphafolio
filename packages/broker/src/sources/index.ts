@@ -11,5 +11,5 @@ import type { AssetSource } from "./types.ts";
 export const ASSET_SOURCES: readonly AssetSource[] = [kisSource, tossSource, binanceSource, manualSource];
 
 export type { AssetSource, SourceConnection, SourceResult } from "./types.ts";
-export { STABLES, clearCoinCostCache, coinCostBasis, equityHolding, mergeCrypto, tokenHolding, usdPrice, walletLabel, withCost } from "./binance.ts";
+export { STABLES, clearCoinCostCache, coinCostBasis, equityHolding, equityPositions, equityTicker, mergeCrypto, tokenHolding, usdPrice, walletLabel, withCost } from "./binance.ts";
 export { clearPublicFxCache, publicUsdKrw } from "./fx.ts";

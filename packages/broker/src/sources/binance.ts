@@ -3,7 +3,8 @@
  *
  *   잔고   wallet.ts 의 지갑별 조회 + Earn 고정 상품(`GET /sapi/v1/simple-earn/locked/position`)
  *   가격   `GET /api/v3/ticker/price` 전 종목 — {자산}USDT → USDC → FDUSD 순. 스테이블코인은 마켓이 없으면 1
- *   주식   보유 API 가 없어 체결 내역으로 추정 (stocks.ts equityHoldings) — 가격은 Binance 호가 중간값, 없으면 본주 시세(KIS·토스)
+ *   주식   지갑의 `EQ_{티커}` 잔고가 보유 수량 (@binance/stocks 문서: 주식의 내부 자산 코드 — 접두사를 떼면 티커). 평단은 체결 내역으로 (stocks.ts equityHoldings).
+ *          지갑에 EQ_ 가 하나도 없으면 체결 내역 추정으로 돌아간다. 가격은 Binance 호가 중간값, 없으면 본주 시세(KIS·토스)
  *   bStock 지갑의 AAPLB 같은 토큰은 코인이 아니라 해외주식으로 옮긴다 (기준가 계산 방식으로 확인 — bstocks.ts)
  *   평단   코인은 현물 체결(`GET /api/v3/myTrades`, 달러 마켓)의 이동평균으로 추정 — 입금·Convert·보상분은 원가를 몰라 커버리지로 밝힌다
  *
@@ -11,7 +12,7 @@
  * 테스트넷 키는 모의 잔고라 합계에서 뺀다 (connect 가 skipped).
  */
 import { bStockOf } from "../binance/bstocks.ts";
-import { equityHoldings, equityQuote, type EquityHolding } from "../binance/stocks.ts";
+import { equityHoldings, equityPositions, equityQuote, equityTicker, type EquityHolding } from "../binance/stocks.ts";
 import { signed, tickerPrices, type BinanceCreds } from "../binance/trade.ts";
 import { walletBalances, type WalletAsset } from "../binance/wallet.ts";
 import type { CryptoHolding, Holding } from "../normalize.ts";
@@ -106,8 +107,8 @@ export function mergeCrypto(
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** 체결 내역 추정 보유 + 가격 → 주식 잔고 (순수). 가격이 없으면 평가 0 — 호출부가 경고한다 */
-export function equityHolding(h: EquityHolding, price: number | null): Holding {
+/** 주식 보유 + 가격 → 주식 잔고 (순수). 가격이 없으면 평가 0 — 호출부가 경고한다 */
+export function equityHolding(h: EquityHolding, price: number | null, fromWallet = false): Holding {
 	const px = price ?? 0;
 	const value = round2(h.qty * px);
 	const avg = h.avgPrice ?? 0;
@@ -125,7 +126,7 @@ export function equityHolding(h: EquityHolding, price: number | null): Holding {
 		profit,
 		profitPct: avg > 0 && px > 0 ? round2(((px - avg) / avg) * 100) : 0,
 		valueKrw: 0,
-		note: "체결 내역 추정",
+		note: fromWallet ? "지갑 잔고 · 평단은 체결 내역" : "체결 내역 추정",
 	};
 }
 
@@ -288,6 +289,14 @@ async function fetchBinance(c: BinanceCreds, access: BrokerAccess): Promise<Sour
 	}
 	crypto = crypto.filter((x) => !moved.has(x.asset));
 
+	// 주식(본주) EQ_ 잔고 → 해외주식. 코인 시세가 없으니 코인 목록에서 뺀다 (binance_stock_account 도 같은 규칙)
+	const equityWallet = new Map<string, number>();
+	for (const x of crypto) {
+		const t = equityTicker(x.asset);
+		if (t) equityWallet.set(t, x.quantity);
+	}
+	crypto = crypto.filter((x) => equityTicker(x.asset) === null);
+
 	if (prices) {
 		const unpriced = crypto.filter((h) => h.priceUsd === null).map((h) => h.asset);
 		if (unpriced.length > 0) warnings.push(`Binance 달러 시세가 없어 합계에서 뺀 자산: ${unpriced.join(", ")}`);
@@ -308,9 +317,12 @@ async function fetchBinance(c: BinanceCreds, access: BrokerAccess): Promise<Sour
 				}),
 			),
 		),
-		equityRes.status === "fulfilled"
-			? Promise.all(equityRes.value.map(async (h) => ({ h, px: await equityPrice(c, access, h.symbol) })))
-			: Promise.resolve([]),
+		Promise.all(
+			equityPositions(equityWallet, equityRes.status === "fulfilled" ? equityRes.value : null).map(async (h) => ({
+				h,
+				px: await equityPrice(c, access, h.symbol),
+			})),
+		),
 	]);
 	const basisOf = new Map(costTargets.map((x, i) => [x.asset, bases[i]]));
 	crypto = crypto.map((x) => {
@@ -319,16 +331,19 @@ async function fetchBinance(c: BinanceCreds, access: BrokerAccess): Promise<Sour
 	});
 	if (costFailed.length > 0) warnings.push(`Binance 코인 평단을 계산하지 못했습니다: ${costFailed.join(", ")}`);
 
-	// 미국 주식 — 보유 API 가 없어 체결 내역으로. 안 쓰는 계정이면 빈 목록이다
-	if (equityRes.status === "fulfilled") {
-		const missing: string[] = [];
-		for (const { h, px } of priced) {
-			if (px === null) missing.push(h.symbol);
-			holdings.push(equityHolding(h, px));
-		}
-		if (missing.length > 0) warnings.push(`Binance 미국 주식 시세를 찾지 못해 평가에서 뺀 종목: ${missing.join(", ")}`);
-	} else {
-		warnings.push(`Binance 미국 주식 보유(체결 내역)를 불러오지 못했습니다: ${reason(equityRes.reason)}`);
+	// 미국 주식 — 지갑 EQ_ 잔고, 없으면 체결 내역 추정. 안 쓰는 계정이면 빈 목록이다
+	const missing: string[] = [];
+	for (const { h, px } of priced) {
+		if (px === null) missing.push(h.symbol);
+		holdings.push(equityHolding(h, px, h.fromWallet));
+	}
+	if (missing.length > 0) warnings.push(`Binance 미국 주식 시세를 찾지 못해 평가에서 뺀 종목: ${missing.join(", ")}`);
+	if (equityRes.status === "rejected") {
+		warnings.push(
+			equityWallet.size > 0
+				? `Binance 미국 주식 체결 내역을 불러오지 못해 평단이 빠졌습니다: ${reason(equityRes.reason)}`
+				: `Binance 미국 주식 보유(체결 내역)를 불러오지 못했습니다: ${reason(equityRes.reason)}`,
+		);
 	}
 
 	return { ...emptyResult(), holdings, crypto, warnings };
@@ -344,5 +359,7 @@ export const binanceSource: AssetSource = {
 		return { run: () => fetchBinance(creds, access) };
 	},
 };
+
+export { equityPositions, equityTicker };
 
 export const walletLabel = (wallet: string): string => WALLET_TEXT[wallet] ?? wallet;

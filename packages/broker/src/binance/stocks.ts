@@ -11,6 +11,7 @@
  *   내역   GET  /order/history — 주문 단위, **fee (수수료 USD 누적)** 가 여기 있다 (detail·open-orders 에도)
  *   체결   GET  /trade/history — **보유 수량 API 가 없다.** 매도 가능 수량은 체결 내역(매수 − 매도)으로 추정한다 (앱에서 bStock 으로 바꾼 건 빠지지 않는다 →
  *          넘치면 거래소가 거절한다)
+ *   자산   주식의 내부 자산 코드는 `EQ_{티커}` (커넥터 문서 — 참고용, 주문에는 티커). 지갑 잔고에 이 이름으로 잡힌다 → 자산 현황(sources/binance.ts)은 이걸 수량으로 쓴다
  *
  * 매수 대금은 기본 USDC (quoteAsset), 매도 대금도 USDC. 테스트넷은 없다 (실전 api.binance.com 만).
  * ⚠️ 쓰기 경로는 /order/place · /order/cancel 둘뿐 — 약관 동의(/account/disclaimer)·토큰 전환(mint/redeem)은 부르지 않는다.
@@ -424,6 +425,29 @@ export function feesFromOrders(orders: EquityOrder[]): EquityFees[] {
 	}
 	return [...by.values()]
 		.map((e) => ({ ...e, fee: Number(e.fee.toFixed(6)), filled: Number(e.filled.toFixed(2)) }))
+		.sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
+/** 주식(본주) 내부 자산 코드 — `EQ_AAPL` (커넥터 문서). 지갑 잔고에 이 이름으로 잡힌다 */
+const EQUITY_ASSET = /^EQ_(.+)$/;
+
+/** `EQ_PANW` → `PANW`, 주식 자산이 아니면 null (순수) */
+export function equityTicker(asset: string): string | null {
+	return EQUITY_ASSET.exec(asset)?.[1] ?? null;
+}
+
+/**
+ * 주식 보유 (순수). 지갑 EQ_ 잔고가 하나라도 있으면 그게 수량이다 — 체결 내역에만 있는 종목은 판 것이거나 bStock 으로 바꾼 것이라 뺀다.
+ * 평단은 체결 내역에서. 지갑에 EQ_ 가 없으면 체결 내역 추정 그대로 (fills 가 null 이면 빈 목록)
+ */
+export function equityPositions(
+	wallet: ReadonlyMap<string, number>,
+	fills: readonly EquityHolding[] | null,
+): Array<EquityHolding & { fromWallet: boolean }> {
+	if (wallet.size === 0) return (fills ?? []).map((h) => ({ ...h, fromWallet: false }));
+	const bySymbol = new Map((fills ?? []).map((h) => [h.symbol, h]));
+	return [...wallet.entries()]
+		.map(([symbol, qty]) => ({ symbol, qty, avgPrice: bySymbol.get(symbol)?.avgPrice ?? null, fills: bySymbol.get(symbol)?.fills ?? 0, fromWallet: true }))
 		.sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 

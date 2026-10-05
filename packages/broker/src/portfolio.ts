@@ -14,6 +14,7 @@ import type {
 	Allocation,
 	BrokerId,
 	CryptoHolding,
+	CurrencySplit,
 	Holding,
 	ManualAsset,
 	ManualHolding,
@@ -119,6 +120,41 @@ export function allocationOf(p: {
 	return a;
 }
 
+/**
+ * 화폐별 금액 (순수) — 원래 통화(amount)와 원화 환산(krw). krw 는 allocationOf 와 같은 값을 더하므로 합계가 총자산과 맞는다.
+ * 코인은 USDT 환산 (valueUsd — USDT 마켓 우선, USDC·FDUSD 는 1:1)
+ */
+export function currencySplit(p: {
+	holdings: readonly Holding[];
+	crypto: readonly CryptoHolding[];
+	manual?: readonly ManualAsset[];
+	cashKrw: number;
+	cashUsd: number;
+	usdKrw: number;
+}): { amount: CurrencySplit; krw: CurrencySplit } {
+	const amount: CurrencySplit = { krw: p.cashKrw, usd: p.cashUsd, usdt: 0 };
+	const krw: CurrencySplit = { krw: p.cashKrw, usd: Math.round(p.cashUsd * p.usdKrw), usdt: 0 };
+	for (const h of p.holdings) {
+		const k = h.currency === "USD" ? "usd" : "krw";
+		amount[k] += h.value;
+		krw[k] += h.valueKrw;
+	}
+	for (const c of p.crypto) {
+		amount.usdt += c.valueUsd ?? 0;
+		krw.usdt += c.valueKrw;
+	}
+	for (const m of p.manual ?? []) {
+		const k = m.currency === "USD" ? "usd" : "krw";
+		amount[k] += m.amount;
+		krw[k] += manualKrw(m, p.usdKrw);
+	}
+	// 원은 정수, 달러·USDT 는 센트 (합산 부동소수점 잡음 제거)
+	return {
+		amount: { krw: Math.round(amount.krw), usd: Math.round(amount.usd * 100) / 100, usdt: Math.round(amount.usdt * 100) / 100 },
+		krw,
+	};
+}
+
 const sumAllocation = (a: Allocation): number => a.domesticStock + a.overseasStock + a.crypto + a.cash + a.other;
 
 interface Settled {
@@ -196,7 +232,19 @@ export async function fetchPortfolio(access: BrokerAccess, opts: PortfolioOption
 	const sources: SourceSummary[] = settled.map(({ source, result, status, error }) => {
 		if (!result || result === "empty") {
 			if (status === "failed") warnings.push(`${source.label} 조회 실패: ${error}`);
-			return { id: source.id, label: source.label, status, valueKrw: 0, stockKrw: 0, cashKrw: 0, cryptoKrw: 0, otherKrw: 0, warnings: [], ...(error ? { error } : {}) };
+			return {
+				id: source.id,
+				label: source.label,
+				status,
+				valueKrw: 0,
+				stockKrw: 0,
+				cashKrw: 0,
+				cryptoKrw: 0,
+				otherKrw: 0,
+				byCurrency: { krw: 0, usd: 0, usdt: 0 },
+				warnings: [],
+				...(error ? { error } : {}),
+			};
 		}
 		warnings.push(...result.warnings);
 		const a = allocationOf({ ...result, usdKrw });
@@ -209,6 +257,7 @@ export async function fetchPortfolio(access: BrokerAccess, opts: PortfolioOption
 			cashKrw: a.cash,
 			cryptoKrw: a.crypto,
 			otherKrw: a.other,
+			byCurrency: currencySplit({ ...result, usdKrw }).amount,
 			warnings: [...result.warnings],
 		};
 	});
@@ -230,6 +279,7 @@ export async function fetchPortfolio(access: BrokerAccess, opts: PortfolioOption
 	const stockValueKrw = holdings.reduce((s, h) => s + h.valueKrw, 0);
 	const profitKrw = holdings.reduce((s, h) => s + (h.currency === "USD" ? Math.round(h.profit * usdKrw) : h.profit), 0);
 	const allocation = allocationOf({ holdings, crypto, manual, cashKrw, cashUsd, usdKrw });
+	const split = currencySplit({ holdings, crypto, manual, cashKrw, cashUsd, usdKrw });
 
 	return {
 		holdings,
@@ -246,6 +296,8 @@ export async function fetchPortfolio(access: BrokerAccess, opts: PortfolioOption
 		cryptoValueKrw: crypto.reduce((s, c) => s + c.valueKrw, 0),
 		netWorthKrw: sumAllocation(allocation),
 		allocation,
+		byCurrency: split.amount,
+		byCurrencyKrw: split.krw,
 		sources,
 	};
 }

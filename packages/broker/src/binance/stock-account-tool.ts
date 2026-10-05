@@ -3,7 +3,8 @@
  *
  *   잔고   Funding 지갑(`POST /sapi/v1/asset/get-funding-asset`) · 현물(MAIN) 지갑의 USDC·USDT
  *          매수 대금 walletType 기본 CARD — Funding 인지 아직 실측 전 (TODO.md), 두 지갑을 다 보여 준다
- *   보유   체결 내역(전 종목, 매수 − 매도)으로 추정 — Binance 에 보유 API 가 없다
+ *   보유   Funding·현물 지갑의 `EQ_{티커}` 잔고가 수량 (주식의 내부 자산 코드 — @binance/stocks 문서). 평단은 체결 내역(전 종목) 이동평균.
+ *          지갑에 EQ_ 가 없으면 체결 내역(매수 − 매도)으로 추정 — 주식 API 에 보유 조회가 없다 (sources/binance.ts 와 같은 규칙)
  *   괴리   Binance 호가(bid·ask, ~5초 지연) vs 본주 현재가(KIS·토스 — market_price 와 같은 길)
  *   토큰   Funding·현물에 있는 bStock(AAPLB 등) — 현물 AAPLBUSDT 가격 vs 본주 (1토큰 = 1주 가정)
  *   수수료 /sapi/v1/equity/order/history 의 fee (주문별 누적 USD) — 종목별 합계·체결 금액 대비 %, 최근 체결 주문
@@ -21,7 +22,9 @@ import {
 	equityHoldings,
 	equityOpenOrders,
 	equityOrderHistory,
+	equityPositions,
 	equityQuote,
+	equityTicker,
 	feesFromOrders,
 	fundingAssets,
 	type EquityFees,
@@ -29,7 +32,8 @@ import {
 	type EquityOrder,
 	type FundingAsset,
 } from "./stocks.ts";
-import { freeBalances, lastPrice, type BinanceCreds } from "./trade.ts";
+import { lastPrice, type BinanceCreds } from "./trade.ts";
+import { spotWallet } from "./wallet.ts";
 
 const CASH = ["USDC", "USDT"];
 /** 한 번에 괴리를 볼 종목 수 — 호가·본주 시세를 종목마다 두 번씩 부른다 */
@@ -54,12 +58,20 @@ export interface Premium {
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 const rel = (a: number, b: number): number => round2(((a - b) / b) * 100);
 
+/** 호가 중간가 (순수) — 한쪽만 있으면 그 값, 비었으면 null */
+function midOf(q: { bid: number; ask: number } | null): number | null {
+	if (!q) return null;
+	const bid = q.bid > 0 ? q.bid : null;
+	const ask = q.ask > 0 ? q.ask : null;
+	return bid && ask ? (bid + ask) / 2 : (ask ?? bid);
+}
+
 /** 괴리 (순수) — 호가가 비었거나 본주 가격이 없으면 null */
 export function premiumOf(q: { bid: number; ask: number } | null, underlying: number): Premium | null {
 	if (!q || !(underlying > 0)) return null;
 	const bid = q.bid > 0 ? q.bid : null;
 	const ask = q.ask > 0 ? q.ask : null;
-	const mid = bid && ask ? (bid + ask) / 2 : (ask ?? bid);
+	const mid = midOf(q);
 	if (!mid) return null;
 	return {
 		binance: round2(mid),
@@ -84,7 +96,7 @@ function cashLines(label: string, rows: Array<{ asset: string; free: string; loc
 
 interface Row {
 	symbol: string;
-	holding: EquityHolding | null;
+	holding: (EquityHolding & { fromWallet: boolean }) | null;
 	quote: { bid: number; ask: number } | null;
 	underlying: { price: number; source: string } | null;
 	premium: Premium | null;
@@ -129,7 +141,7 @@ export function createBinanceStockAccountTool(deps: { brokers: BrokerAccess }) {
 		name: "binance_stock_account",
 		label: "Binance 미국 주식 계좌",
 		description:
-			"Binance **미국 주식 직접 거래** 계좌를 조회한다 (조회만). Funding·현물 지갑의 USDC·USDT 잔고, 보유 주식(체결 내역으로 추정한 수량·평단·평가손익), " +
+			"Binance **미국 주식 직접 거래** 계좌를 조회한다 (조회만). Funding·현물 지갑의 USDC·USDT 잔고, 보유 주식(지갑 EQ_ 잔고 수량 · 체결 내역 평단 · 평가손익), " +
 			"Binance 호가와 본주(나스닥·NYSE) 현재가의 괴리(%), 보유 bStock 토큰, 실제로 낸 수수료(주문 내역 fee — 종목별 합계·%·최근 체결), 미체결 주문. " +
 			"사용자가 바이낸스 주식 잔고·보유·괴리·프리미엄·USDC·수수료를 물으면 이 툴. symbols 로 보유하지 않은 종목의 괴리도 본다 (예 'PANW,NVDA'). " +
 			"주문은 binance_stock_order.",
@@ -146,13 +158,26 @@ export function createBinanceStockAccountTool(deps: { brokers: BrokerAccess }) {
 					return null;
 				});
 
-			const [funding, spot, holdings, open, history] = await Promise.all([
+			const [funding, spotRows, fills, open, history] = await Promise.all([
 				soft("Funding 지갑", fundingAssets(creds)),
-				soft("현물 지갑", freeBalances(creds)),
-				soft("체결 내역(보유 추정)", equityHoldings(creds)),
+				soft("현물 지갑", spotWallet(creds)),
+				soft("체결 내역(평단)", equityHoldings(creds)),
 				soft("미체결", equityOpenOrders(creds)),
 				soft("주문 내역(수수료)", equityOrderHistory(creds, null, EQUITY_SINCE)),
 			]);
+			const spot = spotRows ? Object.fromEntries(spotRows.map((a) => [a.asset, a.free])) : null;
+
+			// 주식 EQ_ 잔고 — Funding·현물 어디든, 묶인 것(주문·동결)도 내 주식이다
+			const eqWallet = new Map<string, number>();
+			const addEq = (asset: string, qty: number): void => {
+				const t = equityTicker(asset);
+				if (t && qty > 0) eqWallet.set(t, Number(((eqWallet.get(t) ?? 0) + qty).toPrecision(12)));
+			};
+			for (const a of funding ?? []) addEq(a.asset, Number(a.free) + Number(a.locked) + Number(a.freeze));
+			for (const a of spotRows ?? []) addEq(a.asset, Number(a.free) + Number(a.locked ?? 0));
+			const fromWallet = eqWallet.size > 0;
+			const holdings = fromWallet || fills ? equityPositions(eqWallet, fills) : null;
+			const fillQty = new Map((fills ?? []).map((h) => [h.symbol, h.qty]));
 			const fees = history ? feesFromOrders(history) : null;
 			const recent = (history ?? [])
 				.filter((o) => Number(o.filledQty) > 0)
@@ -205,26 +230,36 @@ export function createBinanceStockAccountTool(deps: { brokers: BrokerAccess }) {
 
 			const lines: string[] = ["[Binance 미국 주식 계좌]", "", "잔고"];
 			if (funding) lines.push(...cashLines("Funding", funding));
-			if (spot) lines.push(...cashLines("현물(MAIN)", Object.entries(spot).map(([asset, free]) => ({ asset, free }))));
+			if (spotRows) lines.push(...cashLines("현물(MAIN)", spotRows));
 			lines.push("  ※ 매수 대금은 기본 CARD 지갑에서 나간다 — Funding 과 같은지는 실주문으로 확인 전");
 
-			lines.push("", `보유 (체결 내역 추정, ${holdings ? `${holdings.length}종목` : "조회 실패"})`);
+			lines.push("", `보유 (${fromWallet ? "지갑 EQ_ 잔고 · 평단은 체결 내역" : "체결 내역 추정"}, ${holdings ? `${holdings.length}종목` : "조회 실패"})`);
 			let value = 0;
 			let cost = 0;
 			for (const r of rows.filter((x) => x.holding)) {
 				const h = r.holding!;
-				const px = r.premium?.binance ?? r.underlying?.price ?? null;
+				// 본주 시세가 없어도 Binance 호가로 평가한다
+				const mid = midOf(r.quote);
+				const px = mid ? round2(mid) : (r.underlying?.price ?? null);
 				const v = px ? h.qty * px : null;
 				if (v !== null && h.avgPrice) {
 					value += v;
 					cost += h.qty * h.avgPrice;
 				}
 				const pnl = v !== null && h.avgPrice ? ` · 평가 ${usd(v)} (${sign(rel(px!, h.avgPrice))})` : v !== null ? ` · 평가 ${usd(v)}` : "";
-				lines.push(`- ${r.symbol} ${qtyText(h.qty)}주 · 평단 ${h.avgPrice ? usd(h.avgPrice) : "—"}${pnl}`);
+				const est = fillQty.get(r.symbol) ?? 0;
+				const diff = h.fromWallet && fills && Math.abs(est - h.qty) > 1e-9 ? ` (체결 내역으로는 ${qtyText(est)}주)` : "";
+				lines.push(`- ${r.symbol} ${qtyText(h.qty)}주${diff} · 평단 ${h.avgPrice ? usd(h.avgPrice) : "—"}${pnl}`);
 			}
 			if (holdings?.length === 0) lines.push("- 없음");
 			if (cost > 0) lines.push(`  합계 평가 ${usd(value)} · 원가 ${usd(cost)} (${sign(rel(value, cost))})`);
-			if (holdings?.length) lines.push("  ※ 앱에서 bStock 으로 바꾼 주식·입출고는 체결 내역에 안 잡혀 실제와 다를 수 있다");
+			if (holdings?.length) {
+				lines.push(
+					fromWallet
+						? "  ※ 평단은 체결 내역 이동평균 — bStock 에서 되돌린 주식·입고분은 원가를 몰라 평단이 다를 수 있다"
+						: "  ※ 지갑에 EQ_ 잔고가 없어 체결 내역으로 추정 — 앱에서 bStock 으로 바꾼 주식·입출고는 안 잡혀 실제와 다를 수 있다",
+				);
+			}
 
 			if (rows.length) {
 				lines.push("", "괴리 (Binance 중간가 vs 본주 현재가)");

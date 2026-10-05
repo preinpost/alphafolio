@@ -9,11 +9,11 @@
  */
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { allocationOf, fetchPortfolio, NoBrokerConfiguredError, pickUsdKrw, STOCK_SOURCES } from "../src/portfolio.ts";
+import { allocationOf, currencySplit, fetchPortfolio, NoBrokerConfiguredError, pickUsdKrw, STOCK_SOURCES } from "../src/portfolio.ts";
 import { clearBStockCache } from "../src/binance/bstocks.ts";
 import { toOverseasHoldings, type ManualAsset } from "../src/normalize.ts";
 import { clearEquityRulesCache } from "../src/binance/stocks.ts";
-import { clearCoinCostCache, clearPublicFxCache, coinCostBasis, equityHolding, mergeCrypto, usdPrice, withCost } from "../src/sources/index.ts";
+import { clearCoinCostCache, clearPublicFxCache, coinCostBasis, equityHolding, equityPositions, equityTicker, mergeCrypto, usdPrice, withCost } from "../src/sources/index.ts";
 import { memoryTokenStore } from "../src/tokens.ts";
 import type { TossContext } from "../src/toss/client.ts";
 
@@ -112,6 +112,8 @@ interface FakeOpts {
 	equity?: boolean;
 	/** 펀딩 지갑에 bStock 토큰 AAPLB 2개 */
 	bstock?: boolean;
+	/** 현물 지갑의 주식 잔고 (EQ_ 자산) — 예 { EQ_NVDA: "1.2" } */
+	eqWallet?: Record<string, string>;
 	/** 토스 응답을 멈춘다 (제한 시간 확인) */
 	tossHang?: boolean;
 }
@@ -127,7 +129,14 @@ function fake(opts: FakeOpts = {}) {
 			if (opts.binanceFail?.includes(url.pathname)) return json({ code: -2015, msg: "Invalid API-key, IP, or permissions for action." }, 401);
 			switch (url.pathname) {
 				case "/api/v3/account":
-					return json({ balances: [{ asset: "BTC", free: "0.01", locked: "0" }, { asset: "LDUSDT", free: "50", locked: "0" }, { asset: "SHIB", free: "100", locked: "0" }] });
+					return json({
+						balances: [
+							{ asset: "BTC", free: "0.01", locked: "0" },
+							{ asset: "LDUSDT", free: "50", locked: "0" },
+							{ asset: "SHIB", free: "100", locked: "0" },
+							...Object.entries(opts.eqWallet ?? {}).map(([asset, free]) => ({ asset, free, locked: "0" })),
+						],
+					});
 				case "/sapi/v1/asset/get-funding-asset":
 					return json([
 						{ asset: "USDC", free: "20", locked: "0", freeze: "0", withdrawing: "0" },
@@ -236,6 +245,31 @@ describe("통합 집계", () => {
 			],
 		);
 		assert.ok(p.warnings.some((w) => w.includes("SHIB")), "시세 없는 자산은 합계에서 뺐다고 알린다");
+
+		// 화폐별 — 원화(삼성전자·원화 예수금) · 달러(AAPL·달러 예수금) · 코인(USDT 환산, 스테이블 포함)
+		assert.deepEqual(p.byCurrency, { krw: 1_800_000, usd: 450, usdt: 3070 });
+		assert.deepEqual(p.byCurrencyKrw, { krw: 1_800_000, usd: 450 * 1400, usdt: 3070 * 1400 });
+		assert.equal(p.byCurrencyKrw.krw + p.byCurrencyKrw.usd + p.byCurrencyKrw.usdt, p.netWorthKrw, "환산 합계가 총자산");
+		assert.deepEqual(
+			p.sources.map((s) => [s.id, s.byCurrency]),
+			[
+				["toss", { krw: 1_800_000, usd: 450, usdt: 0 }],
+				["binance", { krw: 0, usd: 0, usdt: 3070 }],
+			],
+		);
+	});
+
+	it("화폐별 (순수) — 달러 직접 입력은 달러로, 환율이 없어도 원래 통화 금액은 남는다", () => {
+		const s = currencySplit({
+			holdings: [],
+			crypto: [],
+			manual: [{ id: "m", name: "달러 예금", kind: "deposit", currency: "USD", amount: 1000.5, memo: null, updatedAt: "2026-10-01" }],
+			cashKrw: 5000,
+			cashUsd: 0.1 + 0.2,
+			usdKrw: 0,
+		});
+		assert.deepEqual(s.amount, { krw: 5000, usd: 1000.8, usdt: 0 });
+		assert.deepEqual(s.krw, { krw: 5000, usd: 0, usdt: 0 });
 	});
 
 	it("Binance 만 있고 환율이 없으면 — 던지지 않고, 환산 못 한 것을 알린다", async () => {
@@ -332,6 +366,44 @@ describe("Binance 미국 주식 · bStock", () => {
 		assert.equal(tsla.price, 250, "Binance 호가가 비면 본주 시세");
 		assert.equal(p.allocation.overseasStock, 350 * 1400 + Math.round(196.5 * 1400) + 250 * 1400);
 		assert.ok(p.brokers.every((b) => b !== "binance"), "brokers 는 증권사만");
+	});
+
+	it("EQ_ 티커 (순수)", () => {
+		assert.equal(equityTicker("EQ_PANW"), "PANW");
+		assert.equal(equityTicker("PANWB"), null);
+		assert.equal(equityTicker("BTC"), null);
+	});
+
+	it("지갑 EQ_ 잔고가 있으면 그게 수량 — 체결 내역에만 있는 종목은 뺀다, 평단은 체결 내역에서 (순수)", () => {
+		const fills = [
+			{ symbol: "NVDA", qty: 1.5, avgPrice: 110, fills: 3 },
+			{ symbol: "TSLA", qty: 1, avgPrice: 200, fills: 1 },
+		];
+		assert.deepEqual(equityPositions(new Map([["NVDA", 1.2], ["PANW", 0.3]]), fills), [
+			{ symbol: "NVDA", qty: 1.2, avgPrice: 110, fills: 3, fromWallet: true },
+			{ symbol: "PANW", qty: 0.3, avgPrice: null, fills: 0, fromWallet: true },
+		]);
+		assert.deepEqual(equityPositions(new Map(), fills).map((h) => [h.symbol, h.qty, h.fromWallet]), [["NVDA", 1.5, false], ["TSLA", 1, false]], "EQ_ 가 없으면 체결 내역 추정");
+		assert.deepEqual(equityPositions(new Map(), null), []);
+	});
+
+	it("현물 지갑의 EQ_NVDA — 코인 목록·'시세 없음' 경고에 없고, 해외주식 NVDA 수량이 된다", async () => {
+		const f = fake({ equity: true, eqWallet: { EQ_NVDA: "1.2" } });
+		const p = await fetchPortfolio({ toss: f.toss, binance: f.binance });
+		assert.ok(!p.crypto.some((c) => c.asset.startsWith("EQ_")));
+		assert.ok(!p.warnings.some((w) => w.includes("EQ_")), p.warnings.join(" / "));
+		const nvda = p.holdings.find((h) => h.broker === "binance" && h.symbol === "NVDA")!;
+		assert.deepEqual([nvda.quantity, nvda.avgPrice, nvda.price, nvda.value], [1.2, 110, 131, 157.2]);
+		assert.match(nvda.note ?? "", /지갑 잔고/);
+		assert.ok(!p.holdings.some((h) => h.broker === "binance" && h.symbol === "TSLA"), "지갑에 없는 TSLA 는 체결 내역에만 있어도 뺀다");
+	});
+
+	it("EQ_ 잔고가 있는데 체결 내역이 실패하면 — 수량·평가는 그대로, 평단만 빠진다", async () => {
+		const f = fake({ eqWallet: { EQ_NVDA: "1" }, binanceFail: ["/sapi/v1/equity/trade/history"] });
+		const p = await fetchPortfolio({ binance: f.binance });
+		const nvda = p.holdings.find((h) => h.symbol === "NVDA")!;
+		assert.deepEqual([nvda.quantity, nvda.value, nvda.avgPrice], [1, 131, 0]);
+		assert.ok(p.warnings.some((w) => w.includes("평단이 빠졌습니다")), p.warnings.join(" / "));
 	});
 
 	it("주식 시세를 아무 데서도 못 찾으면 평가 0 + 경고", async () => {

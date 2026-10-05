@@ -6,7 +6,7 @@ import { fetchPortfolio } from "../portfolio.ts";
 import { inspectPortfolioSignals } from "../portfolio-signals.ts";
 import type { BrokerToolDeps, HoldingsDetails, OverviewDetails, PortfolioSignalsDetails } from "./contracts.ts";
 import { won, usd, usdCash, cashText, money, signed } from "./format.ts";
-import type { CryptoHolding, ManualHolding } from "../normalize.ts";
+import type { CryptoHolding, CurrencySplit, ManualHolding } from "../normalize.ts";
 import { walletLabel } from "../sources/index.ts";
 
 const PERIOD_ENUM = Type.Union(
@@ -24,22 +24,34 @@ const PERIOD_ENUM = Type.Union(
 );
 
 const qty = (n: number): string => String(Number(n.toPrecision(8)));
+const usdt = (n: number): string => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT`;
+const approx = (krw: number): string => (krw > 0 ? ` ≈ ${won(krw)}` : "");
+
+/** 화폐별 — 원래 통화 금액 (원화 환산은 곁에). 0 인 화폐는 뺀다 */
+function currencyText(amount: CurrencySplit, krw: CurrencySplit): string {
+	const parts = [
+		amount.krw !== 0 && `원화 ${won(amount.krw)}`,
+		amount.usd !== 0 && `달러 ${usdCash(amount.usd)}${approx(krw.usd)}`,
+		amount.usdt !== 0 && `코인 ${usdt(amount.usdt)}${approx(krw.usdt)}`,
+	].filter(Boolean);
+	return `화폐별 (원래 통화 — 달러는 달러로, 코인은 USDT 로 말한다): ${parts.join(" · ")}`;
+}
 
 /** 코인 목록 — 1달러 미만 잔돈은 개수만 */
-function cryptoText(crypto: readonly CryptoHolding[], totalKrw: number): string {
+function cryptoText(crypto: readonly CryptoHolding[], totalUsdt: number, totalKrw: number): string {
 	const shown = crypto.filter((c) => c.valueUsd === null || c.valueUsd >= 1).slice(0, 20);
 	const rest = crypto.length - shown.length;
 	const lines = shown.map(
 		(c) =>
 			`- ${c.asset}${c.stable ? " (스테이블)" : ""} ${qty(c.quantity)} · ` +
-			(c.valueUsd === null ? "시세 없음" : `${usd(c.valueUsd)}${c.valueKrw > 0 ? ` ≈ ${won(c.valueKrw)}` : ""}`) +
+			(c.valueUsd === null ? "시세 없음" : `${usdt(c.valueUsd)}${approx(c.valueKrw)}`) +
 			(c.avgPriceUsd !== null && c.profitPct !== null
 				? ` · 평단 ${usd(c.avgPriceUsd)} (${c.profitPct >= 0 ? "+" : ""}${c.profitPct}%${c.costCoverage !== null && c.costCoverage < 0.95 ? `, 보유의 ${Math.round(c.costCoverage * 100)}%만 체결로 설명 — 나머지는 원가 모름` : ""})`
 				: "") +
 			` · ${c.wallets.map((w) => walletLabel(w.wallet)).join("·")}`,
 	);
 	return (
-		`코인 (Binance) ${crypto.length}종 · 평가 ${won(totalKrw)} (달러 시세를 원화로 환산 · 평단은 현물 체결로 추정, 입금·보상분은 원가를 모른다)\n` +
+		`코인 (Binance) ${crypto.length}종 · 평가 ${usdt(totalUsdt)}${approx(totalKrw)} (USDT 환산 · 평단은 현물 체결로 추정, 입금·보상분은 원가를 모른다)\n` +
 		lines.join("\n") +
 		(rest > 0 ? `\n… 외 ${rest}종 (1달러 미만 잔돈 등)` : "")
 	);
@@ -67,7 +79,7 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 		name: "portfolio_holdings",
 		label: "보유 종목",
 		description:
-			"연결된 계좌의 보유 자산과 평가금액을 조회한다 — 증권(KIS·토스, 국내+해외), Binance 미국 주식(체결 내역 추정)·bStock 토큰, 코인(Binance 현물·펀딩·Earn, 평단 추정), " +
+			"연결된 계좌의 보유 자산과 평가금액을 조회한다 — 증권(KIS·토스, 국내+해외), Binance 미국 주식(지갑 EQ_ 잔고, 평단은 체결 내역)·bStock 토큰, 코인(Binance 현물·펀딩·Earn, 평단 추정), " +
 			"투자 탭에서 직접 입력한 자산(예금·연금·부동산 등), 원화 환산 총자산. " +
 			"'내 주식', '내 코인', '얼마 벌었어', '포트폴리오', '총자산' 같은 질문에 쓴다. 조회 전용이며 주문은 하지 않는다.",
 		parameters: Type.Object({}),
@@ -101,7 +113,7 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 						(h) =>
 							`- ${h.name} (${h.symbol}) ${h.quantity}주 · ` +
 							(h.avgPrice > 0 ? `평단 ${money(h.avgPrice, h.currency)} · ` : "평단 모름 · ") +
-							`현재 ${money(h.price, h.currency)} · 평가 ${won(h.valueKrw)}` +
+							`현재 ${money(h.price, h.currency)} · 평가 ${h.currency === "USD" ? `${usd(h.value)}${approx(h.valueKrw)}` : won(h.valueKrw)}` +
 							(h.avgPrice > 0 ? ` (${h.profitPct >= 0 ? "+" : ""}${h.profitPct}%)` : "") +
 							(h.broker === "binance" ? ` · Binance${h.note ? ` ${h.note}` : ""}` : ""),
 					);
@@ -114,12 +126,13 @@ export function createPortfolioTools(deps: BrokerToolDeps) {
 				);
 			}
 
-			if (p.crypto.length > 0) sections.push(cryptoText(p.crypto, p.cryptoValueKrw));
+			if (p.crypto.length > 0) sections.push(cryptoText(p.crypto, p.byCurrency.usdt, p.cryptoValueKrw));
 			if (p.manual.length > 0) sections.push(manualText(p.manual));
 			// 계좌가 여럿이면 환산 합계 — 달러·코인을 원화로 바꾼 값이라고 밝힌다
 			if (p.crypto.length > 0 || p.manual.length > 0 || p.sources.length > 1) {
 				sections.push(`총자산 (원화 환산 합계 — 주식·예수금·달러·코인·직접 입력) ${won(p.netWorthKrw)}`);
 			}
+			if (p.byCurrency.usd !== 0 || p.byCurrency.usdt !== 0) sections.push(currencyText(p.byCurrency, p.byCurrencyKrw));
 
 			return {
 				content: [

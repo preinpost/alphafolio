@@ -5,8 +5,9 @@
  * 흩어진 자산을 한 번에 훑어보는 데 강하다. 둘은 같은 계좌를 본다.
  *
  * 금액은 서버가 환율 하나로 원화 환산해 준다 — 화면은 합치거나 환산하지 않는다.
+ * 달러 자산은 달러로, 코인은 USDT 로 먼저 보이고 원화 환산은 곁에 둔다 (원화만으로는 달러·코인이 얼마인지 알기 어렵다).
  */
-import type { BrokerHolding, CryptoHoldingDto, ManualAssetDto, PortfolioDto, PortfolioSourceDto } from "@alphafolio/protocol";
+import type { BrokerHolding, CryptoHoldingDto, CurrencySplitDto, ManualAssetDto, PortfolioDto, PortfolioSourceDto } from "@alphafolio/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api } from "../lib/api.ts";
@@ -31,6 +32,12 @@ function usdCash(value: number): string {
 }
 
 const usd = (n: number): string => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+/** 코인 평가 — USDT 환산 (스테이블 포함) */
+const usdt = (n: number): string => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT`;
+/** 원래 통화 금액 곁에 붙이는 원화 환산 — 환율이 없으면 (0) 빈 문자열 */
+const approxWon = (n: number): string => (n > 0 ? `≈ ${won(n)}` : "");
+/** 원래 통화 금액 — 원화는 원, 달러는 $ */
+const money = (n: number, currency: "KRW" | "USD"): string => (currency === "KRW" ? won(n) : usd(n));
 /** 코인 단가 — 1달러 미만은 유효숫자 4자리 ($0.00001234) */
 const usdPrice = (n: number): string => (n >= 1 ? usd(n) : `$${Number(n.toPrecision(4))}`);
 const qty = (n: number): string => Number(n.toPrecision(8)).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -166,6 +173,8 @@ export function PortfolioPage() {
 							</button>
 						</div>
 
+						<CurrencyTiles amount={p.byCurrency} krw={p.byCurrencyKrw} total={p.netWorthKrw} />
+
 						<AllocationBar allocation={p.allocation} total={p.netWorthKrw} />
 
 						{history.isSuccess && <NetWorthChart points={points} today={today} />}
@@ -278,8 +287,8 @@ export function PortfolioPage() {
 									<div className="flex items-center justify-between px-4 py-2.5">
 										<div className="text-sm text-ink">예수금</div>
 										<div className="text-right text-sm text-ink">
-											{won(p.cashKrw)}
-											{p.cashUsd > 0 && <div className="text-xs text-muted">{usdCash(p.cashUsd)}</div>}
+											{p.cashKrw > 0 && <div>{won(p.cashKrw)}</div>}
+											{p.cashUsd > 0 && <div>{usdCash(p.cashUsd)}</div>}
 										</div>
 									</div>
 								)}
@@ -351,6 +360,30 @@ export function PortfolioPage() {
 	);
 }
 
+/** 화폐별 — 원화 · 달러 · 코인(USDT). 원래 통화 금액을 크게, 원화 환산·비중을 작게 */
+function CurrencyTiles({ amount, krw, total }: { amount: CurrencySplitDto; krw: CurrencySplitDto; total: number }) {
+	const tiles = [
+		{ key: "krw", label: "원화", main: won(amount.krw), sub: "", share: krw.krw, show: amount.krw !== 0 },
+		{ key: "usd", label: "달러", main: usdCash(amount.usd), sub: approxWon(krw.usd), share: krw.usd, show: amount.usd !== 0 },
+		{ key: "usdt", label: "코인 (USDT 환산)", main: usdt(amount.usdt), sub: approxWon(krw.usdt), share: krw.usdt, show: amount.usdt !== 0 },
+	].filter((t) => t.show);
+	if (tiles.length === 0) return null;
+	return (
+		<section className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+			{tiles.map((t) => (
+				<div key={t.key} className="min-w-0 rounded-xl border border-line bg-card px-3 py-2.5">
+					<div className="flex items-baseline justify-between gap-2">
+						<span className="truncate text-xs text-muted">{t.label}</span>
+						<span className="shrink-0 text-xs text-muted">{pct(t.share, total)}</span>
+					</div>
+					<div className="mt-1 truncate text-base font-semibold text-ink">{t.main}</div>
+					{t.sub && <div className="truncate text-[11px] text-faint">{t.sub}</div>}
+				</div>
+			))}
+		</section>
+	);
+}
+
 function AllocationBar({ allocation, total }: { allocation: PortfolioDto["allocation"]; total: number }) {
 	const slices = SLICES.filter((s) => allocation[s.key] > 0);
 	if (total <= 0 || slices.length === 0) return null;
@@ -397,11 +430,11 @@ function SourceCard({
 	onClick: () => void;
 }) {
 	const status = STATUS[s.status];
+	// 화폐별 원래 통화 — 계좌 합계(원화 환산)만으로는 달러·코인이 얼마인지 모른다
 	const parts = [
-		s.stockKrw > 0 && `주식 ${won(s.stockKrw)}`,
-		s.cryptoKrw > 0 && `코인 ${won(s.cryptoKrw)}`,
-		s.cashKrw > 0 && `현금 ${won(s.cashKrw)}`,
-		s.otherKrw > 0 && `기타 ${won(s.otherKrw)}`,
+		s.byCurrency.krw !== 0 && won(s.byCurrency.krw),
+		s.byCurrency.usd !== 0 && usdCash(s.byCurrency.usd),
+		s.byCurrency.usdt !== 0 && usdt(s.byCurrency.usdt),
 	].filter(Boolean);
 	const usable = s.status === "ok" || s.status === "partial";
 	return (
@@ -460,13 +493,17 @@ function HoldingRow({ h }: { h: BrokerHolding }) {
 				</div>
 			</div>
 			<div className="shrink-0 text-right">
-				<div className="text-sm text-ink">{won(h.valueKrw)}</div>
-				{h.avgPrice > 0 && (
-					<div className={`text-xs ${moveClass(h.profitPct)}`}>
-						{sign(h.profitPct)}
-						{h.profitPct}%
-					</div>
-				)}
+				<div className="text-sm text-ink">{money(h.value, h.currency)}</div>
+				<div className="text-xs text-muted">
+					{h.currency === "USD" ? approxWon(h.valueKrw) : ""}
+					{h.avgPrice > 0 && (
+						<span className={moveClass(h.profitPct)}>
+							{h.currency === "USD" && h.valueKrw > 0 ? " · " : ""}
+							{sign(h.profitPct)}
+							{h.profitPct}%
+						</span>
+					)}
+				</div>
 			</div>
 		</div>
 	);
@@ -486,13 +523,17 @@ function GroupedRow({ g }: { g: GroupedHolding }) {
 				</div>
 			</div>
 			<div className="shrink-0 text-right">
-				<div className="text-sm text-ink">{won(g.valueKrw)}</div>
-				{g.profitPct !== null && (
-					<div className={`text-xs ${moveClass(g.profitPct)}`}>
-						{sign(g.profitPct)}
-						{g.profitPct}%
-					</div>
-				)}
+				<div className="text-sm text-ink">{money(g.value, g.currency)}</div>
+				<div className="text-xs text-muted">
+					{g.currency === "USD" ? approxWon(g.valueKrw) : ""}
+					{g.profitPct !== null && (
+						<span className={moveClass(g.profitPct)}>
+							{g.currency === "USD" && g.valueKrw > 0 ? " · " : ""}
+							{sign(g.profitPct)}
+							{g.profitPct}%
+						</span>
+					)}
+				</div>
 			</div>
 		</div>
 	);
@@ -526,8 +567,8 @@ function ManualRow({ m, onEdit }: { m: ManualAssetDto & { valueKrw: number }; on
 				</div>
 			</div>
 			<div className="shrink-0 text-right">
-				<div className="text-sm text-ink">{m.valueKrw > 0 || m.currency === "KRW" ? won(m.valueKrw) : usd(m.amount)}</div>
-				{m.currency === "USD" && m.valueKrw > 0 && <div className="text-xs text-muted">{usd(m.amount)}</div>}
+				<div className="text-sm text-ink">{m.currency === "KRW" ? won(m.valueKrw) : usd(m.amount)}</div>
+				{m.currency === "USD" && m.valueKrw > 0 && <div className="text-xs text-muted">{approxWon(m.valueKrw)}</div>}
 			</div>
 		</button>
 	);
@@ -567,9 +608,9 @@ function CryptoRow({ c }: { c: CryptoHoldingDto }) {
 					<div className="text-xs text-faint">시세 없음</div>
 				) : (
 					<>
-						<div className="text-sm text-ink">{c.valueKrw > 0 ? won(c.valueKrw) : usd(c.valueUsd)}</div>
+						<div className="text-sm text-ink">{usdt(c.valueUsd)}</div>
 						<div className="text-xs text-muted">
-							{c.valueKrw > 0 ? usd(c.valueUsd) : ""}
+							{approxWon(c.valueKrw)}
 							{cryptoPnl(c) ? (
 								<>
 									{c.valueKrw > 0 ? " · " : ""}

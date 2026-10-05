@@ -79,7 +79,14 @@ export interface ManualAssetDto {
 	updatedAt: string;
 }
 
-/** 계좌(출처)별 합계 — 금액은 원화 환산 */
+/** 화폐별 금액 — 원(krw) · 달러(usd) · 코인 USDT 환산(usdt, 스테이블 포함) */
+export interface CurrencySplitDto {
+	krw: number;
+	usd: number;
+	usdt: number;
+}
+
+/** 계좌(출처)별 합계 — 금액은 원화 환산 (byCurrency 만 원래 통화) */
 export interface PortfolioSourceDto {
 	id: string;
 	label: string;
@@ -89,6 +96,7 @@ export interface PortfolioSourceDto {
 	cashKrw: number;
 	cryptoKrw: number;
 	otherKrw: number;
+	byCurrency: CurrencySplitDto;
 	warnings: string[];
 	error?: string;
 }
@@ -115,6 +123,10 @@ export interface PortfolioDto {
 	/** 총자산 — 주식·예수금·달러·코인·직접 입력을 원화로 환산한 합계 */
 	netWorthKrw: number;
 	allocation: { domesticStock: number; overseasStock: number; crypto: number; cash: number; other: number };
+	/** 화폐별 원래 통화 금액 */
+	byCurrency: CurrencySplitDto;
+	/** 화폐별 원화 환산 — 합계가 netWorthKrw (환율이 없으면 usd·usdt 는 0) */
+	byCurrencyKrw: CurrencySplitDto;
 	sources: PortfolioSourceDto[];
 }
 

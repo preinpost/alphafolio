@@ -69,6 +69,8 @@ export interface GroupedHolding {
 	market: BrokerHolding["market"];
 	currency: BrokerHolding["currency"];
 	quantity: number;
+	/** 평가금액 (원래 통화 — 같은 통화끼리만 묶으므로 더할 수 있다) */
+	value: number;
 	valueKrw: number;
 	/** 평단을 아는 잔고만으로 계산 — 하나도 모르면 null */
 	profitPct: number | null;
@@ -98,6 +100,7 @@ export function groupHoldings(holdings: readonly BrokerHolding[]): GroupedHoldin
 				market: first.market,
 				currency: first.currency,
 				quantity: Number(parts.reduce((s, h) => s + h.quantity, 0).toPrecision(12)),
+				value: Math.round(parts.reduce((s, h) => s + h.value, 0) * 100) / 100,
 				valueKrw: parts.reduce((s, h) => s + h.valueKrw, 0),
 				profitPct: cost > 0 ? Math.round(((value - cost) / cost) * 10000) / 100 : null,
 				brokers: [...new Set(parts.map((h) => h.broker))],

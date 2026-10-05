@@ -113,7 +113,19 @@ export interface ManualHolding extends ManualAsset {
 	valueKrw: number;
 }
 
-/** 출처(계좌)별 합계 — 계좌 카드에 쓴다. 금액은 모두 원화 환산 */
+/**
+ * 화폐별 금액 — 환산하지 않은 원래 통화로 묶는다. 원화로만 보면 달러·코인이 얼마인지 알기 어렵다.
+ *   krw   원화 자산 (원) — 원화 주식·원화 예수금·원화 직접 입력
+ *   usd   달러 자산 (USD) — 달러 주식(해외주식·Binance 주식·bStock)·달러 예수금·달러 직접 입력
+ *   usdt  코인 (USDT 환산) — 스테이블 포함. USDC·FDUSD 마켓 시세는 1:1 로 본다. 시세 없는 코인은 빠진다
+ */
+export interface CurrencySplit {
+	krw: number;
+	usd: number;
+	usdt: number;
+}
+
+/** 출처(계좌)별 합계 — 계좌 카드에 쓴다. 금액은 모두 원화 환산 (byCurrency 만 원래 통화) */
 export interface SourceSummary {
 	id: SourceId;
 	label: string;
@@ -127,6 +139,8 @@ export interface SourceSummary {
 	cryptoKrw: number;
 	/** 직접 입력 자산 중 현금성이 아닌 것 (연금·부동산 등) */
 	otherKrw: number;
+	/** 화폐별 (원래 통화) */
+	byCurrency: CurrencySplit;
 	warnings: string[];
 	/** failed·skipped 사유 */
 	error?: string;
@@ -177,6 +191,10 @@ export interface PortfolioSummary {
 	/** 총자산 — 주식 + 원화·달러 예수금 + 코인 + 직접 입력 (원화 환산). 환율이 없으면 환산 못 한 것은 빠진다 */
 	netWorthKrw: number;
 	allocation: Allocation;
+	/** 화폐별 — 원래 통화 금액 (원 · 달러 · USDT) */
+	byCurrency: CurrencySplit;
+	/** 화폐별 원화 환산 — 합계가 netWorthKrw. 환율이 없으면 usd·usdt 는 0 */
+	byCurrencyKrw: CurrencySplit;
 	/** 연결된 계좌별 상태·합계 (미설정 계좌는 없다) */
 	sources: SourceSummary[];
 }

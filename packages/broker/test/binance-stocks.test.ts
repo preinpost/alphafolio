@@ -339,6 +339,42 @@ describe("계좌 조회 (binance_stock_account)", () => {
 		);
 	});
 
+	it("툴 — 지갑 EQ_ 잔고가 수량, 평단은 체결 내역 · 체결 내역과 다르면 함께 적는다", async () => {
+		const { createBinanceStockAccountTool } = await import("../src/binance/stock-account-tool.ts");
+		globalThis.fetch = (async (input: string | URL) => {
+			const url = new URL(String(input));
+			const json = (body: unknown) => new Response(JSON.stringify(body));
+			switch (url.pathname) {
+				case "/sapi/v1/asset/get-funding-asset":
+					return json([{ asset: "USDC", free: "10", locked: "0", freeze: "0", withdrawing: "0" }]);
+				case "/api/v3/account":
+					return json({ balances: [{ asset: "EQ_PANW", free: "0.2", locked: "0.1" }, { asset: "USDT", free: "5", locked: "0" }] });
+				case "/sapi/v1/equity/trade/history":
+					return json({
+						total: 3,
+						rows: [
+							{ symbol: "PANW", side: "BUY", qty: "0.25", price: "404", executionAt: 1 },
+							{ symbol: "AAPL", side: "BUY", qty: "1", price: "200", executionAt: 2 },
+						],
+					});
+				case "/sapi/v1/equity/market/quote":
+					return url.searchParams.get("symbol") === "PANW" ? json({ bidPrice: "409", askPrice: "411" }) : new Response("");
+				case "/sapi/v1/equity/order/open-orders":
+					return json([]);
+				case "/sapi/v1/equity/order/history":
+					return json({ total: 0, rows: [] });
+			}
+			return new Response(JSON.stringify({ code: -1, msg: url.pathname }), { status: 404 });
+		}) as typeof fetch;
+		const tool = createBinanceStockAccountTool({ brokers: { binance: () => CREDS } });
+		const r = await tool.execute("t", {}, undefined, undefined, undefined as never);
+		const text = (r.content[0] as { text: string }).text;
+		assert.match(text, /보유 \(지갑 EQ_ 잔고 · 평단은 체결 내역, 1종목\)/);
+		assert.match(text, /- PANW 0\.3주 \(체결 내역으로는 0\.25주\) · 평단 \$404 · 평가 \$123/, text);
+		assert.doesNotMatch(text, /- AAPL/, "지갑에 없는 AAPL 은 체결 내역에만 있어도 보유가 아니다");
+		assert.match(text, /현물\(MAIN\) USDT: 5/);
+	});
+
 	it("전 종목 체결 조회는 symbol 을 보내지 않는다", async () => {
 		const { equityFills } = await import("../src/binance/stocks.ts");
 		const urls: string[] = [];
