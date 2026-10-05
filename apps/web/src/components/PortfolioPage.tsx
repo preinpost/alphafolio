@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { api } from "../lib/api.ts";
 import {
 	changeSince,
+	compactWon,
 	compositionOf,
 	daysBefore,
 	groupHoldings,
@@ -36,6 +37,8 @@ const usd = (n: number): string => `$${n.toLocaleString("en-US", { maximumFracti
 const usdt = (n: number): string => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT`;
 /** 원래 통화 금액 곁에 붙이는 원화 환산 — 환율이 없으면 (0) 빈 문자열 */
 const approxWon = (n: number): string => (n > 0 ? `≈ ${won(n)}` : "");
+/** 목록 행용 — 좁은 화면에서 왼쪽 정보를 밀어내지 않게 짧게 (정확한 값은 title) */
+const approxShort = (n: number): string => (n > 0 ? `≈${compactWon(n)}` : "");
 /** 원래 통화 금액 — 원화는 원, 달러는 $ */
 const money = (n: number, currency: "KRW" | "USD"): string => (currency === "KRW" ? won(n) : usd(n));
 /** 코인 단가 — 1달러 미만은 유효숫자 4자리 ($0.00001234) */
@@ -360,7 +363,7 @@ export function PortfolioPage() {
 	);
 }
 
-/** 화폐별 — 원화 · 달러 · 코인(USDT). 원래 통화 금액을 크게, 원화 환산·비중을 작게 */
+/** 화폐별 — 원화 · 달러 · 코인(USDT). 한 카드에 한 줄씩 (모바일에서 카드 셋이 쌓이면 첫 화면을 다 먹는다) */
 function CurrencyTiles({ amount, krw, total }: { amount: CurrencySplitDto; krw: CurrencySplitDto; total: number }) {
 	const tiles = [
 		{ key: "krw", label: "원화", main: won(amount.krw), sub: "", share: krw.krw, show: amount.krw !== 0 },
@@ -369,15 +372,17 @@ function CurrencyTiles({ amount, krw, total }: { amount: CurrencySplitDto; krw: 
 	].filter((t) => t.show);
 	if (tiles.length === 0) return null;
 	return (
-		<section className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+		<section className="overflow-hidden rounded-xl border border-line bg-card">
 			{tiles.map((t) => (
-				<div key={t.key} className="min-w-0 rounded-xl border border-line bg-card px-3 py-2.5">
-					<div className="flex items-baseline justify-between gap-2">
-						<span className="truncate text-xs text-muted">{t.label}</span>
-						<span className="shrink-0 text-xs text-muted">{pct(t.share, total)}</span>
+				<div key={t.key} className="flex items-center justify-between gap-3 border-b border-line px-4 py-2 last:border-0">
+					<div className="min-w-0">
+						<div className="truncate text-xs text-muted">{t.label}</div>
+						<div className="text-[11px] text-faint">{pct(t.share, total)}</div>
 					</div>
-					<div className="mt-1 truncate text-base font-semibold text-ink">{t.main}</div>
-					{t.sub && <div className="truncate text-[11px] text-faint">{t.sub}</div>}
+					<div className="shrink-0 text-right">
+						<div className="text-base font-semibold text-ink">{t.main}</div>
+						{t.sub && <div className="text-[11px] text-faint">{t.sub}</div>}
+					</div>
 				</div>
 			))}
 		</section>
@@ -482,20 +487,19 @@ const avgText = (h: BrokerHolding): string => (h.avgPrice > 0 ? (h.currency === 
 
 function HoldingRow({ h }: { h: BrokerHolding }) {
 	return (
-		<div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-0">
-			<div className="min-w-0">
+		<div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-0">
+			<div className="min-w-0 flex-1">
 				<div className="truncate text-sm text-ink">{h.name}</div>
+				{/* 해외 여부는 통화($)로 보인다 — 줄을 짧게 */}
 				<div className="truncate text-xs text-muted">
-					{qty(h.quantity)}주 · 평단 {avgText(h)}
-					{h.market === "overseas" ? " · 해외" : ""}
-					{` · ${BROKER_LABEL[h.broker] ?? h.broker}`}
-					{h.note ? ` · ${h.note}` : ""}
+					{qty(h.quantity)}주 · 평단 {avgText(h)} · {BROKER_LABEL[h.broker] ?? h.broker}
 				</div>
+				{h.note && <div className="truncate text-[11px] text-faint">{h.note}</div>}
 			</div>
 			<div className="shrink-0 text-right">
 				<div className="text-sm text-ink">{money(h.value, h.currency)}</div>
-				<div className="text-xs text-muted">
-					{h.currency === "USD" ? approxWon(h.valueKrw) : ""}
+				<div className="whitespace-nowrap text-xs text-muted" title={h.currency === "USD" ? approxWon(h.valueKrw) : undefined}>
+					{h.currency === "USD" ? approxShort(h.valueKrw) : ""}
 					{h.avgPrice > 0 && (
 						<span className={moveClass(h.profitPct)}>
 							{h.currency === "USD" && h.valueKrw > 0 ? " · " : ""}
@@ -511,21 +515,21 @@ function HoldingRow({ h }: { h: BrokerHolding }) {
 
 function GroupedRow({ g }: { g: GroupedHolding }) {
 	return (
-		<div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-0">
-			<div className="min-w-0">
+		<div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-0">
+			<div className="min-w-0 flex-1">
 				<div className="truncate text-sm text-ink">
 					{g.name}
 					{g.name !== g.symbol && <span className="ml-1.5 text-[11px] text-faint">{g.symbol}</span>}
 				</div>
 				<div className="truncate text-xs text-muted">
-					{qty(g.quantity)}주{g.market === "overseas" ? " · 해외" : ""} ·{" "}
+					{qty(g.quantity)}주 ·{" "}
 					{g.parts.map((h) => `${BROKER_LABEL[h.broker] ?? h.broker} ${qty(h.quantity)}`).join(" + ")}
 				</div>
 			</div>
 			<div className="shrink-0 text-right">
 				<div className="text-sm text-ink">{money(g.value, g.currency)}</div>
-				<div className="text-xs text-muted">
-					{g.currency === "USD" ? approxWon(g.valueKrw) : ""}
+				<div className="whitespace-nowrap text-xs text-muted" title={g.currency === "USD" ? approxWon(g.valueKrw) : undefined}>
+					{g.currency === "USD" ? approxShort(g.valueKrw) : ""}
 					{g.profitPct !== null && (
 						<span className={moveClass(g.profitPct)}>
 							{g.currency === "USD" && g.valueKrw > 0 ? " · " : ""}
@@ -558,8 +562,8 @@ function ageText(iso: string): string {
 function ManualRow({ m, onEdit }: { m: ManualAssetDto & { valueKrw: number }; onEdit: () => void }) {
 	const stale = Date.now() - Date.parse(m.updatedAt) > 90 * 86_400_000;
 	return (
-		<button onClick={onEdit} className="flex w-full items-center justify-between border-b border-line px-4 py-2.5 text-left last:border-0 active:bg-hover">
-			<div className="min-w-0">
+		<button onClick={onEdit} className="flex w-full items-center justify-between gap-3 border-b border-line px-4 py-2.5 text-left last:border-0 active:bg-hover">
+			<div className="min-w-0 flex-1">
 				<div className="truncate text-sm text-ink">{m.name}</div>
 				<div className="truncate text-xs text-muted">
 					{MANUAL_KIND_LABEL[m.kind]} · 직접 입력 · <span className={stale ? "text-danger" : ""}>{ageText(m.updatedAt)}</span>
@@ -568,7 +572,11 @@ function ManualRow({ m, onEdit }: { m: ManualAssetDto & { valueKrw: number }; on
 			</div>
 			<div className="shrink-0 text-right">
 				<div className="text-sm text-ink">{m.currency === "KRW" ? won(m.valueKrw) : usd(m.amount)}</div>
-				{m.currency === "USD" && m.valueKrw > 0 && <div className="text-xs text-muted">{approxWon(m.valueKrw)}</div>}
+				{m.currency === "USD" && m.valueKrw > 0 && (
+					<div className="whitespace-nowrap text-xs text-muted" title={approxWon(m.valueKrw)}>
+						{approxShort(m.valueKrw)}
+					</div>
+				)}
 			</div>
 		</button>
 	);
@@ -591,16 +599,18 @@ function cryptoPnl(c: CryptoHoldingDto) {
 
 function CryptoRow({ c }: { c: CryptoHoldingDto }) {
 	return (
-		<div className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-0">
-			<div className="min-w-0">
+		<div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-0">
+			<div className="min-w-0 flex-1">
 				<div className="truncate text-sm text-ink">
 					{c.asset}
 					{c.stable && <span className="ml-1.5 text-[11px] text-faint">스테이블</span>}
 				</div>
 				<div className="truncate text-xs text-muted">
 					{qty(c.quantity)}
-					{c.avgPriceUsd !== null ? ` · 평단 ${usdPrice(c.avgPriceUsd)}` : ""} · {c.wallets.map((w) => WALLET[w.wallet] ?? w.wallet).join("·")} ·{" "}
-					{BROKER_LABEL[c.source]}
+					{c.avgPriceUsd !== null ? ` · 평단 ${usdPrice(c.avgPriceUsd)}` : ""}
+				</div>
+				<div className="truncate text-[11px] text-faint">
+					{c.wallets.map((w) => WALLET[w.wallet] ?? w.wallet).join("·")} · {BROKER_LABEL[c.source]}
 				</div>
 			</div>
 			<div className="shrink-0 text-right">
@@ -609,8 +619,8 @@ function CryptoRow({ c }: { c: CryptoHoldingDto }) {
 				) : (
 					<>
 						<div className="text-sm text-ink">{usdt(c.valueUsd)}</div>
-						<div className="text-xs text-muted">
-							{approxWon(c.valueKrw)}
+						<div className="whitespace-nowrap text-xs text-muted" title={approxWon(c.valueKrw) || undefined}>
+							{approxShort(c.valueKrw)}
 							{cryptoPnl(c) ? (
 								<>
 									{c.valueKrw > 0 ? " · " : ""}

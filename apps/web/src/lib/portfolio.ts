@@ -121,3 +121,11 @@ export function daysBefore(date: string, n: number): string {
 	d.setUTCDate(d.getUTCDate() - n);
 	return d.toISOString().slice(0, 10);
 }
+
+/** 원화 환산을 짧게 (모바일 한 줄용) — 1만 이상은 만원, 1억 이상은 억원. 100만 이상은 만 단위 정수, 그 아래는 소수 한 자리 */
+export function compactWon(n: number): string {
+	const v = Math.round(n);
+	if (Math.abs(v) >= 1e8) return `${Number((v / 1e8).toFixed(2)).toLocaleString("ko-KR")}억원`;
+	if (Math.abs(v) >= 1e4) return `${Number((v / 1e4).toFixed(Math.abs(v) >= 1e6 ? 0 : 1)).toLocaleString("ko-KR")}만원`;
+	return `${v.toLocaleString("ko-KR")}원`;
+}

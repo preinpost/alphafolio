@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BrokerHolding, PortfolioSnapshotDto } from "@alphafolio/protocol";
-import { changeSince, compositionBreaks, daysBefore, groupHoldings, historySeries } from "../src/lib/portfolio.ts";
+import { changeSince, compactWon, compositionBreaks, daysBefore, groupHoldings, historySeries } from "../src/lib/portfolio.ts";
 
 const snap = (date: string, over: Partial<PortfolioSnapshotDto> = {}): PortfolioSnapshotDto => ({
 	date,
@@ -104,5 +104,16 @@ describe("날짜", () => {
 	it("월 경계를 넘는다", () => {
 		assert.equal(daysBefore("2026-10-01", 1), "2026-09-30");
 		assert.equal(daysBefore("2026-03-01", 365), "2025-03-01");
+	});
+});
+
+describe("원화 환산 짧게", () => {
+	it("만원·억원 — 100만 이상은 만 단위 정수", () => {
+		assert.equal(compactWon(1_559_752), "156만원");
+		assert.equal(compactWon(954_901), "95.5만원");
+		assert.equal(compactWon(21_250), "2.1만원");
+		assert.equal(compactWon(12_345_678), "1,235만원");
+		assert.equal(compactWon(123_456_789), "1.23억원");
+		assert.equal(compactWon(9_800), "9,800원");
 	});
 });
