@@ -8,8 +8,10 @@
  *
  * 이동 경로 (같은 계정 내부 — 외부 출금이 아니다):
  *   SPOT ↔ FUNDING     POST /sapi/v1/asset/transfer             type=MAIN_FUNDING | FUNDING_MAIN  (키 권한: Permits Universal Transfer)
- *   EARN → SPOT·FUNDING POST /sapi/v1/simple-earn/flexible/redeem    destAccount=SPOT | FUND       (키 권한: Spot & Margin Trading)
+ *   EARN → SPOT        POST /sapi/v1/simple-earn/flexible/redeem    destAccount=SPOT              (키 권한: Spot & Margin Trading)
  *   SPOT·FUNDING → EARN POST /sapi/v1/simple-earn/flexible/subscribe sourceAccount=SPOT | FUND
+ *   EARN → FUNDING 은 없다 — 환매는 destAccount=SPOT 만 받는다 (실측 2026-10-05: FUND 는 HTTP 400
+ *   "'destAccount' parameter only accepts 'SPOT'"). EARN → SPOT 뒤 SPOT → FUNDING 두 번으로 옮긴다.
  *
  * ⚠️ executeWalletTransfer 는 **실제 돈을 움직인다.** 서버의 확인 실행 경로(execute.ts)에서만 호출한다.
  * 이 모듈의 쓰기는 위 세 API 가 전부다 — 출금(withdraw)·서브계정·선물·마진 이체는 없다.
@@ -105,12 +107,12 @@ export async function walletBalances(c: BinanceCreds, wallets: readonly WalletNa
 
 // ── 이동 경로 (순수) ─────────────────────────────────────────
 
-/** 보내는·받는 지갑 → API. 같은 지갑이면 null */
+/** 보내는·받는 지갑 → API. 같은 지갑이거나 EARN → FUNDING(Binance 가 막음)이면 null */
 export function transferRoute(from: WalletName, to: WalletName): TransferRoute | null {
 	if (from === to) return null;
 	if (from === "SPOT" && to === "FUNDING") return { kind: "universal", type: "MAIN_FUNDING" };
 	if (from === "FUNDING" && to === "SPOT") return { kind: "universal", type: "FUNDING_MAIN" };
-	if (from === "EARN") return { kind: "redeem", destAccount: to === "SPOT" ? "SPOT" : "FUND" };
+	if (from === "EARN") return to === "SPOT" ? { kind: "redeem", destAccount: "SPOT" } : null;
 	return { kind: "subscribe", sourceAccount: from === "SPOT" ? "SPOT" : "FUND" };
 }
 

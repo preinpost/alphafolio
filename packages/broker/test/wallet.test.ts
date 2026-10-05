@@ -21,7 +21,7 @@ describe("이동 경로", () => {
 		assert.deepEqual(transferRoute("SPOT", "FUNDING"), { kind: "universal", type: "MAIN_FUNDING" });
 		assert.deepEqual(transferRoute("FUNDING", "SPOT"), { kind: "universal", type: "FUNDING_MAIN" });
 		assert.deepEqual(transferRoute("EARN", "SPOT"), { kind: "redeem", destAccount: "SPOT" });
-		assert.deepEqual(transferRoute("EARN", "FUNDING"), { kind: "redeem", destAccount: "FUND" });
+		assert.equal(transferRoute("EARN", "FUNDING"), null, "환매는 destAccount=SPOT 만 — Binance 가 FUND 를 HTTP 400 으로 거절");
 		assert.deepEqual(transferRoute("SPOT", "EARN"), { kind: "subscribe", sourceAccount: "SPOT" });
 		assert.deepEqual(transferRoute("FUNDING", "EARN"), { kind: "subscribe", sourceAccount: "FUND" });
 		assert.equal(transferRoute("SPOT", "SPOT"), null);
@@ -47,8 +47,8 @@ describe("요청 파라미터", () => {
 	});
 
 	it("Earn 전량은 redeemAll — 수량을 보내지 않는다 (이자가 붙어 준비 시점보다 많다)", () => {
-		const a: BinanceTransferAction = { ...base, from: "EARN", to: "FUNDING", amount: "100.7", all: true, route: { kind: "redeem", destAccount: "FUND" }, productId: "USDT001" };
-		assert.deepEqual(transferRequest(a).params, { productId: "USDT001", redeemAll: "true", destAccount: "FUND" });
+		const a: BinanceTransferAction = { ...base, from: "EARN", to: "SPOT", amount: "100.7", all: true, route: { kind: "redeem", destAccount: "SPOT" }, productId: "USDT001" };
+		assert.deepEqual(transferRequest(a).params, { productId: "USDT001", redeemAll: "true", destAccount: "SPOT" });
 	});
 
 	it("펀딩 → Earn: 예치", () => {
@@ -140,6 +140,15 @@ describe("binance_wallet — 이동 준비 (토큰만, 요청은 안 나간다)"
 			assert.equal(r.details.ok, false, JSON.stringify(p));
 		}
 		assert.equal(prepared.length, 0);
+	});
+
+	it("Earn → 펀딩은 준비하지 않는다 — 현물을 거쳐 두 번 옮기라고 안내", async () => {
+		const { run, prepared, calls } = fakeBinance();
+		const r = await run({ action: "transfer", from: "EARN", to: "FUNDING", asset: "USDT", all: true });
+		assert.equal(r.details.ok, false);
+		assert.equal(prepared.length, 0);
+		assert.ok(r.details.errors.some((e) => e.includes("현물로만")));
+		assert.equal(calls.length, 0, "지갑 조회도 하지 않는다");
 	});
 
 	it("펀딩 → Earn — 예치 상품·최소 수량은 상품 목록에서", async () => {

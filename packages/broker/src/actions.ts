@@ -228,7 +228,7 @@ export type WalletName = "SPOT" | "FUNDING" | "EARN";
 /** 지갑 쌍으로 정해지는 API — 준비 단계에서 서버가 고른다 */
 export type TransferRoute =
 	| { kind: "universal"; type: "MAIN_FUNDING" | "FUNDING_MAIN" }
-	| { kind: "redeem"; destAccount: "SPOT" | "FUND" }
+	| { kind: "redeem"; destAccount: "SPOT" }
 	| { kind: "subscribe"; sourceAccount: "SPOT" | "FUND" };
 
 export interface BinanceTransferAction {

@@ -90,7 +90,7 @@ export function createBinanceWalletTool(deps: { brokers: BrokerAccess; prepareOr
 			"Binance **지갑별 잔고**와 **지갑 간 이동**(같은 계정 안 — 외부 출금 아님). 지갑: SPOT(현물)·FUNDING(펀딩)·EARN(Simple Earn 유연 예치). " +
 			"action=balances: 세 지갑 잔고 (조회만). '바이낸스 잔고·USDT 얼마' 는 이걸로 — 현물이 0 이어도 Earn·펀딩에 있을 수 있다. " +
 			"action=transfer: from·to·asset + amount(문자열) 또는 all=true 로 이동을 **준비**한다 (실행하지 않는다 — 확인 카드에서 사용자가 [확인] 해야 옮겨진다). " +
-			"경로: SPOT↔FUNDING, EARN→SPOT/FUNDING(환매), SPOT/FUNDING→EARN(예치). 매수 전 Earn 에 있는 USDT 는 EARN→SPOT 으로 옮긴다. " +
+			"경로: SPOT↔FUNDING, EARN→SPOT(환매), SPOT/FUNDING→EARN(예치). EARN→FUNDING 은 없다 — EARN→SPOT 뒤 SPOT→FUNDING 으로 두 번 옮긴다. 매수 전 Earn 에 있는 USDT 는 EARN→SPOT 으로 옮긴다. " +
 			"사용자가 이동을 명시적으로 요청했을 때만 transfer 를 호출한다.",
 		parameters: Type.Object({
 			action: Type.Union([Type.Literal("balances"), Type.Literal("transfer")]),
@@ -130,7 +130,12 @@ export function createBinanceWalletTool(deps: { brokers: BrokerAccess; prepareOr
 			if (!all && !amountIn) card.errors.push("amount(수량) 또는 all=true 가 필요합니다.");
 			if (!all && amountIn && !validAmount(amountIn)) card.errors.push(`수량이 올바르지 않습니다: ${amountIn}`);
 			const route = transferRoute(from, to);
-			if (!route) card.errors.push("보내는 지갑과 받는 지갑이 같습니다.");
+			if (!route)
+				card.errors.push(
+					from === to
+						? "보내는 지갑과 받는 지갑이 같습니다."
+						: "Earn 환매는 현물로만 받을 수 있습니다 (Binance 제한) — Earn → 현물로 옮긴 뒤 현물 → 펀딩으로 다시 옮기세요.",
+				);
 			if (creds.testnet) card.errors.push("지갑 이동은 테스트넷이 없습니다 — 실전 키로만 됩니다.");
 			if (card.errors.length > 0 || !route) return fail();
 			card.api = routeApi(route);
