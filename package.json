@@ -1,6 +1,6 @@
 {
   "name": "alphafolio",
-  "version": "0.0.28",
+  "version": "0.0.29",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@11.0.9",
