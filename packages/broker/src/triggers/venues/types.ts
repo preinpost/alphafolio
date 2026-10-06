@@ -54,6 +54,16 @@ export interface VenuePlace {
 	clientId: string;
 }
 
+/** 체결 전량의 수수료. quoteFee=null 은 외부 자산 환산 등 금액 비용을 확인하지 못한 경우. */
+export interface Settlement {
+	baseFeeQty: number;
+	quoteFee: number | null;
+	/** 일부 비용만 미확인인 경우에도 확인된 금액 비용을 버리지 않는다. */
+	knownQuoteFee?: number;
+	/** 비용을 환산하지 못한 체결분의 거래 금액. 그 부분에만 추정률을 적용한다. */
+	unpricedQuoteAmount?: number;
+}
+
 export interface VenueOrderState {
 	filledQty: number;
 	/** 체결된 것의 평균가 — 체결이 없으면 null */
@@ -80,6 +90,8 @@ export interface ExecVenue {
 	place(o: VenuePlace): Promise<{ orderId: string; ref?: string }>;
 	cancel(orderId: string): Promise<void>;
 	status(orderId: string): Promise<VenueOrderState>;
+	/** 반복매매 회계용. 체결 전량을 확인하지 못하면 throw (특히 코인 순수량을 추측하지 않는다). */
+	settlement?(orderId: string, filledQty: number): Promise<Settlement>;
 	/** 기동 복구 — 이전 프로세스가 낸 주문을 이 어댑터가 취소·조회할 수 있게 */
 	adopt?(o: { orderId: string; ref: string | null; side: VenuePlace["side"]; quantity: number; price: number }): void;
 }

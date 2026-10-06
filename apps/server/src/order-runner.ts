@@ -17,6 +17,7 @@
  * 수량은 코인 단위(소수)라 격자(venue.grid)로 자른다. 보호 트리거의 남은 수량이 최소 주문 단위보다 작으면(수수료로 빠진 부스러기) 끝낸다.
  */
 import { randomBytes } from "node:crypto";
+import { RangeRunner } from "./range-runner.ts";
 import {
 	cryptoAutoProblem,
 	currencyOf,
@@ -59,6 +60,8 @@ export interface OrderSignal {
 	bar: WatchBar;
 	/** 봉 마감 시각 */
 	closeAt: number;
+	/** 봉 평가가 아닌 현재 호가 로스컷 조회 */
+	rangeRisk?: boolean;
 }
 
 export interface RunnerDeps {
@@ -90,6 +93,7 @@ export function reportLines(r: ExecReport, plan: Pick<ExecPlan, "side" | "quanti
 
 export class OrderRunner {
 	private readonly d: RunnerDeps;
+	private readonly range: RangeRunner;
 	private readonly queues = new Map<string, Promise<void>>();
 	/** 비상 정지 시각 — 그 전에 시작한 체결은 멈춘다 */
 	private readonly stoppedAt = new Map<string, number>();
@@ -98,6 +102,19 @@ export class OrderRunner {
 
 	constructor(deps: RunnerDeps) {
 		this.d = deps;
+		this.range = new RangeRunner(deps);
+	}
+
+	startRangeRisk(isActive: (user: string) => boolean): void {
+		this.range.start((signal) => this.submit(signal), isActive);
+	}
+
+	stopRangeRisk(): void {
+		this.range.stop();
+	}
+
+	async tickRangeRisk(isActive: (user: string) => boolean): Promise<void> {
+		await this.range.tickRisk((signal) => this.submit(signal), isActive);
 	}
 
 	private now(): number {
@@ -150,6 +167,7 @@ export class OrderRunner {
 	private async handle(sig: OrderSignal): Promise<void> {
 		const t = this.d.store.get(sig.trigger.member, sig.trigger.id);
 		if (!t || t.action.kind !== "order") return;
+		if (t.action.range) return this.range.handle(sig, (started) => (this.stoppedAt.get(t.member) ?? 0) >= started);
 		const { target, order } = t.action;
 		const c = t.source.condition;
 		const venueId = c.market.venue;
@@ -372,13 +390,16 @@ export class OrderRunner {
 	 */
 	async recover(): Promise<number> {
 		const list = await this.d.trades.running();
+		let rangeRecoveryFailed = false;
 		for (const rec of list) {
 			try {
 				await this.recoverOne(rec);
 			} catch (err) {
 				console.warn(`[trade] 복구 실패 ${rec.id}: ${err instanceof Error ? err.message : err}`);
+				if (rec.plan.rangeLeg) rangeRecoveryFailed = true;
 			}
 		}
+		if (rangeRecoveryFailed) throw new Error("반복매매 체결을 복구하지 못해 신규 주문을 차단합니다");
 		return list.length;
 	}
 
@@ -386,7 +407,7 @@ export class OrderRunner {
 		const children = rec.children.map((c) => ({ ...c }));
 		let problem: string | null = null;
 		let venue: ExecVenue | null = null;
-		if (children.some((c) => c.state === "open")) {
+		if (rec.plan.rangeLeg || children.some((c) => c.state === "open")) {
 			try {
 				venue = await this.d.venue(rec.member, rec.plan.target, rec.symbol);
 			} catch (err) {
@@ -434,6 +455,10 @@ export class OrderRunner {
 			children,
 			reason: unknown ? (children.find((c) => c.state === "unknown")?.reason ?? "결과 모름") : "서버 재시작으로 체결을 중단했습니다 (잔량 취소)",
 		};
+		if (rec.plan.rangeLeg) {
+			await this.range.recover(rec, report, venue);
+			return;
+		}
 		await this.d.trades.finish(rec.id, report);
 		const t = this.d.store.get(rec.member, rec.triggerId);
 		const stub = t ?? ({ id: rec.triggerId, member: rec.member, name: rec.symbol, conversationId: null, fires: 0, maxFires: null, state: "off" } as unknown as TriggerRecord);

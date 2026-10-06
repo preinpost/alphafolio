@@ -341,6 +341,44 @@ describe("Binance 체결 어댑터", () => {
 		assert.deepEqual([reqs[1]!.method, reqs[1]!.query.orderId, s.open], ["GET", "991", true]);
 	});
 
+	it("체결 수수료를 주문별로 서명 조회하고 1000건을 넘으면 다음 페이지를 읽는다", async () => {
+		const { reqs, make } = venueWith((request) => {
+			const count = request.query.fromId ? 1 : 1000;
+			const firstId = Number(request.query.fromId ?? 1);
+			return json(Array.from({ length: count }, (_, index) => ({
+				id: firstId + index, orderId: 991, qty: "0.001", commission: "0", commissionAsset: "USDT",
+			})));
+		});
+		const venue = await make();
+		assert.deepEqual(await venue.settlement!("991", 1.001), { baseFeeQty: 0, quoteFee: 0 });
+		assert.equal(reqs.length, 2);
+		assert.equal(reqs[0]!.path, "/api/v3/myTrades");
+		assert.equal(reqs[0]!.query.orderId, "991");
+		assert.equal(reqs[0]!.headers["X-MBX-APIKEY"], CREDS.key);
+		assert.equal(reqs[1]!.query.fromId, "1001");
+	});
+
+	it("요청 제한 Retry-After를 어댑터 재생성 후에도 존중한다", async () => {
+		let clock = 1_900_000_000_000;
+		let calls = 0;
+		const options = {
+			rules: BTC,
+			now: () => clock,
+			fetch: async () => {
+				calls++;
+				if (calls === 1) return new Response(JSON.stringify({ code: -1003, msg: "Too many requests" }), { status: 429, headers: { "Retry-After": "30" } });
+				return json({ bids: [["2700", "1"]], asks: [["2701", "1"]] });
+			},
+		};
+		const creds = { ...CREDS, testnet: true };
+		await assert.rejects((await binanceVenue(creds, "BTCUSDT", options)).book(), VenueRejected);
+		await assert.rejects((await binanceVenue(creds, "BTCUSDT", options)).book(), /요청 제한/);
+		assert.equal(calls, 1);
+		clock += 30_001;
+		await (await binanceVenue(creds, "BTCUSDT", options)).book();
+		assert.equal(calls, 2);
+	});
+
 	it("거래할 수 없는 종목이면 만들지 않는다", async () => {
 		await assert.rejects(binanceVenue(CREDS, "BTCUSDT", { rules: { ...BTC, status: "BREAK" } }), /거래할 수 없습니다/);
 		await assert.rejects(binanceVenue(CREDS, "BTCUSDT", { rules: { ...BTC, spot: false } }), /현물 거래가 막혀/);

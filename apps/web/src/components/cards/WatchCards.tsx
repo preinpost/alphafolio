@@ -41,10 +41,21 @@ export function WatchConfirmCardView({ card }: { card: WatchConfirmCard }) {
 			<dl className="mt-3 grid grid-cols-[minmax(0,6.5rem)_1fr] gap-x-3 gap-y-1.5 border-t border-line pt-3 text-xs">
 				<dt className="text-faint">마지막 마감</dt>
 				<dd className="text-ink tabular-nums">{card.lastClose !== null && card.lastBarAt !== null ? `${n(card.lastClose)} (${kst(card.lastBarAt)} 시작 봉, KST)` : "없음"}</dd>
-				<dt className="text-faint">지난 {preview.days}일</dt>
-				<dd className="text-ink">
-					{preview.count === 0 ? "한 번도 울리지 않았을 조건입니다" : `${preview.count}번 울렸을 것 — 최근 ${preview.recent.map((r) => `${kst(r.at)} (${n(r.close)})`).join(", ")}`}
-				</dd>
+				{card.range ? (
+					<>
+						<dt className="text-faint">반복 범위</dt>
+						<dd className="text-ink tabular-nums">매수 {n(card.range.buyPrice)} 이하 · 매도 {n(card.range.sellPrice)} 이상</dd>
+						<dt className="text-faint">비용 계산</dt>
+						<dd className="text-ink">{card.range.fees}</dd>
+					</>
+				) : (
+					<>
+						<dt className="text-faint">지난 {preview.days}일</dt>
+						<dd className="text-ink">
+							{preview.count === 0 ? "한 번도 울리지 않았을 조건입니다" : `${preview.count}번 울렸을 것 — 최근 ${preview.recent.map((r) => `${kst(r.at)} (${n(r.close)})`).join(", ")}`}
+						</dd>
+					</>
+				)}
 				{card.feed && (
 					<>
 						<dt className="text-faint">시세 기준</dt>
@@ -81,16 +92,21 @@ export function WatchConfirmCardView({ card }: { card: WatchConfirmCard }) {
 				)}
 				<dt className="text-faint">받는 곳</dt>
 				<dd className="text-ink">{["앱 화면", ...card.channels.map((x) => (x === "telegram" ? "텔레그램" : x))].join(" · ")}</dd>
-				<dt className="text-faint">횟수 · 만료</dt>
+				<dt className="text-faint">{card.range ? "반복 기간" : "횟수 · 만료"}</dt>
 				<dd className="text-ink">
-					{limits.maxFires ? `최대 ${limits.maxFires}번` : "만료까지 계속"}
-					{limits.cooldownSec ? ` · 다시 울리기까지 ${Math.round(limits.cooldownSec / 60)}분` : ""} · {limits.expiresAt.slice(0, 10)} 만료
+					{card.range ? "사용자가 정지하거나 로스컷이 발생할 때까지" : <>
+						{limits.maxFires ? `최대 ${limits.maxFires}번` : "만료까지 계속"}
+						{limits.cooldownSec ? ` · 다시 울리기까지 ${Math.round(limits.cooldownSec / 60)}분` : ""} · {limits.expiresAt.slice(0, 10)} 만료
+					</>}
 				</dd>
 			</dl>
 			{c.phase === "idle" &&
 				(order ? (
 					<p className="mt-3 text-[11px] text-ink">
-						<b>켜면 조건이 맞을 때 확인 없이 주문이 나갑니다.</b> 봉이 닫힌 뒤의 값으로만 판정하고, 정규장에서만 최악 허용가 안의 지정가로 냅니다. 서버가 멈춰 있던 동안의 신호로는 주문하지 않습니다.
+						<b>켜면 조건이 맞을 때 확인 없이 주문이 나갑니다.</b>{" "}
+						{card.range
+							? "일반 매매는 봉 마감 기준이고, 로스컷은 현재 호가를 5초 주기로 확인합니다. 주식은 정규장 거래 가능 시간, 코인은 24시간 처리하며 서버 중단 중에는 손절할 수 없습니다."
+							: "봉이 닫힌 뒤의 값으로만 판정하고, 주식은 정규장에서만 최악 허용가 안의 지정가로 냅니다. 서버가 멈춰 있던 동안의 신호로는 주문하지 않습니다."}
 					</p>
 				) : (
 					<p className="mt-3 text-[11px] text-faint">봉이 닫힌 뒤의 값으로만 판정합니다 (중간에 꼬리로 찍고 돌아온 가격에는 울리지 않습니다). 알림만 보내고 주문은 내지 않습니다.</p>

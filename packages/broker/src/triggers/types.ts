@@ -175,6 +175,8 @@ export type TriggerAction =
 			kind: "order";
 			target: OrderTarget;
 			order: OrderRule;
+			/** 반복 박스권 전략 — 원래 매수 규칙과 체결 상태를 한 레코드에 보관 */
+			range?: import("./range.ts").RangeTrade;
 			/** 매수 체결 뒤 보호를 건다 (매수만) */
 			protect?: ProtectRule;
 			/** 보호 트리거 — 이 포지션을 판다 (매도만, fire = while_true) */

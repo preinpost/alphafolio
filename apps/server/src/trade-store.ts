@@ -19,6 +19,8 @@ export interface ExecPlan extends ExecIntent {
 	/** 신호 때 기준가 (중간가 또는 봉 종가) */
 	ref: number;
 	maxAmount: number;
+	/** 반복매매 복구에서 손절·정상매도를 구분 */
+	rangeLeg?: "normal" | "stop";
 }
 
 export interface ExecRecord {
@@ -115,7 +117,7 @@ export class TradeStore {
 	}
 
 	async finish(id: string, report: ExecReport): Promise<void> {
-		const amount = (report.avgPrice ?? 0) * report.filledQty;
+		const amount = report.buyCostAmount ?? (report.avgPrice ?? 0) * report.filledQty;
 		await d1Query(
 			this.d1(),
 			"UPDATE trigger_execs SET state = ?, report = ?, children = ?, filled_qty = ?, amount = ?, reserved = 0, updated_at = ? WHERE id = ?",

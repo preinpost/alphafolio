@@ -54,11 +54,15 @@ export interface ChildOrder {
 	filledQty: number;
 	avgPrice: number | null;
 	reason: string | null;
+	/** 선택적 실제 비용 — 반복매매 실행기가 체결 후 조회하고 영속화 */
+	settlement?: import("./venues/types.ts").Settlement;
 }
 
 export type ExecStatus = "filled" | "partial" | "none" | "unknown";
 
 export interface ExecReport {
+	/** 반복매매의 매수 비용 포함 지출 — 하루 한도 회계용 */
+	buyCostAmount?: number;
 	status: ExecStatus;
 	filledQty: number;
 	avgPrice: number | null;

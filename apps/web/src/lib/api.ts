@@ -124,6 +124,22 @@ export type McpAddInput =
 	| { name: string; url: string; auth: "bearer"; token: string };
 
 export interface WatchItem {
+	repeat?: boolean;
+	range?: {
+		phase: string;
+		qty: number;
+		unit: string;
+		currency: TradeCurrency;
+		cost: number;
+		realizedPnl: number;
+		buyEstimated: boolean;
+		pnlEstimated: boolean;
+		estimated: boolean;
+		cycles: number;
+		dustQty: number;
+		resumeBlocked: boolean;
+		removalBlocked: boolean;
+	};
 	id: string;
 	name: string;
 	text: string;

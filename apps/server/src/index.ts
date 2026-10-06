@@ -195,7 +195,7 @@ async function main(): Promise<void> {
 		if ((venue === "binance") !== (spec.action.target.broker === "binance")) return "시장과 주문 계좌가 맞지 않습니다 — 다시 준비해 주세요";
 		if (spec.action.target.broker === "binance_stock" && venue !== "us") return "Binance 미국 주식 계좌는 미장 감시에만 씁니다 — 다시 준비해 주세요";
 		// 보호 트리거는 횟수가 아니라 남은 수량으로 끝난다
-		if (spec.limits.maxFires === null && !spec.action.position) return "자동 매매 감시는 최대 횟수가 필요합니다";
+		if (spec.limits.maxFires === null && !spec.action.position && !spec.action.range) return "자동 매매 감시는 최대 횟수가 필요합니다";
 		if (spec.action.position && spec.action.order.side !== "SELL") return "보호는 매도만 합니다";
 		try {
 			const now = await orderTarget(brokerAccess(user), spec.action.target.broker);
@@ -919,9 +919,12 @@ async function main(): Promise<void> {
 			// 끝나지 못한 자동 매매부터 정리한 뒤 감시를 시작한다 (새 주문은 내지 않는다 — 걸린 주문 취소·결과 모름 알림)
 			void runner
 				.recover()
-				.then((n) => n > 0 && console.log(`  자동 매매 복구: 끝나지 못한 신호 ${n}건 정리`))
-				.catch((err: unknown) => console.warn("[trade] 기동 복구 실패:", err instanceof Error ? err.message : err))
-				.finally(() => watcher.start());
+				.then((n) => {
+					if (n > 0) console.log(`  자동 매매 복구: 끝나지 못한 신호 ${n}건 정리`);
+					watcher.start();
+					runner.startRangeRisk((user) => accounts.has(user));
+				})
+				.catch((err: unknown) => console.warn("[trade] 기동 복구 실패 — 감시를 시작하지 않습니다:", err instanceof Error ? err.message : err));
 			telegramBots.start();
 			if (autoTradeOff()) console.log("  자동 매매 비활성 (AF_AUTO_TRADE_DISABLED=1) — 주문 트리거는 알림만");
 		}
@@ -931,6 +934,7 @@ async function main(): Promise<void> {
 		console.log("\n종료 중…");
 		snapshotScheduler.stop();
 		watcher.stop();
+		runner.stopRangeRisk();
 		telegramBots.stopAll();
 		void runtimes.disposeAll();
 		server.close(() => process.exit(0));

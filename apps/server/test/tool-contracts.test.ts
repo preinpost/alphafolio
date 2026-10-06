@@ -53,15 +53,16 @@ const examples: Record<string, Array<Record<string, unknown>>> = {
 	kis_stream: [{ find: "주식 체결" }],
 	derivatives_greeks: [{ type: "call", underlying: 100, strike: 100, expiry: "2026-12-31", vol: 25, currency: "USD" }],
 	mcp_call: [{}, { server: "example", tool: "get_quote", describe: true }],
+	range_trade: [{ action: "list" }, { action: "pause", id: "watch-1" }, { action: "prepare", symbol: "ETHUSDT", interval: "5m", buyPrice: 2700, sellPrice: 2720, amount: 1000, stopPct: 5, buyCostPct: 0.1, sellCostPct: 0.1 }],
 	watch_alert: [{ action: "list" }, { action: "pause", id: "watch-1" }, { action: "prepare", symbol: "ETHUSDT", market: "binance", interval: "1h", all: [{ left: "close", op: "<", right: 2600 }] }],
 };
 
 describe("사용자별 도구 등록 계약", () => {
-	it("등록된 34개 도구가 선언된 목록과 정확히 일치하고 이름이 중복되지 않는다", () => {
+	it("등록된 35개 도구가 선언된 목록과 정확히 일치하고 이름이 중복되지 않는다", () => {
 		const { opts } = registry();
 		const tools = createUserTools(opts, "ms");
 		const names = tools.map((t) => t.name);
-		assert.equal(names.length, 34);
+		assert.equal(names.length, 35);
 		assert.equal(new Set(names).size, names.length);
 		assert.deepEqual(names, [...CUSTOM_TOOL_NAMES]);
 		assert.deepEqual(Object.keys(examples).sort(), [...names].sort());
@@ -70,7 +71,7 @@ describe("사용자별 도구 등록 계약", () => {
 	it("생성 단계에서 자격증명이나 네트워크에 접근하지 않는다", () => {
 		globalThis.fetch = (async () => { throw new Error("unexpected network request"); }) as typeof fetch;
 		const { opts } = registry();
-		assert.equal(createUserTools(opts, "ms").length, 34);
+		assert.equal(createUserTools(opts, "ms").length, 35);
 	});
 
 	it("모든 도구에 설명·객체 스키마·실행 함수가 있고 호출 예제가 스키마에 맞는다", () => {
@@ -97,6 +98,7 @@ describe("사용자별 도구 등록 계약", () => {
 			["order_change", { action: "execute" }],
 			["order_conditional", { action: "create", conditionalOrderId: "C-1" }],
 			["watch_alert", { action: "arm" }], ["watch_alert", { action: "delete", id: "watch-1" }],
+			["range_trade", { action: "arm" }], ["range_trade", { action: "resume", id: "watch-1" }],
 			["binance_wallet", { action: "withdraw" }],
 			["binance_order", { action: "place", symbol: "BTCUSDT", quantity: 0.001 }],
 		] as const) assert.equal(Check(tools.get(name)!.parameters, args), false, name);
@@ -125,7 +127,7 @@ describe("사용자별 도구 등록 계약", () => {
 describe("시스템 프롬프트와 도구 계약", () => {
 	it("페르소나가 지시하는 자체 도구 이름은 실제로 등록되어 있다", () => {
 		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "ms" });
-		const refs = [...prompt.matchAll(/`((?:ledger_|market_|portfolio_|finance_|order_|binance_|kis_|data_)[a-z_]+|stock_research|toss_query|mcp_call|watch_alert)`/g)].map((m) => m[1]!);
+		const refs = [...prompt.matchAll(/`((?:ledger_|market_|portfolio_|finance_|order_|binance_|kis_|data_)[a-z_]+|stock_research|toss_query|mcp_call|watch_alert|range_trade)`/g)].map((m) => m[1]!);
 		assert.ok(refs.length > 20);
 		for (const name of refs) assert.ok((CUSTOM_TOOL_NAMES as readonly string[]).includes(name), name);
 	});

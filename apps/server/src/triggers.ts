@@ -6,7 +6,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { d1Query, ulid, type D1Config } from "@alphafolio/ledger";
-import { conditionText, evalDelay, isStock, lastClosedStart, nextCloseAt, orderText, type Condition, type TriggerAction, type TriggerSpec, type TriggerState } from "@alphafolio/broker";
+import { conditionText, evalDelay, isStock, lastClosedStart, nextCloseAt, orderText, currencyOf, unitOf, RANGE_PHASE_LABEL, validateRange, validateOrderRule, type Condition, type TriggerAction, type TriggerSpec, type TriggerState } from "@alphafolio/broker";
 import type { WatchSummary } from "@alphafolio/broker/watch-tools";
 
 export const MAX_ACTIVE_PER_USER = 20;
@@ -105,6 +105,30 @@ function baseline(c: Condition, now: number): number {
 	return lastClosedStart(c, now - evalDelay(c));
 }
 
+function rangeSummary(rec: TriggerRecord): Pick<WatchSummary, "repeat" | "range"> {
+	if (rec.action.kind !== "order" || !rec.action.range) return {};
+	const state = rec.action.range.state;
+	const market = rec.source.condition.market;
+	return {
+		repeat: true,
+		range: {
+			phase: RANGE_PHASE_LABEL[state.phase],
+			qty: state.qty,
+			unit: unitOf(market.venue, market.symbol),
+			currency: currencyOf(market.venue),
+			cost: state.cost,
+			realizedPnl: state.realizedPnl,
+			buyEstimated: state.buyEstimated,
+			pnlEstimated: state.pnlEstimated,
+			estimated: state.buyEstimated || state.pnlEstimated,
+			cycles: state.cycles,
+			dustQty: state.dustQty,
+			resumeBlocked: state.phase === "blocked" || state.phase === "stopped" || !!state.pendingExecId,
+			removalBlocked: state.qty > 0 || !!state.pendingExecId || state.phase === "blocked",
+		},
+	};
+}
+
 export function toSummary(rec: TriggerRecord, now: number): WatchSummary {
 	return {
 		id: rec.id,
@@ -118,6 +142,7 @@ export function toSummary(rec: TriggerRecord, now: number): WatchSummary {
 		lastFiredAt: rec.lastFiredAt,
 		lastEvalAt: rec.lastEvalAt,
 		nextEvalAt: nextEvalAt(rec, now),
+		...rangeSummary(rec),
 	};
 }
 
@@ -176,6 +201,13 @@ export class TriggerStore {
 		const active = this.list(user).filter((t) => ACTIVE.has(t.state)).length;
 		if (active >= MAX_ACTIVE_PER_USER) throw new TriggerError(400, `감시는 ${MAX_ACTIVE_PER_USER}개까지 켤 수 있습니다 — 안 쓰는 감시를 지워 주세요`);
 		if (Date.parse(spec.limits.expiresAt) <= this.now()) throw new TriggerError(400, "만료일이 지났습니다 — 다시 준비해 주세요");
+		if (spec.action.kind === "order" && spec.action.range) {
+			const problems = [...validateRange(spec.action.range), ...validateOrderRule(spec.action.order)];
+			if (spec.action.order.side !== "BUY" || spec.action.position || spec.action.protect) problems.push("반복매매는 독립적인 매수 규칙만 사용합니다");
+			const s = spec.action.range.state;
+			if (s.phase !== "buying" || s.qty !== 0 || s.cost !== 0 || s.pendingExecId || s.lastExecId) problems.push("새 반복매매는 비보유 매수 대기 상태여야 합니다");
+			if (problems.length) throw new TriggerError(400, problems.join("\n"));
+		}
 
 		let id: string;
 		do id = `w${randomBytes(4).toString("hex")}`;
@@ -212,13 +244,20 @@ export class TriggerStore {
 
 	private async update(rec: TriggerRecord, patch: Partial<TriggerRecord>): Promise<TriggerRecord> {
 		const next = { ...rec, ...patch, updatedAt: new Date(this.now()).toISOString() };
-		await d1Query(
-			this.d1(),
-			`UPDATE triggers SET state = ?, fires = ?, last_bar_t = ?, last_fired_at = ?, last_eval_at = ?, last_error = ?, updated_at = ? WHERE id = ?`,
-			[next.state, next.fires, next.lastBarT, next.lastFiredAt, next.lastEvalAt, next.lastError, next.updatedAt, rec.id],
-		);
-		this.cache.set(rec.id, next);
-		return next;
+		// 평가 시각만 갱신하는 호출이 동시 일시정지·체결 상태를 덮어쓰지 않게 변경 필드만 쓴다.
+		const columns = {
+			state: "state", fires: "fires", lastBarT: "last_bar_t", lastFiredAt: "last_fired_at",
+			lastEvalAt: "last_eval_at", lastError: "last_error",
+		} as const;
+		const keys = (Object.keys(columns) as Array<keyof typeof columns>).filter((key) => key in patch);
+		const assignments = [...keys.map((key) => `${columns[key]} = ?`), "updated_at = ?"];
+		await d1Query(this.d1(), `UPDATE triggers SET ${assignments.join(", ")} WHERE id = ?`, [
+			...keys.map((key) => next[key]), next.updatedAt, rec.id,
+		]);
+		const current = this.cache.get(rec.id);
+		const merged = { ...(current ?? rec), ...patch, updatedAt: next.updatedAt };
+		if (current) this.cache.set(rec.id, merged);
+		return merged;
 	}
 
 	/** 일시정지 — 에이전트·텔레그램·앱 누구나 (위험을 줄이는 쪽) */
@@ -237,6 +276,10 @@ export class TriggerStore {
 		const rec = this.get(user, id);
 		if (!rec) throw new TriggerError(404, `없는 감시입니다: ${id}`);
 		if (rec.state !== "paused") throw new TriggerError(400, `일시정지된 감시가 아닙니다 (${rec.state})`);
+		if (rec.action.kind === "order" && rec.action.range) {
+			const s = rec.action.range.state;
+			if (s.phase === "blocked" || s.phase === "stopped" || s.pendingExecId) throw new TriggerError(400, "손절 종료 또는 결과 확인이 필요한 전략은 재개할 수 없습니다 — 주문·잔고를 직접 확인해 주세요");
+		}
 		if (Date.parse(rec.expiresAt) <= this.now()) throw new TriggerError(400, "이미 만료된 감시입니다 — 새로 만들어 주세요");
 		return this.update(rec, { state: "armed", lastError: null, lastBarT: baseline(rec.source.condition, this.now()) });
 	}
@@ -244,6 +287,10 @@ export class TriggerStore {
 	async remove(user: string, id: string): Promise<TriggerRecord> {
 		const rec = this.get(user, id);
 		if (!rec) throw new TriggerError(404, `없는 감시입니다: ${id}`);
+		if (rec.action.kind === "order" && rec.action.range) {
+			const s = rec.action.range.state;
+			if (s.qty > 0 || s.pendingExecId || s.phase === "blocked") throw new TriggerError(400, "보유분 또는 확인이 필요한 주문이 있어 전략을 삭제할 수 없습니다 — 먼저 주문·잔고를 확인해 주세요");
+		}
 		await d1Query(this.d1(), "DELETE FROM triggers WHERE id = ?", [id]);
 		this.cache.delete(id);
 		return rec;
@@ -262,8 +309,10 @@ export class TriggerStore {
 		if (!rec) return undefined;
 		const next = { ...rec, action, updatedAt: new Date(this.now()).toISOString() };
 		await d1Query(this.d1(), "UPDATE triggers SET action = ?, updated_at = ? WHERE id = ?", [JSON.stringify(action), next.updatedAt, id]);
-		this.cache.set(id, next);
-		return next;
+		const current = this.cache.get(id);
+		const merged = { ...(current ?? rec), action, updatedAt: next.updatedAt };
+		if (current) this.cache.set(id, merged);
+		return merged;
 	}
 
 	/** 감시기 전용 — 상태·평가 결과 반영 */

@@ -20,9 +20,11 @@
 import { floorToStep, subDec } from "../../binance/decimal.ts";
 import { signedRequest, symbolRules, type BinanceCreds, type SymbolRules } from "../../binance/trade.ts";
 import { PROVIDERS } from "../../data/gateway.ts";
-import { VenueRejected, VenueUnknown, type Book, type BookLevel, type ExecVenue, type Grid, type VenueOrderState } from "./types.ts";
+import { VenueRejected, VenueUnknown, type Book, type BookLevel, type ExecVenue, type Grid, type Settlement, type VenueOrderState } from "./types.ts";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+/** 요청 한도는 IP 기준이다. 어댑터를 매번 만들어도 같은 호스트의 Retry-After를 존중한다. */
+const retryAfterByHost = new Map<string, number>();
 
 export interface BinanceVenueOptions {
 	now?: () => number;
@@ -98,6 +100,46 @@ export function binanceOrderState(o: { status?: string; executedQty?: string; cu
 	};
 }
 
+export interface BinanceTradeFee {
+	qty: string;
+	quoteQty?: string;
+	commission: string;
+	commissionAsset: string;
+}
+
+/** myTrades 가 체결 전량을 포함할 때만 수량 수수료를 확정한다. BNB 등은 금액 추정으로 대체. */
+export function binanceSettlement(trades: BinanceTradeFee[], filledQty: number, assets: Pick<SymbolRules, "base" | "quote">): Settlement {
+	let qty = 0;
+	let baseFeeQty = 0;
+	let quoteFee = 0;
+	let externalFee = false;
+	let unpricedQuoteAmount = 0;
+	let unpricedAmountKnown = true;
+	for (const trade of trades) {
+		const amount = Number(trade.qty);
+		const fee = Number(trade.commission);
+		if (!(Number.isFinite(amount) && amount > 0 && Number.isFinite(fee) && fee >= 0)) throw new Error("체결 수수료 정보가 올바르지 않습니다");
+		qty += amount;
+		if (fee === 0) continue;
+		if (trade.commissionAsset === assets.base) baseFeeQty += fee;
+		else if (trade.commissionAsset === assets.quote) quoteFee += fee;
+		else {
+			externalFee = true;
+			const notional = Number(trade.quoteQty);
+			if (Number.isFinite(notional) && notional > 0) unpricedQuoteAmount += notional;
+			else unpricedAmountKnown = false;
+		}
+	}
+	if (Math.abs(qty - filledQty) > Math.max(1e-12, filledQty * 1e-8)) throw new Error("체결 전량의 수수료를 확인하지 못했습니다 — 순보유 수량 확인이 필요합니다");
+	if (!externalFee) return { baseFeeQty, quoteFee };
+	return {
+		baseFeeQty,
+		quoteFee: null,
+		...(quoteFee > 0 ? { knownQuoteFee: quoteFee } : {}),
+		...(unpricedAmountKnown ? { unpricedQuoteAmount } : {}),
+	};
+}
+
 /** 실행 여부를 모르는 오류 코드 — -1006 예상 밖 응답, -1007 백엔드 응답 시간 초과 */
 const UNKNOWN_CODES = new Set([-1006, -1007]);
 
@@ -129,6 +171,8 @@ export async function binanceVenue(creds: BinanceCreds, symbol: string, opts: Bi
 
 	/** 한 번 보낸다 — 응답이 없거나 읽지 못하면 status 0 */
 	const call = async (method: "GET" | "POST" | "DELETE", path: string, params: Record<string, string>, signed: boolean): Promise<unknown> => {
+		const retryAt = retryAfterByHost.get(base) ?? 0;
+		if (retryAt > now()) throw new VenueRejected(`Binance 요청 제한 — ${Math.ceil((retryAt - now()) / 1000)}초 뒤 조회할 수 있습니다`);
 		let url: string;
 		let init: RequestInit;
 		if (signed) {
@@ -142,6 +186,11 @@ export async function binanceVenue(creds: BinanceCreds, symbol: string, opts: Bi
 			res = await f(url, init);
 		} catch (err) {
 			throw classifyBinance(0, null, scrub(err instanceof Error ? err.message : String(err)));
+		}
+		if (res.status === 429 || res.status === 418) {
+			const seconds = Number(res.headers.get("Retry-After"));
+			const delay = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 60_000;
+			retryAfterByHost.set(base, now() + delay);
 		}
 		const text = await res.text().catch(() => "");
 		let body: unknown = null;
@@ -210,6 +259,24 @@ export async function binanceVenue(creds: BinanceCreds, symbol: string, opts: Bi
 		async status(orderId) {
 			const r = (await call("GET", "/api/v3/order", { symbol, orderId }, true)) as Record<string, string>;
 			return binanceOrderState(r ?? {});
+		},
+		async settlement(orderId, filledQty) {
+			// 공식 REST account-endpoints: symbol+orderId+fromId 조합 지원, 최대 1000건/페이지.
+			const trades: BinanceTradeFee[] = [];
+			let fromId: string | undefined;
+			for (let page = 0; page < 10; page++) {
+				const params: Record<string, string> = { symbol, orderId, limit: "1000" };
+				if (fromId) params.fromId = fromId;
+				const rows = await call("GET", "/api/v3/myTrades", params, true) as Array<BinanceTradeFee & { id: number; orderId: number }>;
+				if (!Array.isArray(rows)) throw new Error("체결 수수료 응답이 올바르지 않습니다");
+				const own = rows.filter((row) => String(row.orderId) === orderId);
+				trades.push(...own);
+				if (rows.length < 1000) break;
+				const next = Number(rows.at(-1)?.id) + 1;
+				if (!Number.isSafeInteger(next) || next <= Number(fromId ?? 0)) throw new Error("체결 수수료 페이지를 확인할 수 없습니다");
+				fromId = String(next);
+			}
+			return binanceSettlement(trades, filledQty, rules);
 		},
 	};
 }

@@ -56,7 +56,7 @@ export function renderList(list: WatchSummary[], publicUrl?: string): { html: st
 		return { html: `감시가 없습니다. 만들기는 AlphaFolio 에서 합니다${publicUrl ? ` — <a href="${escapeHtml(publicUrl)}">열기</a>` : ""}.`, buttons: [] };
 	}
 	const lines = list.map((w, i) => {
-		const bits = [`발동 ${w.fires}${w.maxFires ? `/${w.maxFires}` : ""}회`, `만료 ${w.expiresAt.slice(5, 10).replace("-", "/")}`];
+		const bits = [`발동 ${w.fires}${w.maxFires ? `/${w.maxFires}` : ""}회`, w.repeat ? "정지할 때까지 반복" : `만료 ${w.expiresAt.slice(5, 10).replace("-", "/")}`];
 		if (w.state === "armed" && w.nextEvalAt) bits.push(`다음 평가 ${kstShort(w.nextEvalAt)}`);
 		return `${STATE_ICON[w.state]} <b>${i + 1}. ${escapeHtml(w.name)}</b>\n${escapeHtml(w.text)}${w.order ? `\n💱 자동 ${escapeHtml(w.order)}` : ""}\n${bits.join(" · ")}`;
 	});

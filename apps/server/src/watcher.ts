@@ -192,8 +192,14 @@ export class Watcher {
 			if (rec.state !== "armed") break;
 			rec = await this.fire(rec, bars[i] as WatchBar, valuesAt(c, bars, i), now);
 		}
-		if (rec.state === "armed" || rec.state === "done") {
-			await this.opts.store.mark(rec.id, { lastBarT: newest, lastEvalAt: now, lastError: null });
+		const latest = this.opts.store.get(rec.member, rec.id);
+		if (latest?.state === "armed" || latest?.state === "done") {
+			await this.opts.store.mark(rec.id, {
+				lastBarT: Math.max(latest.lastBarT ?? newest, newest),
+				lastEvalAt: now,
+				// 반복매매 오류는 호가 감시·실행기가 해소한다. 봉 조회 성공으로 손절 오류를 지우지 않는다.
+				...(latest.action.kind === "order" && latest.action.range ? {} : { lastError: null }),
+			});
 		}
 	}
 

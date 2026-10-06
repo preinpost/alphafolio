@@ -41,6 +41,7 @@ export * from "./triggers/stock-intraday.ts";
 export * from "./triggers/presets.ts";
 export * from "./triggers/executor.ts";
 export * from "./triggers/rule.ts";
+export * from "./triggers/range.ts";
 export * from "./triggers/venues/types.ts";
 export * from "./triggers/venues/tick.ts";
 export * from "./triggers/venues/toss.ts";

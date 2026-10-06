@@ -13,6 +13,7 @@ import type { CondNode, Condition, Interval, OrderRule, OrderSize, OrderTarget, 
 import { INTERVAL_LABEL } from "./describe.ts";
 import { stockGrid } from "./venues/tick.ts";
 import type { Grid } from "./venues/types.ts";
+import { rangeText, type RangeTrade } from "./range.ts";
 
 /** 하루 매수 한도·체결 금액의 통화 — 국장 원, 미장 달러, 코인 USDT */
 export type TradeCurrency = "KRW" | "USD" | "USDT";
@@ -148,7 +149,8 @@ export function tradingDay(venue: Venue, now: number): string {
 export const currencyOf = (venue: Venue): TradeCurrency => (venue === "krx" ? "KRW" : venue === "us" ? "USD" : "USDT");
 
 /** 주문 동작 한 줄 — "매수 5,000,000원어치 · 한국투자 ****-01 · 최악 +1% · 기다리며 60초" */
-export function orderText(a: { target: OrderTarget; order: OrderRule; protect?: ProtectRule; position?: Position }, venue: Venue, symbol = ""): string {
+export function orderText(a: { target: OrderTarget; order: OrderRule; protect?: ProtectRule; position?: Position; range?: RangeTrade }, venue: Venue, symbol = ""): string {
+	if (a.range) return `${rangeText(a.range)} · ${sizeText(a.order.size, currencyOf(venue), unitOf(venue, symbol))} · ${a.target.accountLabel}`;
 	const r = a.order;
 	const unit = unitOf(venue, symbol);
 	const how = r.urgency === "patient" ? `기다리며 ${r.deadlineSec}초` : `즉시 (${r.deadlineSec}초 안)`;

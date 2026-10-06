@@ -8,6 +8,9 @@
  * 동작: 알림, 또는 자동 매매(order — 자체 체결기. 주식 PLAN §40 2단계 · 코인 4단계 — Binance 현물 USDT 마켓, 24시간).
  */
 import { Type } from "typebox";
+import { createRangeTools } from "./range-tool.ts";
+import { chooseFeed, guessVenue, summaryLine } from "./tool-helpers.ts";
+export { chooseFeed, guessVenue, summaryLine } from "./tool-helpers.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { binanceSymbolHint, bStockGate, bStockOf, bStockStatus, bStockWarnings, type BStock } from "../binance/bstocks.ts";
 import { symbolRules } from "../binance/trade.ts";
@@ -53,30 +56,25 @@ export function previewBars(c: Pick<Condition, "market" | "interval" | "session"
 	return Math.ceil((PREVIEW_DAYS * DAY) / CRYPTO_STEP[c.interval]);
 }
 
-/** 시장을 말하지 않았을 때 — 6자리(숫자 위주)는 국장, 코인 호가 자산으로 끝나면 Binance, 그 외 미장 */
-/**
- * 주식 출처 고르기 — 켤 때 고정한다 (감시기는 이 출처로만 조회).
- * 국장: basis 를 말하지 않으면 KIS 가 있을 때 KRX 정규장, 없으면 토스 통합. 통합이면 KIS(UN) 우선. 미장: KIS 우선.
- */
-export function chooseFeed(venue: "krx" | "us", has: { kis: boolean; toss: boolean }, basis?: "krx" | "integrated"): StockFeed {
-	if (!has.kis && !has.toss) throw new Error("주식 감시에는 증권 키가 필요합니다 — 설정 → 연결 → 증권 (한국투자 또는 토스)");
-	if (venue === "us") return { provider: has.kis ? "kis" : "toss" };
-	const b = basis ?? (has.kis ? "krx" : "integrated");
-	if (b === "krx") {
-		if (!has.kis) throw new Error("KRX 정규장 기준 시세는 한국투자 키가 필요합니다 — 토스는 KRX+NXT 통합 시세뿐입니다 (basis: 'integrated' 로 준비할 수 있다)");
-		return { provider: "kis", basis: "krx" };
-	}
-	return { provider: has.kis ? "kis" : "toss", basis: "integrated" };
-}
-
-export function guessVenue(symbol: string): Venue {
-	if (/^\d{6}$|^\d{4}[A-Z0-9]\d$/.test(symbol)) return "krx";
-	if (/^[A-Z0-9]{2,}(USDT|USDC|FDUSD|BTC|ETH|BNB|KRW)$/.test(symbol) && symbol.length >= 6) return "binance";
-	return "us";
-}
-
 /** 목록 한 줄 — 서버 저장소가 채운다 */
 export interface WatchSummary {
+	/** 반복 전략은 만료·횟수 제한 없이 정지할 때까지 */
+	repeat?: boolean;
+	range?: {
+		phase: string;
+		qty: number;
+		unit: string;
+		currency: TradeCurrency;
+		cost: number;
+		realizedPnl: number;
+		buyEstimated: boolean;
+		pnlEstimated: boolean;
+		estimated: boolean;
+		cycles: number;
+		dustQty: number;
+		resumeBlocked: boolean;
+		removalBlocked: boolean;
+	};
 	id: string;
 	name: string;
 	text: string;
@@ -94,6 +92,7 @@ export interface WatchSummary {
 /** protocol 의 WatchConfirmCard 와 같은 모양 */
 export interface WatchConfirmCard {
 	kind: "watch-confirm-card";
+	range?: { buyPrice: number; sellPrice: number; stop: string; fees: string };
 	token: string;
 	expiresAt: number;
 	name: string;
@@ -157,15 +156,6 @@ export interface WatchToolDeps {
 	/** 보유 종목 보호 — 그 계좌의 매도 가능 수량과 평단 (평단을 모르면 null) */
 	position?: (symbol: string, target: OrderTarget) => Promise<{ sellable: number; avgPrice: number | null }>;
 	now?: () => number;
-}
-
-const STATE_LABEL: Readonly<Record<TriggerState, string>> = { armed: "켜짐", paused: "일시정지", done: "소진", expired: "만료", off: "꺼짐" };
-
-export function summaryLine(w: WatchSummary): string {
-	const bits = [STATE_LABEL[w.state], `발동 ${w.fires}${w.maxFires ? `/${w.maxFires}` : ""}회`, `만료 ${w.expiresAt.slice(0, 10)}`];
-	if (w.lastFiredAt) bits.push(`마지막 발동 ${kstShort(w.lastFiredAt)}`);
-	if (w.state === "armed" && w.nextEvalAt) bits.push(`다음 평가 ${kstShort(w.nextEvalAt)}`);
-	return `- ${w.id} · ${w.name} — ${w.text}${w.order ? `\n  → 자동 ${w.order}` : ""}\n  ${bits.join(" · ")}`;
 }
 
 /** 조건 트리는 재귀라 스키마로는 모양만 알리고 검증은 validateCondition 이 한다 (사람이 읽을 오류로) */
@@ -666,7 +656,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 			return { content: [{ type: "text" as const, text }], details: card };
 		},
 	});
-	return [tool];
+	return [tool, ...createRangeTools(deps)];
 }
 
-export const WATCH_TOOL_NAMES = ["watch_alert"] as const;
+export const WATCH_TOOL_NAMES = ["watch_alert", "range_trade"] as const;

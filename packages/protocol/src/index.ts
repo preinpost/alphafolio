@@ -213,6 +213,8 @@ export interface McpConfirmCard {
  */
 export interface WatchConfirmCard {
 	kind: "watch-confirm-card";
+	/** 반복매매 확인 정보. 없는 기존 감시 카드는 그대로 렌더링한다. */
+	range?: { buyPrice: number; sellPrice: number; stop: string; fees: string };
 	token: string;
 	expiresAt: number;
 	name: string;

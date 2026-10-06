@@ -72,6 +72,18 @@ function eventText(e: WatchEventItem): string {
 	return bits.filter(Boolean).join(" · ");
 }
 
+function RangeStatus({ range }: { range: NonNullable<WatchItem["range"]> }) {
+	const quantity = (value: number) => `${value.toLocaleString("en-US", { maximumFractionDigits: 8 })} ${range.unit}`;
+	return (
+		<div className="space-y-1 rounded-lg border border-line bg-inset p-2 text-xs text-ink">
+			<p>{range.phase} · 종료된 회차 {range.cycles}회</p>
+			<p>전략 보유분 {quantity(range.qty)} · 매입원가 {money(range.cost, range.currency)}{range.qty > 0 && range.buyEstimated ? " (매수 비용 추정)" : ""}</p>
+			<p>실현 순손익 {money(range.realizedPnl, range.currency)}{range.pnlEstimated ? " (비용 추정 포함)" : ""}</p>
+			{range.dustQty > 0 && <p className="text-muted">최소 주문 단위 미만 잔량 {quantity(range.dustQty)}은 별도 보유로 남아 있습니다.</p>}
+		</div>
+	);
+}
+
 /** 하루 매수 한도 — 통화별. 비우고 저장하면 지운다 */
 function LimitRow({ currency, value, onSave, busy }: { currency: TradeCurrency; value: number | null; onSave: (v: number | null) => void; busy: boolean }) {
 	const [draft, setDraft] = useState<string>(value === null ? "" : String(value));
@@ -151,21 +163,24 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 									{w.order}
 								</div>
 							)}
+							{w.range && <RangeStatus range={w.range} />}
 							<div className="text-[11px] text-faint">
 								발동 {w.fires}
-								{w.maxFires ? `/${w.maxFires}` : ""}회 · 만료 {w.expiresAt.slice(0, 10)}
+								{w.maxFires ? `/${w.maxFires}` : ""}회 · {w.repeat ? "정지할 때까지 반복" : `만료 ${w.expiresAt.slice(0, 10)}`}
 								{w.lastFiredAt ? ` · 마지막 발동 ${kst(w.lastFiredAt)}` : ""}
 								{w.state === "armed" && w.nextEvalAt ? ` · 다음 확인 ${kst(w.nextEvalAt)}` : ""}
 							</div>
 							{w.lastError && <div className="text-[11px] text-danger">최근 오류: {w.lastError}</div>}
 							<div className="flex flex-wrap items-center gap-2 pt-0.5">
 								{w.state === "armed" && (
-									<button className={btn} disabled={act.isPending} onClick={() => act.mutate(() => api.pauseWatch(w.id))}>
+									<button className={btn} disabled={act.isPending} onClick={() => {
+										if (!w.repeat || confirm("전략을 일시정지할까요? 손절 감시도 중단되며 보유분은 매도하지 않습니다.")) act.mutate(() => api.pauseWatch(w.id));
+									}}>
 										일시정지
 									</button>
 								)}
 								{w.state === "paused" && (
-									<button className={btn} disabled={act.isPending} onClick={() => act.mutate(() => api.resumeWatch(w.id))}>
+									<button className={btn} disabled={act.isPending || w.range?.resumeBlocked} title={w.range?.resumeBlocked ? "계좌의 주문·잔고를 확인해야 합니다" : undefined} onClick={() => act.mutate(() => api.resumeWatch(w.id))}>
 										다시 켜기
 									</button>
 								)}
@@ -175,10 +190,12 @@ export function WatchSettings({ onOpenConversation }: { onOpenConversation?: (id
 									</button>
 								)}
 								<button
-									className="shrink-0 text-xs text-faint"
-									disabled={act.isPending}
+									className="shrink-0 text-xs text-faint disabled:opacity-40"
+									disabled={act.isPending || w.range?.removalBlocked}
+									title={w.range?.removalBlocked ? "보유분 또는 확인이 필요한 주문이 있습니다" : undefined}
 									onClick={() => {
-										if (confirm(`${w.name} 을(를) 삭제할까요? 되돌릴 수 없습니다.`)) act.mutate(() => api.deleteWatch(w.id));
+										const dustWarning = w.range?.dustQty ? " 최소 주문 단위 미만 잔량은 계좌에 그대로 남습니다." : "";
+										if (confirm(`${w.name} 을(를) 삭제할까요? 되돌릴 수 없습니다.${dustWarning}`)) act.mutate(() => api.deleteWatch(w.id));
 									}}
 								>
 									삭제
