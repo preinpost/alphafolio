@@ -52,3 +52,17 @@ describe("카드는 확인 다이얼로그만", () => {
 		assert.equal(block?.type === "toolCall" ? block.result?.card : "x", undefined);
 	});
 });
+
+describe("확장 custom 메시지", () => {
+	it("pi-web-access 의 백그라운드 fetch 알림은 화면에 내보내지 않는다", () => {
+		const ready = {
+			role: "custom",
+			customType: "web-search-content-ready",
+			content: "Content fetched for 14/22 URLs [muy3xwmaxigcmg]. Partial page content now available.",
+			display: true,
+		};
+		const out = serializeMessages([user("오늘 장 왜 안좋니?"), ok("찾아볼게요"), ready, ok("정리하면")]);
+		assert.deepEqual(out.map((m) => m.role), ["user", "assistant", "assistant"]);
+		assert.ok(out.every((m) => !JSON.stringify(m.content).includes("Content fetched")));
+	});
+});

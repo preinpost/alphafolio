@@ -92,6 +92,8 @@ export function serializeMessages(messages: unknown[]): UIMessage[] {
 	const out: UIMessage[] = [];
 	for (const [i, m] of msgs.entries()) {
 		if (m.role === "toolResult") continue; // toolCall 블록에 합쳐진다
+		// 확장이 넣는 custom 메시지(pi-web-access 의 "Content fetched for …" 등)는 모델에게 주는 신호다 — 화면에는 내보내지 않는다
+		if (m.role === "custom") continue;
 
 		if (m.role === "user") {
 			const blocks: UIContentBlock[] = [];
