@@ -87,6 +87,8 @@ const TITLE_MAX = 40;
  * (허용목록이면 확장 툴이 조용히 사라진다).
  */
 const EXCLUDED_TOOLS = ["read", "write", "edit", "bash", "powershell", "grep", "find", "ls"];
+/** 웹 툴은 처음부터 켠다 — web_enable 을 거치게 두면 모델이 기사 본문을 읽지 않고 답하는 일이 잦다 */
+const EAGER_TOOLS = ["web_search", "fetch_content", "get_search_content"];
 
 export class RuntimeManager {
 	private readonly opts: RuntimeManagerOptions;
@@ -143,6 +145,7 @@ export class RuntimeManager {
 			authPath: this.opts.authPath,
 			apiKeys: this.opts.llmKeys(user),
 			excludeTools: EXCLUDED_TOOLS,
+			eagerTools: EAGER_TOOLS,
 			customTools: createUserTools(this.opts, user),
 			systemPrompt: buildSystemPrompt({ ledgerEnabled: true, member: user }),
 		});

@@ -55,6 +55,13 @@ export interface RuntimeOptions {
 	 * 나머지(우리 customTools + 확장 툴)는 허용한다.
 	 */
 	excludeTools: string[];
+	/**
+	 * 대화를 열자마자 켤 확장 툴 (등록된 것만).
+	 *
+	 * pi-web-access 0.31+ 는 새 대화에 `web_enable` 만 노출하고, 모델이 그걸 불러야 다음 요청부터
+	 * `web_search`·`fetch_content` 가 보인다. 모델이 이 단계를 건너뛰면 기사 본문을 한 번도 읽지 않고 답한다.
+	 */
+	eagerTools?: string[];
 	customTools: ToolDefinition[];
 	systemPrompt: string;
 	/** 사고(추론) 강도. 모델이 추론을 지원하지 않으면 pi 가 무시한다. */
@@ -198,6 +205,12 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 		await session.bindExtensions({
 			onError: (e) => console.warn(`[agent:ext] ${e.event} — ${e.extensionPath}: ${e.error}`),
 		});
+		// 확장의 session_start 가 툴 선택을 끝낸 뒤에 켠다 (그 전에 켜면 확장이 다시 끈다)
+		if (opts.eagerTools?.length) {
+			const registered = new Set(session.getAllTools().map((t) => t.name));
+			const eager = opts.eagerTools.filter((name) => registered.has(name));
+			if (eager.length) session.setActiveToolsByName([...new Set([...session.getActiveToolNames(), ...eager])]);
+		}
 		const listeners = new Set<(event: unknown) => void>();
 		const unsubscribe = session.subscribe((event: unknown) => {
 			for (const l of listeners) l(event);

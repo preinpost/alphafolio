@@ -36,6 +36,13 @@ describe("답변 문장 지침", () => {
 		assert.ok(prompt.trimEnd().endsWith(stripFrontMatter(raw)));
 	});
 
+	it("분석 답변은 자세히 — 시장 전체 흐름 절차가 있다", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		assert.ok(prompt.includes("사용자는 정보를 최대한 많이 얻고 싶어 한다"));
+		assert.ok(prompt.includes("### 시장 전체 흐름"));
+		assert.ok(prompt.includes("getMarketIndicatorInvestorTrading (KOSPI·KOSDAQ 각각"));
+	});
+
 	it("라이선스(MIT) 고지가 함께 있다", () => {
 		const license = readFileSync(new URL("../vendor/fluent-korean/LICENSE", import.meta.url), "utf8");
 		assert.match(license, /MIT License/);
