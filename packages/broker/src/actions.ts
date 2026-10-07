@@ -221,13 +221,122 @@ export interface BinanceStockCancelAction {
 
 export type BinanceStockAction = BinanceStockPlaceAction | BinanceStockCancelAction;
 
+// ── Binance USDⓈ-M 선물 (binance/futures.ts) — 값은 문자열 10진수 ──
+
+/** 단방향 모드는 BOTH, 양방향(Hedge) 모드는 LONG·SHORT — 준비 단계에서 계정 모드를 읽어 정한다 */
+export type FuturesPositionSide = "BOTH" | "LONG" | "SHORT";
+export type FuturesMarginType = "ISOLATED" | "CROSSED";
+
+interface FuturesBase {
+	broker: "binance";
+	/** 예: BTCUSDT (무기한) */
+	symbol: string;
+	/** 예: BTC */
+	base: string;
+	/** 증거금 자산 — 예: USDT */
+	marginAsset: string;
+}
+
+/** 추가로 거는 익절·손절 — 포지션 전체를 시장가로 닫는 조건부 주문 (Algo, closePosition) */
+export interface FuturesTpsl {
+	takeProfitPrice?: string;
+	stopLossPrice?: string;
+}
+
+/**
+ * 진입·추가 — 포지션을 늘린다. 실행기는 주문 전에 종목 설정을 이 값으로 맞추고(준비 시점 설정과 다를 때만),
+ * 주문이 접수되면 익절·손절을 건다.
+ */
+export interface BinanceFuturesOpenAction extends FuturesBase, FuturesTpsl {
+	kind: "binance-futures-open";
+	/** BUY = 롱, SELL = 숏 */
+	side: OrderSide;
+	positionSide: FuturesPositionSide;
+	type: "LIMIT" | "MARKET";
+	/** 기준 자산 수량 (stepSize 로 내림) */
+	quantity: string;
+	/** 지정가 (tickSize 로 내림) */
+	price?: string;
+	leverage: number;
+	marginType: FuturesMarginType;
+	/** 준비 시점의 종목 설정 — 다른 것만 바꾼다 */
+	current: { leverage: number; marginType: FuturesMarginType };
+	/** 표시용 예상 포지션 크기 (증거금 자산) */
+	estimatedNotional: string;
+}
+
+/** 청산 — 포지션을 줄인다 (단방향은 reduceOnly, 양방향은 positionSide 로 줄어들기만 한다) */
+export interface BinanceFuturesCloseAction extends FuturesBase {
+	kind: "binance-futures-close";
+	/** 롱 청산 = SELL, 숏 청산 = BUY */
+	side: OrderSide;
+	positionSide: FuturesPositionSide;
+	type: "LIMIT" | "MARKET";
+	quantity: string;
+	price?: string;
+	/** 준비 시점 포지션 수량 (부호 포함, 표시용) */
+	positionAmt: string;
+}
+
+/** 열린 포지션에 익절·손절 — 트리거되면 포지션 전체를 시장가로 닫는다 */
+export interface BinanceFuturesTpslAction extends FuturesBase, FuturesTpsl {
+	kind: "binance-futures-tpsl";
+	/** 청산 방향 (롱이면 SELL) */
+	side: OrderSide;
+	positionSide: FuturesPositionSide;
+}
+
+/** 원주문 — 서버가 미체결 조회로 채운다. algo = 조건부 주문(익절·손절 등, 번호는 algoId) */
+export interface FuturesOriginal {
+	source: "order" | "algo";
+	id: number;
+	side: OrderSide;
+	type: string;
+	/** 지정가 — 없으면 "0" */
+	price: string;
+	/** 조건부 주문의 트리거 가격 */
+	triggerPrice?: string;
+	/** 수량 — 포지션 전체 청산 주문은 "0" */
+	quantity: string;
+	closePosition?: boolean;
+}
+
+export interface BinanceFuturesCancelAction extends FuturesBase {
+	kind: "binance-futures-cancel";
+	original: FuturesOriginal;
+}
+
+export interface BinanceFuturesCancelAllAction extends FuturesBase {
+	kind: "binance-futures-cancel-all";
+	/** 준비 시점의 일반·조건부 미체결 건수 — 0 인 쪽은 요청하지 않는다 */
+	orders: number;
+	algo: number;
+}
+
+/** 종목 설정 — 레버리지·증거금 방식 (주문 없이) */
+export interface BinanceFuturesSettingsAction extends FuturesBase {
+	kind: "binance-futures-settings";
+	leverage?: number;
+	marginType?: FuturesMarginType;
+	current: { leverage: number; marginType: FuturesMarginType };
+}
+
+export type BinanceFuturesAction =
+	| BinanceFuturesOpenAction
+	| BinanceFuturesCloseAction
+	| BinanceFuturesTpslAction
+	| BinanceFuturesCancelAction
+	| BinanceFuturesCancelAllAction
+	| BinanceFuturesSettingsAction;
+
 // ── Binance 지갑 간 이동 (같은 계정 내부 — 외부 출금 아님, binance/wallet.ts) ──
 
-export type WalletName = "SPOT" | "FUNDING" | "EARN";
+/** FUTURES = USDⓈ-M 선물 지갑 */
+export type WalletName = "SPOT" | "FUNDING" | "EARN" | "FUTURES";
 
 /** 지갑 쌍으로 정해지는 API — 준비 단계에서 서버가 고른다 */
 export type TransferRoute =
-	| { kind: "universal"; type: "MAIN_FUNDING" | "FUNDING_MAIN" }
+	| { kind: "universal"; type: "MAIN_FUNDING" | "FUNDING_MAIN" | "MAIN_UMFUTURE" | "UMFUTURE_MAIN" | "FUNDING_UMFUTURE" | "UMFUTURE_FUNDING" }
 	| { kind: "redeem"; destAccount: "SPOT" }
 	| { kind: "subscribe"; sourceAccount: "SPOT" | "FUND" };
 
@@ -264,6 +373,7 @@ export type OrderAction =
 	| ConditionalCancelAction
 	| BinanceAction
 	| BinanceStockAction
+	| BinanceFuturesAction
 	| BinanceTransferAction;
 
 /** 로그 한 줄 — 금액·계좌 없이 무엇을 하는지만 */
@@ -297,6 +407,18 @@ export function describeAction(a: OrderAction): string {
 			return `binance 미국 주식 ${a.symbol} ${a.side} ${a.type} ${a.quantity ? `${a.quantity}주` : `${a.notional} ${a.quote}`}`;
 		case "binance-stock-cancel":
 			return `binance 미국 주식 취소 ${a.symbol} ${a.original.orderId.slice(0, 12)}`;
+		case "binance-futures-open":
+			return `binance 선물 진입 ${a.symbol} ${a.side} ${a.type} ${a.quantity} ${a.leverage}x ${a.marginType}${a.stopLossPrice ? " +SL" : ""}${a.takeProfitPrice ? " +TP" : ""}`;
+		case "binance-futures-close":
+			return `binance 선물 청산 ${a.symbol} ${a.side} ${a.type} ${a.quantity}`;
+		case "binance-futures-tpsl":
+			return `binance 선물 익절·손절 ${a.symbol}${a.takeProfitPrice ? " TP" : ""}${a.stopLossPrice ? " SL" : ""}`;
+		case "binance-futures-cancel":
+			return `binance 선물 취소 ${a.symbol} ${a.original.source} #${a.original.id}`;
+		case "binance-futures-cancel-all":
+			return `binance 선물 전체 취소 ${a.symbol} (${a.orders}+${a.algo}건)`;
+		case "binance-futures-settings":
+			return `binance 선물 설정 ${a.symbol}${a.leverage ? ` ${a.leverage}x` : ""}${a.marginType ? ` ${a.marginType}` : ""}`;
 		case "binance-transfer":
 			return `binance 지갑 이동 ${a.from}→${a.to} ${a.asset} ${a.all ? "전량" : a.amount}`;
 	}

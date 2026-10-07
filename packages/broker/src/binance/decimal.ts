@@ -80,6 +80,17 @@ export function mulDec(a: string | number, b: string | number): string {
 	return formatDec({ n: x.n * y.n, scale: x.scale + y.scale });
 }
 
+/** a ÷ b 를 단위(step)의 배수로 내림 — 금액 → 수량 (예: 100 USDT ÷ 83785.7 → 0.001). 양수만 */
+export function divToStep(a: string | number, b: string | number, step: string): string {
+	const x = parseDec(a);
+	const y = parseDec(b);
+	const st = parseDec(step);
+	if (x.n < 0n || y.n <= 0n || st.n <= 0n) throw new Error(`나눌 수 없습니다: ${a} ÷ ${b} (단위 ${step})`);
+	// a / (b × step) = x.n·10^(y.scale+st.scale) / (y.n·st.n·10^x.scale) — 몫(내림)이 단위 개수
+	const k = (x.n * 10n ** BigInt(y.scale + st.scale)) / (y.n * st.n * 10n ** BigInt(x.scale));
+	return formatDec({ n: k * st.n, scale: st.scale });
+}
+
 /** 표시용 비율 — (a / b - 1) × 100, 소수 1자리 (판정에는 쓰지 않는다) */
 export function pctDiff(a: string, b: string): number {
 	const x = Number(a);

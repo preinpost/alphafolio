@@ -36,7 +36,7 @@ describe("재시도된 실패", () => {
 
 describe("카드는 확인 다이얼로그만", () => {
 	it("확인·취소가 있는 카드는 남긴다", () => {
-		for (const kind of ["order-preview-card", "order-change-card", "conditional-order-card", "binance-order-card", "binance-transfer-card", "mcp-confirm-card", "watch-confirm-card"]) {
+		for (const kind of ["order-preview-card", "order-change-card", "conditional-order-card", "binance-order-card", "binance-transfer-card", "binance-futures-card", "mcp-confirm-card", "watch-confirm-card"]) {
 			assert.equal(parseCard({ kind })?.kind, kind);
 		}
 	});

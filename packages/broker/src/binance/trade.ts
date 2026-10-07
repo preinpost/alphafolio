@@ -58,10 +58,10 @@ async function readJson(res: Response, c: BinanceCreds | undefined, label: strin
 	return data;
 }
 
-/** 공개 조회 (키 없이) */
-async function publicGet(path: string, query: Record<string, string>, c?: BinanceCreds): Promise<unknown> {
+/** 공개 조회 (키 없이). host 를 주면 그 서버로 (선물 fapi — futures.ts) */
+export async function publicGet(path: string, query: Record<string, string>, c?: BinanceCreds, host: string = base(c)): Promise<unknown> {
 	const qs = new URLSearchParams(query).toString();
-	const res = await fetch(`${base(c)}${path}${qs ? `?${qs}` : ""}`, { signal: AbortSignal.timeout(15_000) });
+	const res = await fetch(`${host}${path}${qs ? `?${qs}` : ""}`, { signal: AbortSignal.timeout(15_000) });
 	return readJson(res, c, path);
 }
 
@@ -75,19 +75,27 @@ export function signedRequest(
 	params: Record<string, string>,
 	c: BinanceCreds,
 	now: number = Date.now(),
+	host: string = base(c),
 ): { url: string; init: RequestInit } {
 	const q = new URLSearchParams(params);
 	q.set("timestamp", String(now));
 	q.set("recvWindow", "5000");
 	const qs = q.toString();
 	return {
-		url: `${base(c)}${path}?${qs}&signature=${binanceSign(qs, c.secret)}`,
+		url: `${host}${path}?${qs}&signature=${binanceSign(qs, c.secret)}`,
 		init: { method, headers: { "X-MBX-APIKEY": c.key }, signal: AbortSignal.timeout(15_000) },
 	};
 }
 
-export async function signed(method: "GET" | "POST" | "DELETE", path: string, params: Record<string, string>, c: BinanceCreds, label: string): Promise<unknown> {
-	const { url, init } = signedRequest(method, path, params, c);
+export async function signed(
+	method: "GET" | "POST" | "DELETE",
+	path: string,
+	params: Record<string, string>,
+	c: BinanceCreds,
+	label: string,
+	host?: string,
+): Promise<unknown> {
+	const { url, init } = signedRequest(method, path, params, c, Date.now(), host);
 	return readJson(await fetch(url, init), c, label);
 }
 

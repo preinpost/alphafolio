@@ -8,7 +8,10 @@
  *   bStock 지갑의 AAPLB 같은 토큰은 코인이 아니라 해외주식으로 옮긴다 (기준가 계산 방식으로 확인 — bstocks.ts)
  *   평단   코인은 현물 체결(`GET /api/v3/myTrades`, 달러 마켓)의 이동평균으로 추정 — 입금·Convert·보상분은 원가를 몰라 커버리지로 밝힌다
  *
- * 조회만 한다. 선물·마진은 넣지 않는다.
+ *   선물   USDⓈ-M 선물 지갑의 증거금 잔고(지갑 + 미실현 손익)를 그 자산으로 센다 — 포지션 크기(명목가)는 자산이 아니라 넣지 않는다.
+ *          키에 선물 권한이 없으면 조용히 뺀다 (선물을 안 쓰는 계정에 매번 경고가 뜨지 않게)
+ *
+ * 조회만 한다. 마진은 넣지 않는다.
  * 테스트넷 키는 모의 잔고라 합계에서 뺀다 (connect 가 skipped).
  */
 import { bStockOf } from "../binance/bstocks.ts";
@@ -34,6 +37,7 @@ const WALLET_TEXT: Record<string, string> = {
 	FUNDING: "펀딩",
 	EARN: "Earn 유연",
 	EARN_LOCKED: "Earn 고정",
+	FUTURES: "선물",
 };
 
 async function lockedEarn(c: BinanceCreds): Promise<WalletAsset[]> {
@@ -261,6 +265,7 @@ async function fetchBinance(c: BinanceCreds, access: BrokerAccess): Promise<Sour
 	const failed: string[] = [];
 	for (const w of walletsRes.status === "fulfilled" ? walletsRes.value : []) {
 		if (w.assets) wallets.push({ wallet: w.wallet, assets: w.assets });
+		else if (w.wallet === "FUTURES" && /permissions/i.test(w.error ?? "")) continue;
 		else failed.push(`${WALLET_TEXT[w.wallet] ?? w.wallet}(${w.error ?? "실패"})`);
 	}
 	// 지갑을 하나도 못 읽었으면 출처 전체 실패 — 0원으로 보이면 자산이 사라진 것처럼 보인다

@@ -46,7 +46,13 @@ const examples: Record<string, Array<Record<string, unknown>>> = {
 	order_conditional: [{ action: "cancel", conditionalOrderId: "C-1" }],
 	binance_order: [{ action: "place", symbol: "BTCUSDT", side: "BUY", type: "LIMIT", quantity: "0.001", price: "80000" }],
 	binance_stock_order: [{ action: "place", symbol: "AAPL", side: "BUY", type: "MARKET", notional: "5" }, { action: "cancel", symbol: "AAPL" }],
-	binance_stock_account: [{}], binance_wallet: [{ action: "balances" }, { action: "transfer", from: "EARN", to: "SPOT", asset: "USDT", all: true }],
+	binance_stock_account: [{}], binance_wallet: [{ action: "balances" }, { action: "transfer", from: "EARN", to: "SPOT", asset: "USDT", all: true }, { action: "transfer", from: "SPOT", to: "FUTURES", asset: "USDT", amount: "50" }],
+	binance_futures: [
+		{ action: "account" },
+		{ action: "open", symbol: "BTCUSDT", side: "BUY", type: "MARKET", margin: "20", leverage: 5, marginType: "ISOLATED", stopLossPrice: "80000" },
+		{ action: "close", symbol: "BTCUSDT" }, { action: "tpsl", symbol: "BTCUSDT", stopLossPrice: "80000" },
+		{ action: "cancel", symbol: "BTCUSDT", algoId: 1 }, { action: "settings", symbol: "BTCUSDT", leverage: 3 },
+	],
 	kis_find: [{ query: "외국인 수급" }], kis_call: [{ api: "FHPIF05030100", params: {} }],
 	toss_query: [{ api: "getConditionalOrders", describe: true }],
 	data_find: [{ query: "earnings calendar" }], data_call: [{ provider: "binance", api: "GET /api/v3/openOrders" }],
@@ -58,11 +64,11 @@ const examples: Record<string, Array<Record<string, unknown>>> = {
 };
 
 describe("사용자별 도구 등록 계약", () => {
-	it("등록된 35개 도구가 선언된 목록과 정확히 일치하고 이름이 중복되지 않는다", () => {
+	it("등록된 36개 도구가 선언된 목록과 정확히 일치하고 이름이 중복되지 않는다", () => {
 		const { opts } = registry();
 		const tools = createUserTools(opts, "ms");
 		const names = tools.map((t) => t.name);
-		assert.equal(names.length, 35);
+		assert.equal(names.length, 36);
 		assert.equal(new Set(names).size, names.length);
 		assert.deepEqual(names, [...CUSTOM_TOOL_NAMES]);
 		assert.deepEqual(Object.keys(examples).sort(), [...names].sort());
@@ -71,7 +77,7 @@ describe("사용자별 도구 등록 계약", () => {
 	it("생성 단계에서 자격증명이나 네트워크에 접근하지 않는다", () => {
 		globalThis.fetch = (async () => { throw new Error("unexpected network request"); }) as typeof fetch;
 		const { opts } = registry();
-		assert.equal(createUserTools(opts, "ms").length, 35);
+		assert.equal(createUserTools(opts, "ms").length, 36);
 	});
 
 	it("모든 도구에 설명·객체 스키마·실행 함수가 있고 호출 예제가 스키마에 맞는다", () => {
@@ -100,6 +106,9 @@ describe("사용자별 도구 등록 계약", () => {
 			["watch_alert", { action: "arm" }], ["watch_alert", { action: "delete", id: "watch-1" }],
 			["range_trade", { action: "arm" }], ["range_trade", { action: "resume", id: "watch-1" }],
 			["binance_wallet", { action: "withdraw" }],
+			["binance_futures", { action: "withdraw" }],
+			["binance_futures", { action: "open", symbol: "BTCUSDT", leverage: 2.5 }],
+			["binance_futures", { action: "open", symbol: "BTCUSDT", quantity: 0.001 }],
 			["binance_order", { action: "place", symbol: "BTCUSDT", quantity: 0.001 }],
 		] as const) assert.equal(Check(tools.get(name)!.parameters, args), false, name);
 	});

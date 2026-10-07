@@ -20,7 +20,7 @@ type Phase = "idle" | "sending" | "done" | "failed" | "expired";
 const BROKER_LABEL = { toss: "토스", kis: "한국투자", binance: "Binance" } as const;
 
 /** 어느 증권사로 나가는지 — 카드마다 눈에 띄게 (토스로 준비한 주문과 KIS 주문이 섞이지 않게) */
-function BrokerBadge({ broker }: { broker: "toss" | "kis" | "binance" }) {
+export function BrokerBadge({ broker }: { broker: "toss" | "kis" | "binance" }) {
 	return <span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">{BROKER_LABEL[broker]}</span>;
 }
 
@@ -136,7 +136,7 @@ export function ConfirmBar({
 	);
 }
 
-function Problems({ title, errors }: { title: string; errors: string[] }) {
+export function Problems({ title, errors }: { title: string; errors: string[] }) {
 	return (
 		<div className="mt-2 rounded-xl border border-danger/50 bg-inset p-4">
 			<div className="text-sm font-medium text-ink">{title}</div>
@@ -424,9 +424,9 @@ function StockGapLine({ gap, side, type }: { gap: NonNullable<BinanceOrderCard["
 	);
 }
 
-const WALLET_LABEL = { SPOT: "현물", FUNDING: "펀딩", EARN: "Earn 유연 예치" } as const;
+const WALLET_LABEL = { SPOT: "현물", FUNDING: "펀딩", EARN: "Earn 유연 예치", FUTURES: "선물(USDⓈ-M)" } as const;
 
-/** Binance 지갑 간 이동 — 같은 계정 안 (현물·펀딩·Earn). 외부 출금이 아니다 */
+/** Binance 지갑 간 이동 — 같은 계정 안 (현물·펀딩·Earn·선물). 외부 출금이 아니다 */
 export function BinanceTransferCardView({ card }: { card: BinanceTransferCard }) {
 	const c = useConfirm(card.token, card.expiresAt, card.ok);
 	const route = `${WALLET_LABEL[card.from]} → ${WALLET_LABEL[card.to]}`;

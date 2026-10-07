@@ -60,7 +60,7 @@ export interface ConditionalOrderCard {
 }
 
 /**
- * Binance 지갑 간 이동 확인 카드 — 같은 계정 안 (현물·펀딩·Earn 유연), 외부 출금이 아니다.
+ * Binance 지갑 간 이동 확인 카드 — 같은 계정 안 (현물·펀딩·Earn 유연·USDⓈ-M 선물), 외부 출금이 아니다.
  * 이동 가능 수량·Earn 상품 ID 는 준비 단계에서 서버가 Binance 에서 조회한 값이다.
  */
 export interface BinanceTransferCard {
@@ -68,8 +68,8 @@ export interface BinanceTransferCard {
 	ok: boolean;
 	token: string | null;
 	expiresAt: number | null;
-	from: "SPOT" | "FUNDING" | "EARN";
-	to: "SPOT" | "FUNDING" | "EARN";
+	from: "SPOT" | "FUNDING" | "EARN" | "FUTURES";
+	to: "SPOT" | "FUNDING" | "EARN" | "FUTURES";
 	asset: string;
 	/** 옮길 수량 — 전량이면 준비 시점의 이동 가능 수량 */
 	amount: string | null;
@@ -121,6 +121,40 @@ export interface BinanceOrderCard {
 	original: { orderId: number | string; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string } | null;
 	lines: Array<{ label: string; text: string; pct: number | null }>;
 	orders: Array<{ orderId: number | string; side: "BUY" | "SELL"; type: string; price: string; origQty: string; executedQty: string }>;
+	warnings: string[];
+	errors: string[];
+}
+
+/**
+ * Binance USDⓈ-M 선물 확인 카드 — 진입·청산·익절손절·취소·전체 취소·종목 설정.
+ * 포지션·원주문·종목 설정은 준비 단계에서 서버가 Binance 에서 조회한 값이다. 값은 문자열 10진수.
+ * (broker/src/binance/futures-card.ts 와 같은 모양)
+ */
+export interface BinanceFuturesCard {
+	kind: "binance-futures-card";
+	ok: boolean;
+	token: string | null;
+	expiresAt: number | null;
+	action: "open" | "close" | "tpsl" | "cancel" | "cancel_all" | "settings";
+	symbol: string;
+	base: string;
+	marginAsset: string;
+	direction: "LONG" | "SHORT" | null;
+	type: "LIMIT" | "MARKET" | null;
+	quantity: string | null;
+	price: string | null;
+	notional: string | null;
+	margin: string | null;
+	leverage: number | null;
+	marginType: "ISOLATED" | "CROSSED" | null;
+	liqPrice: string | null;
+	markPrice: string | null;
+	available: string | null;
+	takeProfitPrice: string | null;
+	stopLossPrice: string | null;
+	position: { amt: string; entryPrice: string; unrealized: string; liquidationPrice: string } | null;
+	orders: Array<{ source: "order" | "algo"; id: number; side: "BUY" | "SELL"; type: string; price: string; triggerPrice?: string; quantity: string; closePosition?: boolean }>;
+	lines: Array<{ label: string; text: string }>;
 	warnings: string[];
 	errors: string[];
 }

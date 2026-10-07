@@ -5,30 +5,35 @@
  *   SPOT     현물 지갑          GET  /api/v3/account (LD* 는 Earn 예치 영수증이라 빼고 EARN 에서 원금으로 본다)
  *   FUNDING  펀딩 지갑          POST /sapi/v1/asset/get-funding-asset (POST 지만 조회)
  *   EARN     Simple Earn 유연   GET  /sapi/v1/simple-earn/flexible/position
+ *   FUTURES  USDⓈ-M 선물        GET  /fapi/v3/account (free = 옮길 수 있는 수량, locked = 증거금·미실현 몫 — 합이 증거금 잔고)
  *
  * 이동 경로 (같은 계정 내부 — 외부 출금이 아니다):
  *   SPOT ↔ FUNDING     POST /sapi/v1/asset/transfer             type=MAIN_FUNDING | FUNDING_MAIN  (키 권한: Permits Universal Transfer)
+ *   SPOT·FUNDING ↔ FUTURES  같은 API                            type=MAIN_UMFUTURE · UMFUTURE_MAIN · FUNDING_UMFUTURE · UMFUTURE_FUNDING
  *   EARN → SPOT        POST /sapi/v1/simple-earn/flexible/redeem    destAccount=SPOT              (키 권한: Spot & Margin Trading)
  *   SPOT·FUNDING → EARN POST /sapi/v1/simple-earn/flexible/subscribe sourceAccount=SPOT | FUND
  *   EARN → FUNDING 은 없다 — 환매는 destAccount=SPOT 만 받는다 (실측 2026-10-05: FUND 는 HTTP 400
  *   "'destAccount' parameter only accepts 'SPOT'"). EARN → SPOT 뒤 SPOT → FUNDING 두 번으로 옮긴다.
+ *   EARN ↔ FUTURES 도 없다 — 현물을 거친다.
  *
  * ⚠️ executeWalletTransfer 는 **실제 돈을 움직인다.** 서버의 확인 실행 경로(execute.ts)에서만 호출한다.
- * 이 모듈의 쓰기는 위 세 API 가 전부다 — 출금(withdraw)·서브계정·선물·마진 이체는 없다.
+ * 이 모듈의 쓰기는 위 세 API 가 전부다 — 출금(withdraw)·서브계정·마진·코인M 선물 이체는 없다.
  * 멱등성 키가 없는 API 라 중복은 토큰 nonce 소비(서버)와 자동 재시도 금지로 막는다.
  * 수량은 문자열 10진수 그대로 (부동소수점 없이, decimal.ts).
  */
 import type { BinanceTransferAction, TransferRoute, WalletName } from "../actions.ts";
-import { cmpDec } from "./decimal.ts";
+import { cmpDec, subDec } from "./decimal.ts";
+import { futuresAccount } from "./futures.ts";
 import { fundingAssets } from "./stocks.ts";
 import { BinanceError, signed, type BinanceCreds } from "./trade.ts";
 
-export const WALLETS: readonly WalletName[] = ["SPOT", "FUNDING", "EARN"];
+export const WALLETS: readonly WalletName[] = ["SPOT", "FUNDING", "EARN", "FUTURES"];
 
 export const WALLET_LABEL: Record<WalletName, string> = {
 	SPOT: "현물(Spot)",
 	FUNDING: "펀딩(Funding)",
 	EARN: "Earn 유연 예치",
+	FUTURES: "선물(USDⓈ-M)",
 };
 
 export interface WalletAsset {
@@ -80,10 +85,23 @@ export async function earnWallet(c: BinanceCreds, asset?: string): Promise<Walle
 		}));
 }
 
+/** 선물 지갑 — free 는 지갑 밖으로 옮길 수 있는 수량, 나머지(증거금·미실현 손익)는 locked. 합 = 증거금 잔고 */
+export async function futuresWallet(c: BinanceCreds): Promise<WalletAsset[]> {
+	const r = await futuresAccount(c);
+	return r.assets
+		.filter((a) => positive(a.marginBalance) || positive(a.walletBalance))
+		.map((a) => {
+			const free = positive(a.maxWithdrawAmount) ? a.maxWithdrawAmount : "0";
+			const rest = subDec(positive(a.marginBalance) ? a.marginBalance : a.walletBalance, free);
+			return { asset: a.asset, free, ...(positive(rest) ? { locked: rest } : {}) };
+		});
+}
+
 const READERS: Record<WalletName, (c: BinanceCreds) => Promise<WalletAsset[]>> = {
 	SPOT: spotWallet,
 	FUNDING: fundingWallet,
 	EARN: (c) => earnWallet(c),
+	FUTURES: futuresWallet,
 };
 
 export interface WalletBalances {
@@ -107,11 +125,16 @@ export async function walletBalances(c: BinanceCreds, wallets: readonly WalletNa
 
 // ── 이동 경로 (순수) ─────────────────────────────────────────
 
-/** 보내는·받는 지갑 → API. 같은 지갑이거나 EARN → FUNDING(Binance 가 막음)이면 null */
+/** 보내는·받는 지갑 → API. 같은 지갑이거나 EARN → FUNDING(Binance 가 막음)·EARN ↔ FUTURES 면 null */
 export function transferRoute(from: WalletName, to: WalletName): TransferRoute | null {
 	if (from === to) return null;
 	if (from === "SPOT" && to === "FUNDING") return { kind: "universal", type: "MAIN_FUNDING" };
 	if (from === "FUNDING" && to === "SPOT") return { kind: "universal", type: "FUNDING_MAIN" };
+	if (from === "SPOT" && to === "FUTURES") return { kind: "universal", type: "MAIN_UMFUTURE" };
+	if (from === "FUTURES" && to === "SPOT") return { kind: "universal", type: "UMFUTURE_MAIN" };
+	if (from === "FUNDING" && to === "FUTURES") return { kind: "universal", type: "FUNDING_UMFUTURE" };
+	if (from === "FUTURES" && to === "FUNDING") return { kind: "universal", type: "UMFUTURE_FUNDING" };
+	if (from === "FUTURES" || to === "FUTURES") return null;
 	if (from === "EARN") return to === "SPOT" ? { kind: "redeem", destAccount: "SPOT" } : null;
 	return { kind: "subscribe", sourceAccount: from === "SPOT" ? "SPOT" : "FUND" };
 }

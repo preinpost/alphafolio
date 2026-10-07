@@ -168,6 +168,8 @@ function fake(opts: FakeOpts = {}) {
 					return url.searchParams.get("symbol") === "NVDA" ? json({ bidPrice: "130", askPrice: "132" }) : new Response("");
 				case "/sapi/v1/simple-earn/flexible/position":
 					return json({ total: 1, rows: [{ asset: "USDT", totalAmount: "50", productId: "USDT001" }] });
+				case "/fapi/v3/account":
+					return json({ assets: [{ asset: "USDT", walletBalance: "0", unrealizedProfit: "0", marginBalance: "0", availableBalance: "0", maxWithdrawAmount: "0" }] });
 				case "/sapi/v1/simple-earn/locked/position":
 					return json({ total: 1, rows: [{ asset: "ETH", amount: "0.5" }] });
 				case "/api/v3/ticker/price":
@@ -290,7 +292,7 @@ describe("통합 집계", () => {
 	});
 
 	it("지갑을 하나도 못 읽으면 그 계좌만 failed — 0원으로 보이지 않게 경고", async () => {
-		const f = fake({ binanceFail: ["/api/v3/account", "/sapi/v1/asset/get-funding-asset", "/sapi/v1/simple-earn/flexible/position"] });
+		const f = fake({ binanceFail: ["/api/v3/account", "/sapi/v1/asset/get-funding-asset", "/sapi/v1/simple-earn/flexible/position", "/fapi/v3/account"] });
 		const p = await fetchPortfolio({ toss: f.toss, binance: f.binance });
 		const b = p.sources.find((s) => s.id === "binance")!;
 		assert.equal(b.status, "failed");

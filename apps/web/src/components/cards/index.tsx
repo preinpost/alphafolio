@@ -5,6 +5,7 @@
  * 조회 결과(시세·지표·보유·가계부 등)는 카드 없이 답변 텍스트로만 보인다 (serialize.ts 가 걸러 보낸다).
  */
 import type { UICard } from "@alphafolio/protocol";
+import { BinanceFuturesCardView } from "./FuturesCards.tsx";
 import { McpConfirmCardView } from "./McpCards.tsx";
 import { WatchConfirmCardView } from "./WatchCards.tsx";
 import { BinanceOrderCardView, BinanceTransferCardView, ConditionalOrderCardView, OrderChangeCardView, OrderPreviewCardView } from "./OrderCards.tsx";
@@ -21,6 +22,8 @@ export function CardView({ card }: { card: UICard }) {
 			return <BinanceOrderCardView card={card} />;
 		case "binance-transfer-card":
 			return <BinanceTransferCardView card={card} />;
+		case "binance-futures-card":
+			return <BinanceFuturesCardView card={card} />;
 		case "watch-confirm-card":
 			return <WatchConfirmCardView card={card} />;
 		case "mcp-confirm-card":

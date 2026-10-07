@@ -11,6 +11,7 @@
 import { describeAction, type OrderAction } from "./actions.ts";
 import { kisChangeOrder, kisPlaceOrder } from "./kis/orders.ts";
 import { executeBinance } from "./binance/trade.ts";
+import { executeFutures } from "./binance/futures.ts";
 import { equityCancel, equityPlace } from "./binance/stocks.ts";
 import { executeWalletTransfer, validAmount } from "./binance/wallet.ts";
 import type { BrokerAccess } from "./portfolio.ts";
@@ -53,6 +54,16 @@ function sane(a: OrderAction): void {
 			if (/quantity|Qty|price|Price/.test(what) && typeof v === "string" && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
 		}
 	}
+	if (a.kind === "binance-futures-open" || a.kind === "binance-futures-close" || a.kind === "binance-futures-tpsl") {
+		for (const [what, v] of Object.entries(a)) {
+			if (/quantity|price|Price/.test(what) && typeof v === "string" && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
+		}
+	}
+	if (a.kind === "binance-futures-open" || a.kind === "binance-futures-settings") {
+		// 레버리지는 정수 1~125 (종목 상한은 준비 단계에서 구간으로 확인했다)
+		if (a.leverage !== undefined && !(Number.isInteger(a.leverage) && a.leverage >= 1 && a.leverage <= 125)) throw new Error(`레버리지 값이 올바르지 않습니다: ${a.leverage}`);
+	}
+	if (a.kind === "binance-futures-tpsl" && !a.takeProfitPrice && !a.stopLossPrice) throw new Error("익절·손절 가격이 없습니다");
 	if (a.kind === "binance-stock-place") {
 		for (const [what, v] of [["수량", a.quantity], ["금액", a.notional], ["가격", a.price]] as const) {
 			if (v !== undefined && !(Number(v) > 0)) throw new Error(`${what} 값이 올바르지 않습니다: ${v}`);
@@ -144,6 +155,13 @@ export async function executeOrderAction(action: OrderAction, nonce: string, acc
 		case "binance-stock-cancel":
 			await equityCancel(need(access.binance, "Binance"), action.original.orderId);
 			return { message: "취소가 접수되었습니다", orderId: action.original.orderId };
+		case "binance-futures-open":
+		case "binance-futures-close":
+		case "binance-futures-tpsl":
+		case "binance-futures-cancel":
+		case "binance-futures-cancel-all":
+		case "binance-futures-settings":
+			return executeFutures(action, nonce, need(access.binance, "Binance"));
 		case "binance-transfer":
 			return executeWalletTransfer(action, need(access.binance, "Binance"));
 	}
