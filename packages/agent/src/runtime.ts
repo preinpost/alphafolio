@@ -222,8 +222,13 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 				return () => listeners.delete(listener);
 			},
 			prompt: (text, images) => session.prompt(text, images?.length ? { images: toContent(images) } : undefined),
-			steer: (text, images) => session.steer(text, images?.length ? toContent(images) : undefined),
-			followUp: (text, images) => session.followUp(text, images?.length ? toContent(images) : undefined),
+			// SDK 0.99+ 는 "handled" | "queued" 를 돌려주지만 서버는 쓰지 않는다
+			steer: async (text, images) => {
+				await session.steer(text, images?.length ? toContent(images) : undefined);
+			},
+			followUp: async (text, images) => {
+				await session.followUp(text, images?.length ? toContent(images) : undefined);
+			},
 			abort: () => session.abort(),
 			get acceptsImages() {
 				const input = (session.model as { input?: string[] } | undefined)?.input;

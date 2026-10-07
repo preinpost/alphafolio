@@ -19,8 +19,8 @@
     "smoke": "node apps/server/scripts/smoke.mjs"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "typescript": "^5.9.0"
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
   },
   "pnpm": {
     "comment": "@google/genai·protobufjs 의 postinstall 은 우리 코드 경로에 필요 없다 (빌드 스크립트 미실행).",

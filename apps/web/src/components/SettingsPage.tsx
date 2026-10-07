@@ -14,7 +14,7 @@
  *
  * 지금 탭은 주소에 싣는다 (/settings/connect) — 새로고침해도, "설정에서 키를 넣으세요" 링크로 와도 그 탭이 열린다.
  */
-import { Tabs } from "@base-ui-components/react/tabs";
+import { Tabs } from "@base-ui/react/tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api, type SecretStatus } from "../lib/api.ts";

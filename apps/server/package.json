@@ -12,15 +12,15 @@
   },
   "dependencies": {
     "@alphafolio/agent": "workspace:*",
-    "@alphafolio/ledger": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^0.87.1",
-    "typebox": "^1.3.7",
-    "ws": "^8.21.1",
-    "@alphafolio/protocol": "workspace:*",
     "@alphafolio/broker": "workspace:*",
-    "@alphafolio/mcp": "workspace:*"
+    "@alphafolio/ledger": "workspace:*",
+    "@alphafolio/mcp": "workspace:*",
+    "@alphafolio/protocol": "workspace:*",
+    "@earendil-works/pi-coding-agent": "^1.0.4",
+    "typebox": "^1.3.36",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.13"
+    "@types/ws": "^8.18.2"
   }
 }
