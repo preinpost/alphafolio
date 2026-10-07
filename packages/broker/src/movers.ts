@@ -4,8 +4,7 @@
  * "오늘 뭐가 주도했어?" 같은 질문에 답하는 경로다. 토스 `/api/v1/rankings` 한 번이면
  * 되고, 종목명은 별도로 해석한다 (랭킹 응답에 이름이 없다).
  *
- * ⚠️ **섹터/테마 랭킹 API 는 없다.** 종목 단위 랭킹만 제공하므로, 섹터는
- *    상위 종목 구성을 보고 사람이/모델이 판단해야 한다. 이 한계를 숨기지 않는다.
+ * 토스 랭킹은 종목 단위다. 섹터(국내 업종) 순위는 여기가 아니라 KIS FHPUP02140000 (kis_call) 에 있다.
  */
 import { resolveNames, type NameResolverAccess } from "./names.ts";
 import { tossGet, type TossContext } from "./toss/client.ts";

@@ -335,7 +335,7 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 				market !== "KR" || !deps.brokers.kis
 					? Promise.resolve(
 							skipped<ResearchFinancials>(
-								market !== "KR" ? "해외 종목은 재무·컨센서스를 제공하지 않는다" : "재무 조회에는 KIS 연결이 필요하다",
+								market !== "KR" ? "해외 종목 재무·추천은 여기서 모으지 않는다 — data_find(finnhub \"financials\"·\"recommendation\"·\"price target\")로 조회한다" : "재무 조회에는 KIS 연결이 필요하다",
 							),
 						)
 					: settle(
@@ -413,7 +413,7 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 				const c = f.consensus;
 				lines.push(
 					c.covered
-						? `[투자의견] ${c.rating ?? "—"}${c.analyst ? ` (${c.analyst})` : ""}${c.estimatedAt ? ` · ${c.estimatedAt}` : ""} — 목표주가는 제공되지 않음`
+						? `[투자의견] ${c.rating ?? "—"}${c.analyst ? ` (${c.analyst})` : ""}${c.estimatedAt ? ` · ${c.estimatedAt}` : ""} — 증권사별 목표주가는 kis_call FHKST663300C0`
 						: c.error
 							? `[투자의견] 조회 실패 (${c.error}) — 커버 여부 알 수 없음`
 							: "[투자의견] 한국투자 리서치 미커버 종목",

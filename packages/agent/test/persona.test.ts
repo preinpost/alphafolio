@@ -53,6 +53,15 @@ describe("답변 문장 지침", () => {
 		assert.ok(!prompt.includes("섹터 순위는 제공되지 않는다"));
 	});
 
+	it("있는 데이터를 '제공되지 않는다' 고 막지 않는다 — 목표주가·테마·해외 재무 경로를 안내한다", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		for (const blocker of ["목표주가·추정 실적(예상 매출·EPS)은 제공되지 않는다", "테마 분류 자체는 제공되지 않는다", "구성 종목 API 는 없다"]) {
+			assert.ok(!prompt.includes(blocker), blocker);
+		}
+		assert.ok(prompt.includes("FHKST663300C0"));
+		assert.ok(prompt.includes("테마주"));
+	});
+
 	it("라이선스(MIT) 고지가 함께 있다", () => {
 		const license = readFileSync(new URL("../vendor/fluent-korean/LICENSE", import.meta.url), "utf8");
 		assert.match(license, /MIT License/);
