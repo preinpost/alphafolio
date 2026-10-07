@@ -1,5 +1,9 @@
 {
   "packages": [
     "npm:pi-web-access"
+  ],
+  "defaultTools": [
+    "+codemode",
+    "+tool_search"
   ]
 }

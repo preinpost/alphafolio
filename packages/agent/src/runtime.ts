@@ -20,6 +20,8 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	createCodemodeExtension,
+	createToolSearchExtension,
 	ModelRuntime,
 	resolveCliModel,
 	SessionManager,
@@ -166,6 +168,11 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 				// pi 스킬은 read 툴로 SKILL.md 를 읽는 구조인데 read 는 파일시스템 전체를 열기 때문에
 				// 빼두었다. 명시적으로 꺼서 확장 패키지가 싣는 스킬도 조용히 들어오지 않게 한다.
 				noSkills: true,
+				// CLI 는 codemode·tool_search 를 내장 확장으로 싣지만 SDK 세션은 직접 넣어야 한다 (pi docs/sdk.md).
+				// 둘 다 꺼진 채로 등록되고, agentDir/settings.json 의 defaultTools("+codemode") 가 켠다.
+				// models: 스크립트가 서버 자격증명으로 분류기·이미지 모델을 부르지 못하게 끈다 (비용).
+				// MCP 내장 확장은 싣지 않는다 — MCP 는 사용자별 확인 경로가 있는 @alphafolio/mcp 가 맡는다.
+				extensionFactories: [createCodemodeExtension({ models: false }), createToolSearchExtension()],
 			},
 		});
 		return {

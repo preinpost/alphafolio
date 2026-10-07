@@ -32,3 +32,12 @@ pi 에이전트 디렉터리에 올라가는 설정. 읽기 전용이면 되므�
 - `AF_DEFAULT_MODEL` 은 `openrouter/openai/gpt-6-luna` 형식(프로바이더/모델)으로 쓴다 — 현재 기본값.
   모델 ID가 유일하면 프로바이더 접두어 없이 `openai/gpt-6-luna` 로 써도 openrouter로 해석된다.
 - deepseek 항목들은 기본 모델을 바꿔도 남겨둔다 (UI 모델 선택 대비).
+
+## settings.json — 확장 패키지·기본 툴
+
+- `packages`: pi 가 싣는 확장 패키지 (`agent-config/npm` 에 설치된다 — `task agent:install`).
+- `defaultTools: ["+codemode", "+tool_search"]`: 내장 툴 두 개를 켠다. `+` 는 기본 목록에 더한다는 뜻이다.
+
+> SDK 세션은 codemode·tool_search 확장을 자동으로 싣지 않는다. `packages/agent/src/runtime.ts` 가
+> `extensionFactories` 로 넣어야 이 설정이 효과가 있다. 확인 카드를 내는 도구는 codemode 스크립트에서
+> 부를 수 없게 `model-only` 로 등록한다 (`apps/server/src/tool-registry.ts` 의 `CONFIRM_CARD_TOOL_NAMES`).

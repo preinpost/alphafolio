@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { Check } from "typebox/value";
 import { buildSystemPrompt } from "@alphafolio/agent";
-import { createUserTools, CUSTOM_TOOL_NAMES } from "../src/tool-registry.ts";
+import { CONFIRM_CARD_TOOL_NAMES, createUserTools, CUSTOM_TOOL_NAMES } from "../src/tool-registry.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -130,6 +130,17 @@ describe("사용자별 도구 등록 계약", () => {
 		for (const name of ["read", "write", "edit", "bash", "powershell", "order_execute", "mcp_execute", "watch_arm"]) {
 			assert.ok(!(CUSTOM_TOOL_NAMES as readonly string[]).includes(name), name);
 		}
+	});
+
+	it("확인 카드를 내는 도구는 codemode 스크립트에서 부를 수 없다 (model-only)", () => {
+		const tools = createUserTools(registry().opts, "ms");
+		for (const name of CONFIRM_CARD_TOOL_NAMES) {
+			const tool = tools.find((t) => t.name === name);
+			assert.ok(tool, `${name} 가 등록돼 있어야 한다`);
+			assert.equal((tool as { exposure?: string }).exposure, "model-only", name);
+		}
+		const rest = tools.filter((t) => !(CONFIRM_CARD_TOOL_NAMES as readonly string[]).includes(t.name));
+		assert.ok(rest.every((t) => (t as { exposure?: string }).exposure === undefined));
 	});
 });
 

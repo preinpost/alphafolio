@@ -19,6 +19,18 @@ type ToolOptions = Pick<RuntimeManagerOptions,
 	"mcpServers" | "mcpFetch" | "prepareMcpWrite" | "watch"
 >;
 
+/**
+ * 확인 카드(serialize.ts 의 CARD_KINDS)를 내는 도구 — codemode 스크립트에서 부르지 못하게 한다.
+ * 스크립트 안의 호출 결과는 화면에 오지 않아 카드가 뜨지 않고, 사람이 [확인] 을 누를 길이 없어진다.
+ * model-only 는 모델이 직접 부르는 것만 허용한다 (pi docs/extensions.md — Tool exposure).
+ */
+export const CONFIRM_CARD_TOOL_NAMES = [
+	"order_prepare", "order_change", "order_conditional",
+	"binance_order", "binance_stock_order", "binance_wallet", "binance_futures",
+	"mcp_call", "watch_alert", "range_trade",
+] as const;
+const CONFIRM_CARD_TOOLS = new Set<string>(CONFIRM_CARD_TOOL_NAMES);
+
 export function createUserTools(opts: ToolOptions, user: string) {
 	return [
 		// 가계부는 멤버끼리 공유되지만 기록자는 사용자별로 묶인다.
@@ -34,5 +46,5 @@ export function createUserTools(opts: ToolOptions, user: string) {
 		...createDerivativesTools({ brokers: opts.brokerAccess(user) }),
 		...createMcpTools({ servers: () => opts.mcpServers(user), fetch: opts.mcpFetch, prepareWrite: opts.prepareMcpWrite(user) }),
 		...createWatchTools(opts.watch(user)),
-	];
+	].map((tool) => (CONFIRM_CARD_TOOLS.has(tool.name) ? { ...tool, exposure: "model-only" as const } : tool));
 }
