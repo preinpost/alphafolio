@@ -43,6 +43,16 @@ describe("답변 문장 지침", () => {
 		assert.ok(prompt.includes("getMarketIndicatorInvestorTrading (KOSPI·KOSDAQ 각각"));
 	});
 
+	it("추천은 거래 순위가 아니라 여러 데이터 소스에서 후보를 고른다", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		const section = prompt.slice(prompt.indexOf("### 종목 추천·스크리닝"), prompt.indexOf("### 등락 이유"));
+		assert.ok(section.includes("후보를 이 순위에서만 뽑지 않는다"));
+		for (const source of ["FHPUP02140000", "FHPTJ04400000", "FHPST01870000", "HHDFS76370000", "mcp-tv-run-screener", "XLK"]) {
+			assert.ok(section.includes(source), source);
+		}
+		assert.ok(!prompt.includes("섹터 순위는 제공되지 않는다"));
+	});
+
 	it("라이선스(MIT) 고지가 함께 있다", () => {
 		const license = readFileSync(new URL("../vendor/fluent-korean/LICENSE", import.meta.url), "utf8");
 		assert.match(license, /MIT License/);

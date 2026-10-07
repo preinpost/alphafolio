@@ -145,8 +145,9 @@ export function createMarketTools(deps: BrokerToolDeps) {
 		description:
 			"오늘 시장을 주도한 종목을 조회한다 — 거래대금·거래량·상승률·하락률 상위. " +
 			"'주도주', '뭐가 올랐어', '거래대금 상위', '오늘 시장 어땠어' 같은 질문에 쓴다. " +
-			"⚠️ 섹터/테마 단위 랭킹은 제공되지 않는다 — 섹터를 물으면 상위 종목 구성을 근거로 설명하되, " +
-			"섹터 순위 자체는 알 수 없다고 밝힌다. 토스증권 연결이 필요하다.",
+			"⚠️ 당일 거래 순위라 참고용이다 — 종목·섹터 추천의 후보를 이 툴만으로 고르지 않는다. " +
+			"섹터 순위는 여기 없다: 국내 업종은 kis_call FHPUP02140000, 미국은 섹터 ETF 를 market_technical 로 비교한다. " +
+			"토스증권 연결이 필요하다.",
 		parameters: Type.Object({
 			type: Type.Optional(
 				Type.Union(
