@@ -11,6 +11,9 @@ export type ThemeMode = "light" | "dark" | "system";
 
 export const STORAGE_KEY = "af_theme";
 
+/** 주소창·상태바 색 = styles.css 의 --bg (oklch 0.977 / 0.165 를 hex 로). index.html 인라인 스크립트도 같은 값 */
+const THEME_COLOR = { light: "#f6f8fa", dark: "#090f16" } as const;
+
 export function getThemeMode(): ThemeMode {
 	try {
 		const v = localStorage.getItem(STORAGE_KEY);
@@ -31,8 +34,20 @@ export function applyTheme(mode: ThemeMode): void {
 
 	// 모바일 브라우저 주소창·상태바 색도 맞춘다
 	const meta = document.querySelector('meta[name="theme-color"]');
-	if (meta) meta.setAttribute("content", dark ? "#0e1622" : "#f6f8fb");
+	if (meta) meta.setAttribute("content", dark ? THEME_COLOR.dark : THEME_COLOR.light);
+	window.dispatchEvent(new Event(THEME_EVENT));
 }
+
+const THEME_EVENT = "af-theme";
+
+/** 화면 테마가 바뀔 때 (설정 화면·사이드바 토글·system 모드의 OS 변경). useSyncExternalStore 용 */
+export function onThemeApplied(cb: () => void): () => void {
+	window.addEventListener(THEME_EVENT, cb);
+	return () => window.removeEventListener(THEME_EVENT, cb);
+}
+
+/** 지금 다크로 그리고 있는가 (system 모드면 OS 설정에 따라) */
+export const isDarkNow = (): boolean => document.documentElement.classList.contains("dark");
 
 export function setThemeMode(mode: ThemeMode): void {
 	try {

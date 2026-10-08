@@ -6,550 +6,142 @@
  *
  * 금액은 서버가 환율 하나로 원화 환산해 준다 — 화면은 합치거나 환산하지 않는다.
  * 달러 자산은 달러로, 코인은 USDT 로 먼저 보이고 원화 환산은 곁에 둔다 (원화만으로는 달러·코인이 얼마인지 알기 어렵다).
+ *
+ * 화면당 큰 숫자 하나 — 총자산. 계좌를 누르면 보유 자산이 그 계좌로 좁혀진다.
  */
-import type { BrokerHolding, CryptoHoldingDto, CurrencySplitDto, ManualAssetDto, PortfolioDto, PortfolioSourceDto } from "@alphafolio/protocol";
+import type { BrokerHolding, CryptoHoldingDto, ManualAssetDto, PortfolioDto, PortfolioSourceDto } from "@alphafolio/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api } from "../lib/api.ts";
-import {
-	changeSince,
-	compactWon,
-	compositionOf,
-	daysBefore,
-	groupHoldings,
-	historySeries,
-	kstDate,
-	type Change,
-	type GroupedHolding,
-} from "../lib/portfolio.ts";
+import { changeSince, compactWon, compositionOf, daysBefore, groupHoldings, historySeries, kstDate, type Change, type GroupedHolding } from "../lib/portfolio.ts";
+import { toast } from "../lib/toast.ts";
+import { AlertIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, RefreshIcon, SearchIcon, XIcon } from "./icons.tsx";
 import { MANUAL_KIND_LABEL, ManualAssetEditor } from "./ManualAssetEditor.tsx";
-import { NetWorthChart } from "./NetWorthChart.tsx";
+import { NetWorthChart, RANGES, type RangeId } from "./NetWorthChart.tsx";
+import { Topbar } from "./Topbar.tsx";
 
 const won = (n: number): string => `${Math.round(n).toLocaleString("ko-KR")}원`;
-
-/** 예수금 — 센트까지 ($1,234.50). 원화로 환산하지 않는다 (미국 주식은 달러로 주문) */
-function usdCash(value: number): string {
-	return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
+/** 예수금 — 센트까지 ($1,234.50) */
+const usdCash = (n: number): string => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const usd = (n: number): string => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 /** 코인 평가 — USDT 환산 (스테이블 포함) */
 const usdt = (n: number): string => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT`;
 /** 원래 통화 금액 곁에 붙이는 원화 환산 — 환율이 없으면 (0) 빈 문자열 */
 const approxWon = (n: number): string => (n > 0 ? `≈ ${won(n)}` : "");
-/** 목록 행용 — 좁은 화면에서 왼쪽 정보를 밀어내지 않게 짧게 (정확한 값은 title) */
-const approxShort = (n: number): string => (n > 0 ? `≈${compactWon(n)}` : "");
-/** 원래 통화 금액 — 원화는 원, 달러는 $ */
+const approxShort = (n: number): string => (n > 0 ? `≈ ${compactWon(n)}` : "");
 const money = (n: number, currency: "KRW" | "USD"): string => (currency === "KRW" ? won(n) : usd(n));
 /** 코인 단가 — 1달러 미만은 유효숫자 4자리 ($0.00001234) */
 const usdPrice = (n: number): string => (n >= 1 ? usd(n) : `$${Number(n.toPrecision(4))}`);
 const qty = (n: number): string => Number(n.toPrecision(8)).toLocaleString("en-US", { maximumFractionDigits: 8 });
-
-function moveClass(n: number): string {
-	if (n > 0) return "text-up";
-	if (n < 0) return "text-down";
-	return "text-muted";
-}
-
-const sign = (n: number): string => (n > 0 ? "+" : "");
-
-const pct = (part: number, total: number): string => (total > 0 ? `${((part / total) * 100).toFixed(1)}%` : "—");
+const sign = (n: number): string => (n > 0 ? "+" : n < 0 ? "−" : "");
+const move = (n: number): string => (n > 0 ? "up" : n < 0 ? "down" : "flat");
+const pctOf = (part: number, total: number): string => (total > 0 ? `${((part / total) * 100).toFixed(1)}%` : "—");
+const signedPct = (n: number): string => `${sign(n)}${Math.abs(n).toFixed(2)}%`;
 
 const WALLET: Record<string, string> = { SPOT: "현물", FUNDING: "펀딩", EARN: "Earn 유연", EARN_LOCKED: "Earn 고정" };
+const BROKER_LABEL: Record<string, string> = { kis: "한국투자", toss: "토스", binance: "Binance", manual: "직접 입력" };
 
-const BROKER_LABEL: Record<string, string> = { kis: "KIS", toss: "토스", binance: "Binance", manual: "직접 입력" };
-
-/** 배분 막대 — 순서가 곧 범례 순서 */
+/** 배분 막대 — 순서가 곧 범례 순서. 색은 데이터 팔레트 토큰 */
 const SLICES: Array<{ key: keyof PortfolioDto["allocation"]; label: string; color: string }> = [
-	{ key: "domesticStock", label: "국내주식", color: "#2563eb" },
-	{ key: "overseasStock", label: "해외주식", color: "#8b5cf6" },
-	{ key: "crypto", label: "코인", color: "#f59e0b" },
-	{ key: "cash", label: "현금성", color: "#14b8a6" },
-	{ key: "other", label: "기타", color: "#94a3b8" },
+	{ key: "domesticStock", label: "국내주식", color: "var(--d1)" },
+	{ key: "overseasStock", label: "해외주식", color: "var(--d2)" },
+	{ key: "crypto", label: "코인", color: "var(--d3)" },
+	{ key: "cash", label: "현금성", color: "var(--d4)" },
+	{ key: "other", label: "기타", color: "var(--d5)" },
 ];
+
+type Kind = "domesticStock" | "overseasStock" | "crypto" | "manual";
+const KIND_CHIPS: Array<{ key: Kind | "all"; label: string }> = [
+	{ key: "all", label: "전체" },
+	{ key: "domesticStock", label: "국내주식" },
+	{ key: "overseasStock", label: "해외주식" },
+	{ key: "crypto", label: "코인" },
+	{ key: "manual", label: "직접 입력" },
+];
+type Sort = "value" | "pnl" | "name";
 
 /** 1달러 미만 코인 — 기본은 접어 둔다 (거래하고 남은 잔돈) */
 const isDust = (c: CryptoHoldingDto): boolean => c.valueUsd !== null && c.valueUsd < 1;
 
-export function PortfolioPage() {
-	const [symbol, setSymbol] = useState("");
-	const [lookup, setLookup] = useState<string | null>(null);
-	/** 보유 목록 계좌 필터 — null 이면 전체 */
-	const [only, setOnly] = useState<string | null>(null);
-	const [showDust, setShowDust] = useState(false);
-	/** 보유 목록 — 계좌별(account) 또는 같은 종목 합치기(symbol) */
-	const [view, setView] = useState<"account" | "symbol">("account");
-	/** 직접 입력 자산 — 고치는 중인 id, "new" = 추가 중 */
-	const [editing, setEditing] = useState<string | null>(null);
-	const today = kstDate();
-
-	const qc = useQueryClient();
-	// 계좌마다 여러 API 를 부르므로 화면 복귀마다 다시 읽지 않는다 (새로고침 버튼은 있다)
-	const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio, retry: false, staleTime: 30_000 });
-	// 미체결은 주문 직후 바뀌므로 짧게 캐시한다
-	const openOrders = useQuery({
-		queryKey: ["orders", "OPEN"],
-		queryFn: () => api.orders("OPEN"),
-		retry: false,
-		staleTime: 5_000,
-	});
-	const cancel = useMutation({
-		mutationFn: api.cancelOrder,
-		onSuccess: () => {
-			void qc.invalidateQueries({ queryKey: ["orders"] });
-			void qc.invalidateQueries({ queryKey: ["portfolio"] });
-		},
-	});
-	// 추이 — 합계만 (보유 종목 없이). D1 이 없으면 실패하는데, 그러면 차트만 숨긴다
-	const history = useQuery({
-		queryKey: ["portfolio-history", today],
-		queryFn: () => api.portfolioHistory(daysBefore(today, 366), today),
-		retry: false,
-		staleTime: 10 * 60_000,
-	});
-	const points = useMemo(() => historySeries(history.data?.items ?? []), [history.data]);
-	const quote = useQuery({
-		queryKey: ["quote", lookup],
-		queryFn: () => api.quote(lookup as string),
-		enabled: lookup !== null,
-		retry: false,
-	});
-
-	const p = portfolio.data;
-	const holdings = (p?.holdings ?? []).filter((h) => !only || h.broker === only);
-	const grouped = view === "symbol" ? groupHoldings(holdings) : null;
-	const composition = p ? compositionOf(p.sources) : "";
-	const daily = p ? changeSince(points, p.netWorthKrw, composition, today) : null;
-	const monthly = p ? changeSince(points, p.netWorthKrw, composition, `${today.slice(0, 7)}-01`) : null;
-	const crypto = (p?.crypto ?? []).filter((c) => !only || c.source === only);
-	const manual = (p?.manual ?? []).filter(() => !only || only === "manual");
-	const dust = crypto.filter(isDust);
-	const shownCrypto = showDust ? crypto : crypto.filter((c) => !isDust(c));
-
-	return (
-		<div className="flex-1 overflow-y-auto">
-			<div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-				{portfolio.isLoading && <p className="text-sm text-muted">불러오는 중…</p>}
-
-				{portfolio.isError && (
-					<div className="rounded-xl border border-line bg-inset p-4">
-						<p className="text-sm text-danger">{(portfolio.error as Error).message}</p>
-						<p className="mt-2 text-xs text-faint">
-							설정 &gt; 증권 (KIS)·증권 (토스)·코인 (Binance) 에서 키를 입력하세요. 키는 사용자별로 저장됩니다.
-							API 가 없는 자산(예금·연금·부동산)은 아래에서 직접 입력할 수 있습니다.
-						</p>
-						<div className="mt-3 overflow-hidden rounded-xl border border-line bg-card">
-							<AddManual editing={editing} setEditing={setEditing} />
-						</div>
-					</div>
-				)}
-
-				{p && (
-					<>
-						{/* 총자산 */}
-						<div className="flex items-end justify-between gap-3">
-							<div className="min-w-0">
-								<div className="text-xs text-muted">총자산 (원화 환산)</div>
-								<div className="text-2xl font-semibold text-ink">{won(p.netWorthKrw)}</div>
-								{(daily || monthly) && (
-									<div className="mt-0.5 flex flex-wrap gap-x-3 text-xs">
-										{daily && <ChangeText label="전일 대비" c={daily} />}
-										{monthly && <ChangeText label="이번 달" c={monthly} />}
-									</div>
-								)}
-								<div className="mt-0.5 text-xs text-muted">
-									<span className={moveClass(p.profitKrw)}>
-										주식 평가손익 {sign(p.profitKrw)}
-										{won(p.profitKrw)}
-									</span>
-									{p.usdKrw > 0
-										? ` · 환율 ${Math.round(p.usdKrw).toLocaleString("ko-KR")}원${p.fxSource ? ` (${p.fxSource})` : ""}`
-										: ""}
-								</div>
-							</div>
-							<button
-								onClick={() => void portfolio.refetch()}
-								disabled={portfolio.isFetching}
-								className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-muted disabled:opacity-50"
-							>
-								{portfolio.isFetching ? "불러오는 중…" : "새로고침"}
-							</button>
-						</div>
-
-						<CurrencyTiles amount={p.byCurrency} krw={p.byCurrencyKrw} total={p.netWorthKrw} />
-
-						<AllocationBar allocation={p.allocation} total={p.netWorthKrw} />
-
-						{history.isSuccess && <NetWorthChart points={points} today={today} />}
-
-						{/* 계좌별 */}
-						<section>
-							<h2 className="mb-2 text-sm font-medium text-muted">계좌</h2>
-							<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-								{p.sources.map((s) => (
-									<SourceCard
-										key={s.id}
-										source={s}
-										total={p.netWorthKrw}
-										active={only === s.id}
-										onClick={() => setOnly((cur) => (cur === s.id ? null : s.id))}
-									/>
-								))}
-							</div>
-						</section>
-
-						{p.warnings.map((w) => (
-							<p key={w} className="rounded-lg border border-danger/40 bg-inset p-2 text-xs text-danger">
-								{w}
-							</p>
-						))}
-
-						{(openOrders.data?.orders.length ?? 0) > 0 && (
-							<section>
-								<h2 className="mb-2 text-sm font-medium text-muted">
-									미체결 주문 {openOrders.data?.orders.length}건
-								</h2>
-								<div className="overflow-hidden rounded-xl border border-line">
-									{openOrders.data?.orders.map((o) => (
-										<div
-											key={o.orderId}
-											className="flex items-center justify-between border-b border-line px-4 py-2.5 last:border-0"
-										>
-											<div className="min-w-0">
-												<div className="truncate text-sm text-ink">
-													{o.symbol}{" "}
-													<span className={o.side === "BUY" ? "text-up" : "text-down"}>
-														{o.side === "BUY" ? "매수" : "매도"}
-													</span>
-												</div>
-												<div className="text-xs text-muted">
-													{o.quantity}주 ·{" "}
-													{o.price ? `${Number(o.price).toLocaleString("ko-KR")}` : "시장가"} · {o.status}
-												</div>
-											</div>
-											<button
-												onClick={() => cancel.mutate(o.orderId)}
-												disabled={cancel.isPending}
-												className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs text-muted disabled:opacity-50"
-											>
-												취소
-											</button>
-										</div>
-									))}
-								</div>
-							</section>
-						)}
-
-						{/* 보유 */}
-						<section>
-							<div className="mb-2 flex items-center justify-between gap-2">
-								<h2 className="min-w-0 truncate text-sm font-medium text-muted">
-									보유 자산{only ? ` · ${BROKER_LABEL[only] ?? only}` : ""}
-									{only && (
-										<button onClick={() => setOnly(null)} className="ml-2 text-xs text-accent">
-											전체 보기
-										</button>
-									)}
-								</h2>
-								<div className="flex shrink-0 gap-1">
-									{(
-										[
-											["account", "계좌별"],
-											["symbol", "종목별"],
-										] as const
-									).map(([id, label]) => (
-										<button
-											key={id}
-											onClick={() => setView(id)}
-											className={`rounded-md px-2 py-0.5 text-xs ${view === id ? "bg-accent-soft text-ink" : "text-muted"}`}
-										>
-											{label}
-										</button>
-									))}
-								</div>
-							</div>
-							<div className="overflow-hidden rounded-xl border border-line">
-								{grouped
-									? grouped.map((g) => <GroupedRow key={g.key} g={g} />)
-									: holdings.map((h) => <HoldingRow key={`${h.broker}-${h.market}-${h.symbol}`} h={h} />)}
-
-								{shownCrypto.map((c) => (
-									<CryptoRow key={`${c.source}-${c.asset}`} c={c} />
-								))}
-
-								{dust.length > 0 && (
-									<button
-										onClick={() => setShowDust((v) => !v)}
-										className="w-full px-4 py-2 text-center text-xs text-muted active:bg-hover"
-									>
-										{showDust ? "1달러 미만 코인 접기" : `1달러 미만 코인 ${dust.length}개 더 보기`}
-									</button>
-								)}
-
-								{!only && (p.cashKrw > 0 || p.cashUsd > 0) && (
-									<div className="flex items-center justify-between px-4 py-2.5">
-										<div className="text-sm text-ink">예수금</div>
-										<div className="text-right text-sm text-ink">
-											{p.cashKrw > 0 && <div>{won(p.cashKrw)}</div>}
-											{p.cashUsd > 0 && <div>{usdCash(p.cashUsd)}</div>}
-										</div>
-									</div>
-								)}
-
-								{manual.map((m) =>
-									editing === m.id ? (
-										<ManualAssetEditor key={m.id} asset={m} onDone={() => setEditing(null)} />
-									) : (
-										<ManualRow key={m.id} m={m} onEdit={() => setEditing(m.id)} />
-									),
-								)}
-
-								{holdings.length === 0 && crypto.length === 0 && manual.length === 0 && editing !== "new" && (
-									<p className="px-4 py-6 text-center text-sm text-muted">보유 자산이 없습니다.</p>
-								)}
-
-								{(!only || only === "manual") && <AddManual editing={editing} setEditing={setEditing} />}
-							</div>
-						</section>
-					</>
-				)}
-
-				{/* 시세 조회 */}
-				<section className="space-y-3">
-					<h2 className="text-sm font-medium text-muted">시세 조회</h2>
-					<div className="flex gap-2">
-						<input
-							placeholder="종목코드 또는 티커 (예: 005930, AAPL)"
-							value={symbol}
-							onChange={(e) => setSymbol(e.target.value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter" && symbol.trim()) setLookup(symbol.trim());
-							}}
-							className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-						/>
-						<button
-							onClick={() => symbol.trim() && setLookup(symbol.trim())}
-							disabled={!symbol.trim()}
-							className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-ink disabled:opacity-40"
-						>
-							조회
-						</button>
-					</div>
-
-					{quote.isError && <p className="text-sm text-danger">{(quote.error as Error).message}</p>}
-					{quote.data && (
-						<div className="flex items-baseline justify-between rounded-xl border border-line bg-inset px-4 py-3">
-							<div className="min-w-0">
-								<div className="truncate text-sm font-medium text-ink">{quote.data.name}</div>
-								<div className="text-xs text-faint">
-									{quote.data.symbol}
-									{quote.data.exchange ? ` · ${quote.data.exchange}` : ""}
-								</div>
-							</div>
-							<div className="shrink-0 text-right">
-								<div className="text-base font-semibold text-ink">
-									{quote.data.currency === "KRW" ? won(quote.data.price) : usd(quote.data.price)}
-								</div>
-								<div className={`text-xs ${moveClass(quote.data.change)}`}>
-									{sign(quote.data.changePct)}
-									{quote.data.changePct}%
-								</div>
-							</div>
-						</div>
-					)}
-				</section>
-			</div>
-		</div>
-	);
-}
-
-/** 화폐별 — 원화 · 달러 · 코인(USDT). 한 카드에 한 줄씩 (모바일에서 카드 셋이 쌓이면 첫 화면을 다 먹는다) */
-function CurrencyTiles({ amount, krw, total }: { amount: CurrencySplitDto; krw: CurrencySplitDto; total: number }) {
-	const tiles = [
-		{ key: "krw", label: "원화", main: won(amount.krw), sub: "", share: krw.krw, show: amount.krw !== 0 },
-		{ key: "usd", label: "달러", main: usdCash(amount.usd), sub: approxWon(krw.usd), share: krw.usd, show: amount.usd !== 0 },
-		{ key: "usdt", label: "코인 (USDT 환산)", main: usdt(amount.usdt), sub: approxWon(krw.usdt), share: krw.usdt, show: amount.usdt !== 0 },
-	].filter((t) => t.show);
-	if (tiles.length === 0) return null;
-	return (
-		<section className="overflow-hidden rounded-xl border border-line bg-card">
-			{tiles.map((t) => (
-				<div key={t.key} className="flex items-center justify-between gap-3 border-b border-line px-4 py-2 last:border-0">
-					<div className="min-w-0">
-						<div className="truncate text-xs text-muted">{t.label}</div>
-						<div className="text-[11px] text-faint">{pct(t.share, total)}</div>
-					</div>
-					<div className="shrink-0 text-right">
-						<div className="text-base font-semibold text-ink">{t.main}</div>
-						{t.sub && <div className="text-[11px] text-faint">{t.sub}</div>}
-					</div>
-				</div>
-			))}
-		</section>
-	);
-}
-
-function AllocationBar({ allocation, total }: { allocation: PortfolioDto["allocation"]; total: number }) {
-	const slices = SLICES.filter((s) => allocation[s.key] > 0);
-	if (total <= 0 || slices.length === 0) return null;
-	return (
-		<section className="space-y-2">
-			<div className="flex h-2.5 overflow-hidden rounded-full bg-inset">
-				{slices.map((s) => (
-					<div
-						key={s.key}
-						style={{ width: `${(allocation[s.key] / total) * 100}%`, backgroundColor: s.color }}
-						title={`${s.label} ${pct(allocation[s.key], total)}`}
-					/>
-				))}
-			</div>
-			<div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-				{slices.map((s) => (
-					<span key={s.key} className="flex items-center gap-1.5">
-						<span className="inline-block size-2 rounded-full" style={{ backgroundColor: s.color }} />
-						{s.label} <span className="text-ink">{pct(allocation[s.key], total)}</span>
-						<span className="text-faint">{won(allocation[s.key])}</span>
-					</span>
-				))}
-			</div>
-		</section>
-	);
-}
-
-const STATUS: Record<PortfolioSourceDto["status"], { text: string; className: string } | null> = {
-	ok: null,
-	partial: { text: "일부 누락", className: "text-danger" },
-	failed: { text: "조회 실패", className: "text-danger" },
-	skipped: { text: "제외", className: "text-faint" },
-};
-
-function SourceCard({
-	source: s,
-	total,
-	active,
-	onClick,
-}: {
-	source: PortfolioSourceDto;
-	total: number;
-	active: boolean;
-	onClick: () => void;
-}) {
-	const status = STATUS[s.status];
-	// 화폐별 원래 통화 — 계좌 합계(원화 환산)만으로는 달러·코인이 얼마인지 모른다
-	const parts = [
-		s.byCurrency.krw !== 0 && won(s.byCurrency.krw),
-		s.byCurrency.usd !== 0 && usdCash(s.byCurrency.usd),
-		s.byCurrency.usdt !== 0 && usdt(s.byCurrency.usdt),
-	].filter(Boolean);
-	const usable = s.status === "ok" || s.status === "partial";
-	return (
-		<button
-			onClick={onClick}
-			disabled={!usable}
-			className={`min-w-0 rounded-xl border px-3 py-2.5 text-left transition ${
-				active ? "border-accent bg-accent-soft" : "border-line bg-card active:bg-hover"
-			} disabled:opacity-70`}
-		>
-			<div className="flex items-baseline justify-between gap-2">
-				<span className="truncate text-sm font-medium text-ink">{s.label}</span>
-				{status ? (
-					<span className={`shrink-0 text-[11px] ${status.className}`}>{status.text}</span>
-				) : (
-					<span className="shrink-0 text-xs text-muted">{pct(s.valueKrw, total)}</span>
-				)}
-			</div>
-			{usable ? (
-				<>
-					<div className="mt-1 text-base font-semibold text-ink">{won(s.valueKrw)}</div>
-					<div className="truncate text-[11px] text-faint">{parts.join(" · ") || "잔고 없음"}</div>
-				</>
-			) : (
-				<div className="mt-1 line-clamp-2 text-xs text-faint" title={s.error}>
-					{s.error}
-				</div>
-			)}
-		</button>
-	);
-}
-
-function ChangeText({ label, c }: { label: string; c: Change }) {
-	return (
-		<span className={moveClass(c.diff)} title={`${c.baseDate} 스냅샷 ${won(c.base)} 기준 (입출금 포함)`}>
-			{label} {sign(c.diff)}
-			{won(c.diff)} ({sign(c.pct)}
-			{c.pct}%)
-		</span>
-	);
+/** 보유 자산 표의 한 줄 — 주식·합친 종목·코인·직접 입력을 같은 모양으로 */
+interface HoldRow {
+	key: string;
+	kind: Kind;
+	name: string;
+	sym: string | null;
+	meta: string;
+	metaWarn?: boolean;
+	price: string | null;
+	value: string;
+	valueSub: string;
+	valueKrw: number;
+	pnl: string | null;
+	pnlPct: number | null;
+	pnlNote?: string;
+	pnlTitle?: string;
+	manual?: ManualAssetDto & { valueKrw: number };
 }
 
 /** 평단 — 0 이면 모른다 (Binance 체결 내역에 없던 것·bStock 토큰) */
-const avgText = (h: BrokerHolding): string => (h.avgPrice > 0 ? (h.currency === "KRW" ? won(h.avgPrice) : usd(h.avgPrice)) : "—");
+const avgText = (h: BrokerHolding): string => (h.avgPrice > 0 ? money(h.avgPrice, h.currency) : "—");
 
-function HoldingRow({ h }: { h: BrokerHolding }) {
-	return (
-		<div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-0">
-			<div className="min-w-0 flex-1">
-				<div className="truncate text-sm text-ink">{h.name}</div>
-				{/* 해외 여부는 통화($)로 보인다 — 줄을 짧게 */}
-				<div className="truncate text-xs text-muted">
-					{qty(h.quantity)}주 · 평단 {avgText(h)} · {BROKER_LABEL[h.broker] ?? h.broker}
-				</div>
-				{h.note && <div className="truncate text-[11px] text-faint">{h.note}</div>}
-			</div>
-			<div className="shrink-0 text-right">
-				<div className="text-sm text-ink">{money(h.value, h.currency)}</div>
-				<div className="whitespace-nowrap text-xs text-muted" title={h.currency === "USD" ? approxWon(h.valueKrw) : undefined}>
-					{h.currency === "USD" ? approxShort(h.valueKrw) : ""}
-					{h.avgPrice > 0 && (
-						<span className={moveClass(h.profitPct)}>
-							{h.currency === "USD" && h.valueKrw > 0 ? " · " : ""}
-							{sign(h.profitPct)}
-							{h.profitPct}%
-						</span>
-					)}
-				</div>
-			</div>
-		</div>
-	);
+function stockRow(h: BrokerHolding, total: number): HoldRow {
+	const known = h.avgPrice > 0;
+	return {
+		key: `${h.broker}-${h.market}-${h.symbol}`,
+		kind: h.market === "domestic" ? "domesticStock" : "overseasStock",
+		name: h.name,
+		sym: h.name !== h.symbol ? h.symbol : null,
+		meta: [`${qty(h.quantity)}주`, `평단 ${avgText(h)}`, BROKER_LABEL[h.broker] ?? h.broker, h.note].filter(Boolean).join(" · "),
+		price: money(h.price, h.currency),
+		value: money(h.value, h.currency),
+		valueSub: h.currency === "USD" ? approxShort(h.valueKrw) : pctOf(h.valueKrw, total),
+		valueKrw: h.valueKrw,
+		pnl: known ? `${sign(h.profit)}${money(Math.abs(h.profit), h.currency)}` : null,
+		pnlPct: known ? h.profitPct : null,
+	};
 }
 
-function GroupedRow({ g }: { g: GroupedHolding }) {
-	return (
-		<div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-0">
-			<div className="min-w-0 flex-1">
-				<div className="truncate text-sm text-ink">
-					{g.name}
-					{g.name !== g.symbol && <span className="ml-1.5 text-[11px] text-faint">{g.symbol}</span>}
-				</div>
-				<div className="truncate text-xs text-muted">
-					{qty(g.quantity)}주 ·{" "}
-					{g.parts.map((h) => `${BROKER_LABEL[h.broker] ?? h.broker} ${qty(h.quantity)}`).join(" + ")}
-				</div>
-			</div>
-			<div className="shrink-0 text-right">
-				<div className="text-sm text-ink">{money(g.value, g.currency)}</div>
-				<div className="whitespace-nowrap text-xs text-muted" title={g.currency === "USD" ? approxWon(g.valueKrw) : undefined}>
-					{g.currency === "USD" ? approxShort(g.valueKrw) : ""}
-					{g.profitPct !== null && (
-						<span className={moveClass(g.profitPct)}>
-							{g.currency === "USD" && g.valueKrw > 0 ? " · " : ""}
-							{sign(g.profitPct)}
-							{g.profitPct}%
-						</span>
-					)}
-				</div>
-			</div>
-		</div>
-	);
+function groupedRow(g: GroupedHolding, total: number): HoldRow {
+	const known = g.parts.filter((h) => h.avgPrice > 0);
+	const profit = known.reduce((s, h) => s + h.profit, 0);
+	return {
+		key: g.key,
+		kind: g.market === "domestic" ? "domesticStock" : "overseasStock",
+		name: g.name,
+		sym: g.name !== g.symbol ? g.symbol : null,
+		meta: `${qty(g.quantity)}주 · ${g.parts.map((h) => `${BROKER_LABEL[h.broker] ?? h.broker} ${qty(h.quantity)}`).join(" + ")}`,
+		price: g.parts[0] ? money(g.parts[0].price, g.currency) : null,
+		value: money(g.value, g.currency),
+		valueSub: g.currency === "USD" ? approxShort(g.valueKrw) : pctOf(g.valueKrw, total),
+		valueKrw: g.valueKrw,
+		pnl: g.profitPct !== null ? `${sign(profit)}${money(Math.abs(profit), g.currency)}` : null,
+		pnlPct: g.profitPct,
+	};
 }
 
-function AddManual({ editing, setEditing }: { editing: string | null; setEditing: (v: string | null) => void }) {
-	if (editing === "new") return <ManualAssetEditor onDone={() => setEditing(null)} />;
-	return (
-		<button onClick={() => setEditing("new")} className="w-full px-4 py-2.5 text-center text-xs text-accent active:bg-hover">
-			+ 직접 입력 자산 추가 (예금·연금·부동산 등)
-		</button>
-	);
+function cryptoRow(c: CryptoHoldingDto): HoldRow {
+	// 평단은 현물 체결로 추정 — 입금·보상분이 섞이면 "일부"
+	const partial = c.costCoverage !== null && c.costCoverage < 0.95;
+	return {
+		key: `${c.source}-${c.asset}`,
+		kind: "crypto",
+		name: c.asset,
+		sym: c.stable ? "스테이블" : null,
+		meta: [qty(c.quantity), c.avgPriceUsd !== null ? `평단 ${usdPrice(c.avgPriceUsd)}` : null, c.wallets.map((w) => WALLET[w.wallet] ?? w.wallet).join("·"), BROKER_LABEL[c.source]]
+			.filter(Boolean)
+			.join(" · "),
+		price: c.priceUsd !== null ? usdPrice(c.priceUsd) : null,
+		value: c.valueUsd === null ? "시세 없음" : usdt(c.valueUsd),
+		valueSub: approxShort(c.valueKrw),
+		valueKrw: c.valueKrw,
+		pnl: c.profitUsd !== null && c.profitPct !== null ? `${sign(c.profitUsd)}${usd(Math.abs(c.profitUsd))}` : null,
+		pnlPct: c.profitPct,
+		...(partial ? { pnlNote: "일부" } : {}),
+		...(c.avgPriceUsd !== null
+			? { pnlTitle: `평단 ${usdPrice(c.avgPriceUsd)} (현물 체결 추정${partial ? `, 보유의 ${Math.round((c.costCoverage ?? 0) * 100)}%만 설명됨` : ""})` }
+			: {}),
+	};
 }
 
 /** 며칠 전에 고쳤나 — 시세가 없는 값이라 오래되면 알린다 */
@@ -559,82 +151,609 @@ function ageText(iso: string): string {
 	return days >= 30 ? `${Math.floor(days / 30)}개월 전 갱신` : `${days}일 전 갱신`;
 }
 
-function ManualRow({ m, onEdit }: { m: ManualAssetDto & { valueKrw: number }; onEdit: () => void }) {
-	const stale = Date.now() - Date.parse(m.updatedAt) > 90 * 86_400_000;
+function manualRow(m: ManualAssetDto & { valueKrw: number }, total: number): HoldRow {
+	return {
+		key: `manual-${m.id}`,
+		kind: "manual",
+		name: m.name,
+		sym: null,
+		meta: [MANUAL_KIND_LABEL[m.kind], ageText(m.updatedAt), m.memo].filter(Boolean).join(" · "),
+		metaWarn: Date.now() - Date.parse(m.updatedAt) > 90 * 86_400_000,
+		price: null,
+		value: m.currency === "KRW" ? won(m.valueKrw) : usd(m.amount),
+		valueSub: m.currency === "USD" ? approxShort(m.valueKrw) : pctOf(m.valueKrw, total),
+		valueKrw: m.valueKrw,
+		pnl: null,
+		pnlPct: null,
+		manual: m,
+	};
+}
+
+/** "10월 8일 14:32" */
+function stamp(ms: number): string {
+	const d = new Date(ms);
+	return `${d.getMonth() + 1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+export function PortfolioPage({ onAskChat }: { onAskChat?: () => void } = {}) {
+	/** 보유 목록 계좌 필터 — null 이면 전체 */
+	const [only, setOnly] = useState<string | null>(null);
+	const [showDust, setShowDust] = useState(false);
+	/** 보유 목록 — 계좌별(account) 또는 같은 종목 합치기(symbol) */
+	const [view, setView] = useState<"account" | "symbol">("account");
+	const [kind, setKind] = useState<Kind | "all">("all");
+	const [q, setQ] = useState("");
+	const [sort, setSort] = useState<Sort>("value");
+	const [range, setRange] = useState<RangeId>("3m");
+	/** 직접 입력 자산 — 고치는 중인 id, "new" = 추가 중 */
+	const [editing, setEditing] = useState<string | null>(null);
+	const today = kstDate();
+
+	const qc = useQueryClient();
+	// 계좌마다 여러 API 를 부르므로 화면 복귀마다 다시 읽지 않는다 (새로고침 버튼은 있다)
+	const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio, retry: false, staleTime: 30_000 });
+	// 미체결은 주문 직후 바뀌므로 짧게 캐시한다
+	const openOrders = useQuery({ queryKey: ["orders", "OPEN"], queryFn: () => api.orders("OPEN"), retry: false, staleTime: 5_000 });
+	const cancel = useMutation({
+		mutationFn: api.cancelOrder,
+		onSuccess: () => {
+			toast("주문을 취소했습니다");
+			void qc.invalidateQueries({ queryKey: ["orders"] });
+			void qc.invalidateQueries({ queryKey: ["portfolio"] });
+		},
+		onError: (e: Error) => toast(`취소하지 못했습니다: ${e.message}`),
+	});
+	// 추이 — 합계만 (보유 종목 없이). D1 이 없으면 실패하는데, 그러면 차트만 숨긴다
+	const history = useQuery({
+		queryKey: ["portfolio-history", today],
+		queryFn: () => api.portfolioHistory(daysBefore(today, 366), today),
+		retry: false,
+		staleTime: 10 * 60_000,
+	});
+	const points = useMemo(() => historySeries(history.data?.items ?? []), [history.data]);
+	const rangeFrom = daysBefore(today, RANGES.find((r) => r.id === range)!.days);
+	const ranged = useMemo(() => points.filter((p) => p.date >= rangeFrom), [points, rangeFrom]);
+
+	const p = portfolio.data;
+	const total = p?.netWorthKrw ?? 0;
+	const composition = p ? compositionOf(p.sources) : "";
+	const daily = p ? changeSince(points, p.netWorthKrw, composition, today) : null;
+	const monthly = p ? changeSince(points, p.netWorthKrw, composition, `${today.slice(0, 7)}-01`) : null;
+
+	// ── 보유 자산 표 ──
+	const holdings = (p?.holdings ?? []).filter((h) => !only || h.broker === only);
+	const crypto = (p?.crypto ?? []).filter((c) => !only || c.source === only);
+	const manual = (p?.manual ?? []).filter(() => !only || only === "manual");
+	const dust = crypto.filter(isDust);
+	const allRows: HoldRow[] = [
+		...(view === "symbol" ? groupHoldings(holdings).map((g) => groupedRow(g, total)) : holdings.map((h) => stockRow(h, total))),
+		...(showDust ? crypto : crypto.filter((c) => !isDust(c))).map(cryptoRow),
+		...manual.map((m) => manualRow(m, total)),
+	];
+	const needle = q.trim().toLowerCase();
+	const rows = allRows
+		.filter((r) => kind === "all" || r.kind === kind)
+		.filter((r) => !needle || r.name.toLowerCase().includes(needle) || (r.sym ?? "").toLowerCase().includes(needle))
+		.sort(
+			sort === "name"
+				? (a, b) => a.name.localeCompare(b.name, "ko")
+				: sort === "pnl"
+					? (a, b) => (b.pnlPct ?? -Infinity) - (a.pnlPct ?? -Infinity)
+					: (a, b) => b.valueKrw - a.valueKrw,
+		);
+	const canAddManual = (!only || only === "manual") && (kind === "all" || kind === "manual");
+
+	async function refresh(): Promise<void> {
+		const r = await portfolio.refetch();
+		void openOrders.refetch();
+		if (r.isError) toast(`불러오지 못했습니다: ${(r.error as Error).message}`);
+		else {
+			const failed = r.data?.sources.filter((s) => s.status === "failed" || s.status === "partial").map((s) => s.label) ?? [];
+			toast("시세와 잔고를 새로 불러왔습니다", failed.length ? { sub: `${failed.join(" · ")} 일부 실패` } : {});
+		}
+	}
+
+	const sub = p
+		? [`${stamp(portfolio.dataUpdatedAt)} 갱신`, p.usdKrw > 0 ? `환율 ${Math.round(p.usdKrw).toLocaleString("ko-KR")}원${p.fxSource ? ` (${p.fxSource})` : ""}` : null]
+				.filter(Boolean)
+				.join(" · ")
+		: undefined;
+
 	return (
-		<button onClick={onEdit} className="flex w-full items-center justify-between gap-3 border-b border-line px-4 py-2.5 text-left last:border-0 active:bg-hover">
-			<div className="min-w-0 flex-1">
-				<div className="truncate text-sm text-ink">{m.name}</div>
-				<div className="truncate text-xs text-muted">
-					{MANUAL_KIND_LABEL[m.kind]} · 직접 입력 · <span className={stale ? "text-danger" : ""}>{ageText(m.updatedAt)}</span>
-					{m.memo ? ` · ${m.memo}` : ""}
+		<>
+			<Topbar title="투자" sub={sub}>
+				<button className="btn btn-secondary btn-sm" onClick={() => void refresh()} disabled={portfolio.isFetching} aria-label="새로고침">
+					{portfolio.isFetching ? <span className="spin" /> : <RefreshIcon size={15} />}
+					<span className="desktop-only">새로고침</span>
+				</button>
+			</Topbar>
+
+			<div className="page">
+				<div className="wrap portfolio">
+					{portfolio.isLoading && <p className="empty">불러오는 중…</p>}
+
+					{portfolio.isError && (
+						<div className="section-gap" style={{ maxWidth: 720 }}>
+							<div className="notice bad" role="alert">
+								<AlertIcon size={16} />
+								<div>
+									<b>{(portfolio.error as Error).message}</b>
+									<p className="mt-1 text-muted">
+										설정 → 연결에서 증권(KIS·토스)·코인(Binance) 키를 입력하세요. 키는 사용자별로 저장됩니다. API 가 없는 자산(예금·연금·부동산)은 아래에서 직접 입력할 수
+										있습니다.
+									</p>
+								</div>
+							</div>
+							<section className="card">
+								<div className="card-h">
+									<h2>직접 입력 자산</h2>
+								</div>
+								<AddManual editing={editing} setEditing={setEditing} />
+							</section>
+						</div>
+					)}
+
+					{p && (
+						<>
+							{p.warnings.length > 0 && (
+								<div className="notice warn mb-5">
+									<AlertIcon size={16} />
+									<div className="flex flex-col gap-1">
+										{p.warnings.map((w) => (
+											<span key={w}>{w}</span>
+										))}
+									</div>
+								</div>
+							)}
+
+							<div className="grid-main">
+								<div className="col">
+									{/* 총자산 — 화면의 큰 숫자 하나 */}
+									<section className="card fade-up o-1" aria-labelledby="nw-label">
+										<div className="hero-top">
+											<div className="grow">
+												<div className="eyebrow" id="nw-label">
+													총자산 (원화 환산)
+												</div>
+												<div className="big-num">
+													{Math.round(p.netWorthKrw).toLocaleString("ko-KR")}
+													<span className="unit">원</span>
+												</div>
+												<div className="hero-delta">
+													{daily && <Delta label="전일 대비" c={daily} />}
+													{monthly && <Delta label="이번 달" c={monthly} />}
+													<span>
+														<span className="muted">주식 평가손익</span>{" "}
+														<b className={move(p.profitKrw)}>
+															{sign(p.profitKrw)}
+															{won(Math.abs(p.profitKrw))}
+														</b>
+													</span>
+												</div>
+											</div>
+											{history.isSuccess && (
+												<div className="seg" role="group" aria-label="차트 기간">
+													{RANGES.map((r) => (
+														<button key={r.id} aria-pressed={range === r.id} onClick={() => setRange(r.id)}>
+															{r.label}
+														</button>
+													))}
+												</div>
+											)}
+										</div>
+										{history.isSuccess ? <NetWorthChart points={ranged} long={range === "1y"} /> : <div className="h-4" />}
+									</section>
+
+									{(openOrders.data?.orders.length ?? 0) > 0 && (
+										<section className="card fade-up o-4">
+											<div className="card-h">
+												<h2>
+													미체결 주문<span className="count">{openOrders.data?.orders.length}</span>
+												</h2>
+											</div>
+											<div className="rows border-t border-line">
+												{openOrders.data?.orders.map((o) => (
+													<div key={o.orderId} className="row">
+														<span className={`side-tag ${o.side === "BUY" ? "buy" : "sell"}`}>{o.side === "BUY" ? "매수" : "매도"}</span>
+														<span className="grow">
+															<span className="name">{o.symbol}</span>
+															<span className="meta">
+																{o.quantity}주 · {o.price ? Number(o.price).toLocaleString("ko-KR") : "시장가"} · {o.status}
+															</span>
+														</span>
+														<button
+															className="btn btn-secondary btn-sm"
+															onClick={() => {
+																if (confirm(`${o.symbol} ${o.side === "BUY" ? "매수" : "매도"} ${o.quantity}주 주문을 취소할까요?`)) cancel.mutate(o.orderId);
+															}}
+															disabled={cancel.isPending}
+														>
+															취소
+														</button>
+													</div>
+												))}
+											</div>
+										</section>
+									)}
+
+									<section className="card fade-up o-4" aria-labelledby="hold-title">
+										<div className="card-h flex-wrap">
+											<h2 id="hold-title">
+												보유 자산<span className="count">{rows.length}</span>
+											</h2>
+											{only && (
+												<span className="filter-pill">
+													{BROKER_LABEL[only] ?? only}만
+													<button onClick={() => setOnly(null)} aria-label="계좌 필터 해제">
+														<XIcon size={13} />
+													</button>
+												</span>
+											)}
+											<span className="spacer" />
+											<div className="seg" role="group" aria-label="보기 방식">
+												<button aria-pressed={view === "account"} onClick={() => setView("account")}>
+													계좌별
+												</button>
+												<button aria-pressed={view === "symbol"} onClick={() => setView("symbol")}>
+													종목별
+												</button>
+											</div>
+										</div>
+										<div className="hold-tools">
+											<label className="search-field">
+												<SearchIcon size={15} />
+												<span className="sr-only">종목 검색</span>
+												<input className="input input-sm" type="search" placeholder="종목명·티커 검색" autoComplete="off" value={q} onChange={(e) => setQ(e.target.value)} />
+											</label>
+											<div className="hscroll" role="group" aria-label="자산 종류">
+												{KIND_CHIPS.map((k) => (
+													<button key={k.key} className="chip" aria-pressed={kind === k.key} onClick={() => setKind(k.key)}>
+														{k.label}
+													</button>
+												))}
+											</div>
+											<label>
+												<span className="sr-only">정렬</span>
+												<select className="input input-sm" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+													<option value="value">평가금액순</option>
+													<option value="pnl">수익률순</option>
+													<option value="name">이름순</option>
+												</select>
+											</label>
+										</div>
+										<div className="hold-grid hold-head" aria-hidden="true">
+											<span>종목</span>
+											<span className="c-price">현재가</span>
+											<span className="c-val">평가금액</span>
+											<span>
+												<span className="desktop-only">손익</span>
+												<span className="mobile-only">평가 · 손익</span>
+											</span>
+										</div>
+										<div className="hold-list" role="list">
+											{rows.map((r) =>
+												r.manual && editing === r.manual.id ? (
+													<ManualAssetEditor key={r.key} asset={r.manual} onDone={() => setEditing(null)} />
+												) : (
+													<HoldingRow key={r.key} r={r} onEdit={r.manual ? () => setEditing(r.manual!.id) : undefined} />
+												),
+											)}
+											{rows.length === 0 && editing !== "new" && (
+												<div className="empty">{allRows.length ? "조건에 맞는 자산이 없습니다." : "보유 자산이 없습니다."}</div>
+											)}
+										</div>
+										{dust.length > 0 && (kind === "all" || kind === "crypto") && (
+											<button className="row-add" onClick={() => setShowDust((v) => !v)}>
+												{showDust ? <ArrowUpIcon size={14} /> : <ChevronDownIcon size={14} />}
+												{showDust ? "1달러 미만 코인 접기" : `1달러 미만 코인 ${dust.length}개 더 보기`}
+											</button>
+										)}
+										{canAddManual && <AddManual editing={editing} setEditing={setEditing} />}
+									</section>
+								</div>
+
+								<div className="col">
+									<AllocationCard allocation={p.allocation} total={total} />
+
+									<section className="card fade-up o-3">
+										<div className="card-h">
+											<h2>계좌</h2>
+											<span className="spacer" />
+											<span className="eyebrow font-medium">누르면 해당 계좌만</span>
+										</div>
+										<div className="rows border-t border-line">
+											{p.sources.map((s) => (
+												<SourceRow key={s.id} s={s} total={total} active={only === s.id} onClick={() => setOnly((cur) => (cur === s.id ? null : s.id))} />
+											))}
+										</div>
+									</section>
+
+									<CurrencyCard p={p} showCash={!only} />
+
+									<QuoteCard onAskChat={onAskChat} />
+								</div>
+							</div>
+						</>
+					)}
+
+					{/* 계좌를 하나도 못 읽어도 시세 조회는 된다 */}
+					{portfolio.isError && (
+						<div className="mt-5" style={{ maxWidth: 720 }}>
+							<QuoteCard onAskChat={onAskChat} />
+						</div>
+					)}
 				</div>
 			</div>
-			<div className="shrink-0 text-right">
-				<div className="text-sm text-ink">{m.currency === "KRW" ? won(m.valueKrw) : usd(m.amount)}</div>
-				{m.currency === "USD" && m.valueKrw > 0 && (
-					<div className="whitespace-nowrap text-xs text-muted" title={approxWon(m.valueKrw)}>
-						{approxShort(m.valueKrw)}
-					</div>
-				)}
-			</div>
-		</button>
+		</>
 	);
 }
 
-/** 코인 손익 — 평단은 현물 체결로 추정, 입금·보상분이 섞이면 "일부" */
-function cryptoPnl(c: CryptoHoldingDto) {
-	if (c.profitPct === null || c.avgPriceUsd === null) return null;
-	const partial = c.costCoverage !== null && c.costCoverage < 0.95;
+function Delta({ label, c }: { label: string; c: Change }) {
 	return (
-		<span
-			className={moveClass(c.profitPct)}
-			title={`평단 ${usdPrice(c.avgPriceUsd)} (현물 체결 추정${partial ? `, 보유의 ${Math.round((c.costCoverage ?? 0) * 100)}%만 설명됨` : ""})`}
-		>
-			{sign(c.profitPct)}
-			{c.profitPct}%{partial ? " 일부" : ""}
+		<span title={`${c.baseDate} 스냅샷 ${won(c.base)} 기준 (입출금 포함)`}>
+			<span className="muted">{label}</span>{" "}
+			<b className={move(c.diff)}>
+				{sign(c.diff)}
+				{won(Math.abs(c.diff))} ({signedPct(c.pct)})
+			</b>
 		</span>
 	);
 }
 
-function CryptoRow({ c }: { c: CryptoHoldingDto }) {
-	return (
-		<div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5 last:border-0">
-			<div className="min-w-0 flex-1">
-				<div className="truncate text-sm text-ink">
-					{c.asset}
-					{c.stable && <span className="ml-1.5 text-[11px] text-faint">스테이블</span>}
+function HoldingRow({ r, onEdit }: { r: HoldRow; onEdit: (() => void) | undefined }) {
+	const body = (
+		<>
+			<div className="min-w-0">
+				<div className="name">
+					<span>{r.name}</span>
+					{r.sym && <span className="mono">{r.sym}</span>}
 				</div>
-				<div className="truncate text-xs text-muted">
-					{qty(c.quantity)}
-					{c.avgPriceUsd !== null ? ` · 평단 ${usdPrice(c.avgPriceUsd)}` : ""}
-				</div>
-				<div className="truncate text-[11px] text-faint">
-					{c.wallets.map((w) => WALLET[w.wallet] ?? w.wallet).join("·")} · {BROKER_LABEL[c.source]}
+				<div className={`meta ${r.metaWarn ? "danger-text" : ""}`} title={r.meta}>
+					{r.meta}
 				</div>
 			</div>
-			<div className="shrink-0 text-right">
-				{c.valueUsd === null ? (
-					<div className="text-xs text-faint">시세 없음</div>
+			<div className="c-price">
+				<div className="v sm">{r.price ?? "—"}</div>
+			</div>
+			<div className="c-val">
+				<div className="v">{r.value}</div>
+				<div className="s muted" title={approxWon(r.valueKrw) || undefined}>
+					{r.valueSub}
+				</div>
+			</div>
+			<div>
+				<div className="v mobile-only">{r.valueKrw > 0 ? compactWon(r.valueKrw) : r.value}</div>
+				{r.pnlPct === null ? (
+					<div className="s muted">{r.manual ? "직접 입력" : "손익 없음"}</div>
 				) : (
 					<>
-						<div className="text-sm text-ink">{usdt(c.valueUsd)}</div>
-						<div className="whitespace-nowrap text-xs text-muted" title={approxWon(c.valueKrw) || undefined}>
-							{approxShort(c.valueKrw)}
-							{cryptoPnl(c) ? (
-								<>
-									{c.valueKrw > 0 ? " · " : ""}
-									{cryptoPnl(c)}
-								</>
-							) : c.priceUsd !== null && !c.stable ? (
-								`${c.valueKrw > 0 ? " · " : ""}@${usdPrice(c.priceUsd)}`
-							) : (
-								""
-							)}
+						<div className={`v desktop-only ${move(r.pnlPct)}`}>{r.pnl}</div>
+						<div className={`s ${move(r.pnlPct)}`} title={r.pnlTitle}>
+							{signedPct(r.pnlPct)}
+							{r.pnlNote ? ` ${r.pnlNote}` : ""}
 						</div>
 					</>
 				)}
 			</div>
+		</>
+	);
+	if (onEdit)
+		return (
+			<button className="hold-grid hold-row" role="listitem" onClick={onEdit} title="눌러서 금액 고치기">
+				{body}
+			</button>
+		);
+	return (
+		<div className="hold-grid hold-row" role="listitem">
+			{body}
 		</div>
+	);
+}
+
+function AddManual({ editing, setEditing }: { editing: string | null; setEditing: (v: string | null) => void }) {
+	if (editing === "new") return <ManualAssetEditor onDone={() => setEditing(null)} />;
+	return (
+		<button className="row-add" onClick={() => setEditing("new")}>
+			<PlusIcon size={14} />
+			직접 입력 자산 추가 (예금·연금·부동산 등)
+		</button>
+	);
+}
+
+function AllocationCard({ allocation, total }: { allocation: PortfolioDto["allocation"]; total: number }) {
+	const slices = SLICES.filter((s) => allocation[s.key] > 0);
+	if (total <= 0 || slices.length === 0) return null;
+	return (
+		<section className="card fade-up o-2">
+			<div className="card-h">
+				<h2>자산 배분</h2>
+			</div>
+			<div className="card-b">
+				<div className="bar" role="img" aria-label={slices.map((s) => `${s.label} ${pctOf(allocation[s.key], total)}`).join(", ")}>
+					{slices.map((s) => (
+						<i key={s.key} style={{ width: `${(allocation[s.key] / total) * 100}%`, background: s.color }} title={`${s.label} ${pctOf(allocation[s.key], total)}`} />
+					))}
+				</div>
+				<div className="mt-3">
+					{slices.map((s) => (
+						<div key={s.key} className="alloc-row">
+							<span className="sw" style={{ background: s.color }} />
+							<span>{s.label}</span>
+							<span className="pct">{pctOf(allocation[s.key], total)}</span>
+							<span className="amt" title={won(allocation[s.key])}>
+								{compactWon(allocation[s.key])}
+							</span>
+						</div>
+					))}
+				</div>
+			</div>
+		</section>
+	);
+}
+
+const STATUS: Record<PortfolioSourceDto["status"], { text: string; tone: string } | null> = {
+	ok: null,
+	partial: { text: "일부 누락", tone: "warn" },
+	failed: { text: "조회 실패", tone: "bad" },
+	skipped: { text: "제외", tone: "" },
+};
+
+function SourceRow({ s, total, active, onClick }: { s: PortfolioSourceDto; total: number; active: boolean; onClick: () => void }) {
+	const status = STATUS[s.status];
+	// 화폐별 원래 통화 — 계좌 합계(원화 환산)만으로는 달러·코인이 얼마인지 모른다
+	const parts = [s.byCurrency.krw !== 0 && won(s.byCurrency.krw), s.byCurrency.usd !== 0 && usdCash(s.byCurrency.usd), s.byCurrency.usdt !== 0 && usdt(s.byCurrency.usdt)].filter(
+		Boolean,
+	);
+	const usable = s.status === "ok" || s.status === "partial";
+	const detail = usable ? [...parts, ...s.warnings].join(" · ") || "잔고 없음" : (s.error ?? "");
+	return (
+		<button className="row row-btn" aria-pressed={active} disabled={!usable} onClick={onClick}>
+			<span className="grow">
+				<span className="name flex items-center gap-2">
+					{s.label}
+					{status && <span className={`badge ${status.tone}`}>{status.text}</span>}
+				</span>
+				<span className={`meta ${usable ? "" : "danger-text"}`} title={detail}>
+					{detail}
+				</span>
+			</span>
+			{usable && (
+				<span className="amt">
+					<b>{compactWon(s.valueKrw)}</b>
+					<small className="muted">{pctOf(s.valueKrw, total)}</small>
+				</span>
+			)}
+		</button>
+	);
+}
+
+/** 화폐별 — 원화 · 달러 · 코인(USDT). 아래에 예수금 (계좌 필터 중에는 숨긴다 — 계좌별로 나뉘지 않는다) */
+function CurrencyCard({ p, showCash }: { p: PortfolioDto; showCash: boolean }) {
+	const tiles = [
+		{ key: "krw", label: "원화", main: won(p.byCurrency.krw), sub: "", share: p.byCurrencyKrw.krw, show: p.byCurrency.krw !== 0 },
+		{ key: "usd", label: "달러", main: usdCash(p.byCurrency.usd), sub: approxWon(p.byCurrencyKrw.usd), share: p.byCurrencyKrw.usd, show: p.byCurrency.usd !== 0 },
+		{ key: "usdt", label: "코인 (USDT 환산)", main: usdt(p.byCurrency.usdt), sub: approxWon(p.byCurrencyKrw.usdt), share: p.byCurrencyKrw.usdt, show: p.byCurrency.usdt !== 0 },
+	].filter((t) => t.show);
+	const cash = showCash && (p.cashKrw > 0 || p.cashUsd > 0);
+	if (tiles.length === 0 && !cash) return null;
+	return (
+		<section className="card fade-up o-5">
+			<div className="card-h">
+				<h2>화폐별</h2>
+			</div>
+			<div className="rows border-t border-line">
+				{tiles.map((t) => (
+					<div key={t.key} className="row">
+						<span className="grow">
+							<span className="name">{t.label}</span>
+							<span className="meta">총자산의 {pctOf(t.share, p.netWorthKrw)}</span>
+						</span>
+						<span className="amt">
+							<b>{t.main}</b>
+							{t.sub && <small className="muted">{t.sub}</small>}
+						</span>
+					</div>
+				))}
+				{cash && (
+					<div className="row">
+						<span className="grow">
+							<span className="name">예수금</span>
+							<span className="meta">주문에 바로 쓸 수 있는 현금</span>
+						</span>
+						<span className="amt">
+							{p.cashKrw > 0 && <b>{won(p.cashKrw)}</b>}
+							{p.cashUsd > 0 && (p.cashKrw > 0 ? <small className="muted">{usdCash(p.cashUsd)}</small> : <b>{usdCash(p.cashUsd)}</b>)}
+						</span>
+					</div>
+				)}
+			</div>
+		</section>
+	);
+}
+
+function QuoteCard({ onAskChat }: { onAskChat: (() => void) | undefined }) {
+	const [symbol, setSymbol] = useState("");
+	const [lookup, setLookup] = useState<string | null>(null);
+	const [empty, setEmpty] = useState(false);
+	const quote = useQuery({
+		queryKey: ["quote", lookup],
+		queryFn: () => api.quote(lookup as string),
+		enabled: lookup !== null,
+		retry: false,
+	});
+	const d = quote.data;
+
+	return (
+		<section className="card fade-up o-6">
+			<div className="card-h">
+				<h2>시세 조회</h2>
+			</div>
+			<div className="card-b">
+				<form
+					className="quote-form"
+					noValidate
+					onSubmit={(e) => {
+						e.preventDefault();
+						const s = symbol.trim();
+						setEmpty(!s);
+						if (s) setLookup(s);
+					}}
+				>
+					<label className="sr-only" htmlFor="quote-q">
+						종목코드 또는 티커
+					</label>
+					<input
+						id="quote-q"
+						className="input"
+						placeholder="종목코드 또는 티커 (예: 005930, AAPL)"
+						autoComplete="off"
+						value={symbol}
+						aria-invalid={empty}
+						onChange={(e) => {
+							setSymbol(e.target.value);
+							setEmpty(false);
+						}}
+					/>
+					<button className="btn btn-secondary" type="submit">
+						조회
+					</button>
+				</form>
+				<div className="quote-out" aria-live="polite">
+					{empty && <div className="field-err">종목코드나 티커를 입력하세요.</div>}
+					{quote.isFetching && (
+						<div className="flex items-center gap-2 text-[13px] text-muted">
+							<span className="spin" />
+							불러오는 중…
+						</div>
+					)}
+					{!quote.isFetching && quote.isError && (
+						<div className="notice">
+							<AlertIcon size={16} />
+							<span>
+								{(quote.error as Error).message} — 국내는 6자리 종목코드, 해외는 티커로 입력하세요.
+							</span>
+						</div>
+					)}
+					{!quote.isFetching && d && (
+						<>
+							<div className="q-name">
+								<b>{d.name}</b>
+								<span className="mono muted">{d.symbol}</span>
+								{d.exchange && <span className="badge">{d.exchange}</span>}
+							</div>
+							<div className="q-price">{d.currency === "KRW" ? won(d.price) : usd(d.price)}</div>
+							<div className={`num text-[13px] font-semibold ${move(d.changePct)}`}>전일 대비 {signedPct(d.changePct)}</div>
+							{onAskChat && (
+								<div className="mt-3">
+									<button className="text-link text-[13px]" onClick={onAskChat}>
+										챗에서 분석·주문 준비하기
+									</button>
+								</div>
+							)}
+						</>
+					)}
+				</div>
+			</div>
+		</section>
 	);
 }

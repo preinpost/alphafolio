@@ -12,7 +12,7 @@ export function UpdateBanner() {
 	if (!ready) return null;
 	return (
 		<div className="fixed inset-x-0 top-[max(0.5rem,env(safe-area-inset-top))] z-50 flex justify-center px-4">
-			<div className="flex items-center gap-3 rounded-full border border-line bg-card px-4 py-2 text-sm text-ink shadow-lg">
+			<div className="flex items-center gap-3 rounded-full border border-line bg-card py-1.5 pr-1.5 pl-4 text-[13.5px] shadow-[var(--af-shadow-md)]">
 				<span>{version ? `새 버전(v${version})이 준비됐습니다` : "새 버전이 준비됐습니다"}</span>
 				<button
 					disabled={busy}
@@ -20,7 +20,7 @@ export function UpdateBanner() {
 						setBusy(true);
 						void applyUpdate();
 					}}
-					className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-accent-ink disabled:opacity-60"
+					className="btn btn-primary btn-sm rounded-full"
 				>
 					{busy ? "받는 중…" : "새로고침"}
 				</button>

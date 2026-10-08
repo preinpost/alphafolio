@@ -1,5 +1,6 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { MAX_ATTACH, prepareImage, type PreparedImage } from "../lib/images.ts";
+import { finePointer } from "../lib/viewport.ts";
 import { ArrowUpIcon, ImageIcon, StopIcon, XIcon } from "./icons.tsx";
 
 interface Props {
@@ -76,26 +77,30 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 	// 응답 중이라도 입력이 있으면 전송 (서버가 후속 메시지로 큐잉). 비어 있으면 중지 버튼.
 	const showStop = streaming && !hasText && images.length === 0;
 
+	const hint = attachError ? (
+		<span className="hint err">{attachError}</span>
+	) : busy ? (
+		<span className="hint">이미지 준비 중…</span>
+	) : streaming ? (
+		<span className="hint">응답 중 — 입력하면 이어서 보낼 수 있어요</span>
+	) : finePointer ? (
+		<span className="hint idle">Shift + Enter 줄바꿈</span>
+	) : null;
+
 	return (
-		<div className="mx-auto w-full max-w-3xl">
-			<div
-				onClick={() => ref.current?.focus()}
-				onDragOver={(e) => e.preventDefault()}
-				onDrop={onDrop}
-				className="flex cursor-text flex-col rounded-3xl border border-line bg-card shadow-[0_2px_12px_rgba(15,23,42,0.06)] transition focus-within:border-accent/60 focus-within:shadow-[0_2px_16px_rgba(37,99,235,0.12)]"
-			>
+		<div>
+			<div className="composer" onClick={() => ref.current?.focus()} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
 				{images.length > 0 && (
-					<div className="flex gap-2 overflow-x-auto px-4 pt-3">
+					<div className="attach-list">
 						{images.map((img, i) => (
-							<div key={img.dataUrl.slice(-32) + i} className="relative shrink-0">
-								<img src={img.dataUrl} alt="" className="size-16 rounded-xl border border-line object-cover" />
+							<div key={img.dataUrl.slice(-32) + i} className="attach-thumb">
+								<img src={img.dataUrl} alt="" />
 								<button
 									onMouseDown={(e) => e.preventDefault()}
 									onClick={(e) => {
 										e.stopPropagation();
 										setImages((cur) => cur.filter((_, j) => j !== i));
 									}}
-									className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-ink text-canvas"
 									aria-label="첨부 빼기"
 								>
 									<XIcon size={11} />
@@ -104,7 +109,11 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 						))}
 					</div>
 				)}
+				<label className="sr-only" htmlFor="af-composer">
+					메시지
+				</label>
 				<textarea
+					id="af-composer"
 					ref={ref}
 					onPaste={onPaste}
 					rows={1}
@@ -121,9 +130,9 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 					autoComplete="off"
 					autoCorrect="on"
 					spellCheck={false}
-					className="composer-textarea max-h-[200px] w-full resize-none bg-transparent px-5 pt-4 pb-1 text-[15px] text-ink outline-none placeholder:text-faint disabled:opacity-60"
+					className="composer-textarea"
 				/>
-				<div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+				<div className="bar-row">
 					{/* iOS 에서는 카메라·사진 보관함 선택지가 함께 뜬다 (Info.plist 권한 문구 필요) */}
 					<input
 						ref={fileRef}
@@ -137,40 +146,34 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 						}}
 					/>
 					<button
+						className="icon-btn"
 						onMouseDown={(e) => e.preventDefault()}
 						onClick={(e) => {
 							e.stopPropagation();
 							fileRef.current?.click();
 						}}
 						disabled={disabled || busy || images.length >= MAX_ATTACH}
-						className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-hover active:scale-95 disabled:opacity-40"
 						aria-label="이미지 첨부"
+						title="이미지 첨부"
 					>
-						<ImageIcon size={18} />
+						<ImageIcon size={19} />
 					</button>
-					{attachError ? (
-						<span className="truncate px-1 text-xs text-danger">{attachError}</span>
-					) : busy ? (
-						<span className="truncate px-1 text-xs text-faint">이미지 준비 중…</span>
-					) : streaming ? (
-						<span className="truncate px-2 text-xs text-faint">응답 중 — 입력하면 이어서 보낼 수 있어요</span>
-					) : (
-						<span className="hidden px-2 text-xs text-faint md:inline">Shift + Enter 줄바꿈</span>
-					)}
+					{hint}
 					{showStop ? (
 						<button
+							className="send"
 							onMouseDown={(e) => e.preventDefault()}
 							onClick={(e) => {
 								e.stopPropagation();
 								onAbort();
 							}}
-							className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-canvas transition active:scale-95"
 							aria-label="응답 중지"
 						>
-							<StopIcon size={14} />
+							<StopIcon size={18} />
 						</button>
 					) : (
 						<button
+							className="send"
 							// 버튼이 포커스를 가져가지 않게 — 모바일에서 전송 후에도 키보드가 닫히지 않는다
 							onMouseDown={(e) => e.preventDefault()}
 							onClick={(e) => {
@@ -178,7 +181,6 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 								submit();
 							}}
 							disabled={disabled || !canSend}
-							className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-ink transition active:scale-95 disabled:bg-inset disabled:text-faint"
 							aria-label="보내기"
 						>
 							<ArrowUpIcon size={18} />
@@ -186,9 +188,7 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 					)}
 				</div>
 			</div>
-			<p className="hide-on-keyboard mt-2 text-center text-[11px] text-faint">
-				AI 분석은 참고용이며, 투자 판단과 그 책임은 본인에게 있습니다.
-			</p>
+			<p className="disclaimer hide-on-keyboard">AI 분석은 참고용이며, 투자 판단과 그 책임은 본인에게 있습니다.</p>
 		</div>
 	);
 }

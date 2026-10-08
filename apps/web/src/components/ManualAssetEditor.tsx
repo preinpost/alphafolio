@@ -1,11 +1,12 @@
 /**
  * 직접 입력 자산 추가·수정 폼 — API 가 없는 곳(은행 예금·연금·부동산·다른 거래소)의 금액.
- * 저장하면 투자 화면의 총자산·배분·계좌 카드("직접 입력")에 바로 들어간다.
+ * 보유 자산 목록의 그 행 자리에서 펼친다. 저장하면 총자산·배분·계좌("직접 입력")에 바로 들어간다.
  */
 import type { ManualAssetDto, ManualKind } from "@alphafolio/protocol";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../lib/api.ts";
+import { toast } from "../lib/toast.ts";
 
 export const MANUAL_KIND_LABEL: Record<ManualKind, string> = {
 	deposit: "예금·현금",
@@ -15,13 +16,11 @@ export const MANUAL_KIND_LABEL: Record<ManualKind, string> = {
 	other: "기타",
 };
 
-const field = "min-w-0 rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent";
-
 export function ManualAssetEditor({ asset, onDone }: { asset?: ManualAssetDto; onDone: () => void }) {
 	const [name, setName] = useState(asset?.name ?? "");
 	const [kind, setKind] = useState<ManualKind>(asset?.kind ?? "deposit");
 	const [currency, setCurrency] = useState<"KRW" | "USD">(asset?.currency ?? "KRW");
-	const [amount, setAmount] = useState(asset ? String(asset.amount) : "");
+	const [amount, setAmount] = useState(asset ? asset.amount.toLocaleString("en-US") : "");
 	const [memo, setMemo] = useState(asset?.memo ?? "");
 
 	const qc = useQueryClient();
@@ -34,19 +33,34 @@ export function ManualAssetEditor({ asset, onDone }: { asset?: ManualAssetDto; o
 			const body = { name: name.trim(), kind, currency, amount: Number(amount.replace(/,/g, "")), memo: memo.trim() || null };
 			return asset ? api.updateManualAsset(asset.id, body) : api.addManualAsset(body);
 		},
-		onSuccess: refresh,
+		onSuccess: () => {
+			toast(asset ? `${name.trim()} 금액을 고쳤습니다` : `${name.trim()}을(를) 추가했습니다`);
+			refresh();
+		},
 	});
-	const remove = useMutation({ mutationFn: () => api.deleteManualAsset(asset!.id), onSuccess: refresh });
+	const remove = useMutation({
+		mutationFn: () => api.deleteManualAsset(asset!.id),
+		onSuccess: () => {
+			toast(`${asset?.name ?? ""}을(를) 지웠습니다`);
+			refresh();
+		},
+	});
 
 	const n = Number(amount.replace(/,/g, ""));
 	const valid = name.trim().length > 0 && amount.trim() !== "" && Number.isFinite(n) && n >= 0;
 	const error = (save.error ?? remove.error) as Error | null;
 
 	return (
-		<div className="space-y-2 border-b border-line bg-inset px-4 py-3 last:border-0">
-			<div className="flex gap-2">
-				<input placeholder="이름 (예: 주택청약, 퇴직연금)" value={name} onChange={(e) => setName(e.target.value)} className={`${field} flex-1`} />
-				<select value={kind} onChange={(e) => setKind(e.target.value as ManualKind)} className={field}>
+		<form
+			className="inline-edit"
+			onSubmit={(e) => {
+				e.preventDefault();
+				if (valid && !save.isPending) save.mutate();
+			}}
+		>
+			<div className="line">
+				<input className="input input-sm" placeholder="이름 (예: 주택청약, 퇴직연금)" aria-label="이름" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+				<select className="input input-sm" aria-label="종류" value={kind} onChange={(e) => setKind(e.target.value as ManualKind)}>
 					{(Object.keys(MANUAL_KIND_LABEL) as ManualKind[]).map((k) => (
 						<option key={k} value={k}>
 							{MANUAL_KIND_LABEL[k]}
@@ -54,45 +68,48 @@ export function ManualAssetEditor({ asset, onDone }: { asset?: ManualAssetDto; o
 					))}
 				</select>
 			</div>
-			<div className="flex gap-2">
+			<div className="line">
 				<input
+					className="input input-sm num"
 					inputMode="decimal"
 					placeholder="금액"
+					aria-label="금액"
 					value={amount}
-					onChange={(e) => setAmount(e.target.value)}
-					className={`${field} flex-1`}
+					onChange={(e) => {
+						// 정수부에만 천 단위 쉼표 — 달러 소수점은 그대로
+						const [i = "", d] = e.target.value.replace(/[^\d.]/g, "").split(".");
+						const int = i ? Number(i).toLocaleString("en-US") : "";
+						setAmount(d !== undefined ? `${int || "0"}.${d.slice(0, 2)}` : int);
+					}}
 				/>
-				<select value={currency} onChange={(e) => setCurrency(e.target.value as "KRW" | "USD")} className={field}>
+				<select className="input input-sm" aria-label="통화" value={currency} onChange={(e) => setCurrency(e.target.value as "KRW" | "USD")}>
 					<option value="KRW">원</option>
 					<option value="USD">달러</option>
 				</select>
 			</div>
-			<input placeholder="메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} className={`${field} w-full`} />
-			{error && <p className="text-xs text-danger">{error.message}</p>}
+			<input className="input input-sm" placeholder="메모 (선택)" aria-label="메모" value={memo} onChange={(e) => setMemo(e.target.value)} />
+			{error && <p className="field-err">{error.message}</p>}
 			<div className="flex items-center gap-2">
 				{asset && (
 					<button
+						type="button"
+						className="btn btn-danger btn-sm"
+						disabled={remove.isPending}
 						onClick={() => {
 							if (confirm(`'${asset.name}' 을(를) 지울까요?`)) remove.mutate();
 						}}
-						disabled={remove.isPending}
-						className="rounded-lg px-3 py-1.5 text-xs text-danger disabled:opacity-50"
 					>
 						삭제
 					</button>
 				)}
-				<div className="flex-1" />
-				<button onClick={onDone} className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted">
+				<span className="flex-1" />
+				<button type="button" className="btn btn-ghost btn-sm" onClick={onDone}>
 					취소
 				</button>
-				<button
-					onClick={() => save.mutate()}
-					disabled={!valid || save.isPending}
-					className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-ink disabled:opacity-40"
-				>
+				<button type="submit" className="btn btn-primary btn-sm" disabled={!valid || save.isPending}>
 					{save.isPending ? "저장 중…" : "저장"}
 				</button>
 			</div>
-		</div>
+		</form>
 	);
 }

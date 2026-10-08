@@ -5,6 +5,7 @@
  * 조회 결과(시세·지표·보유·가계부 등)는 카드 없이 답변 텍스트로만 보인다 (serialize.ts 가 걸러 보낸다).
  */
 import type { CardOutcome, UICard } from "@alphafolio/protocol";
+import { InfoIcon } from "../icons.tsx";
 import { BinanceFuturesCardView } from "./FuturesCards.tsx";
 import { McpConfirmCardView } from "./McpCards.tsx";
 import { WatchConfirmCardView } from "./WatchCards.tsx";
@@ -46,9 +47,10 @@ function CardBody({ card }: { card: UICard }) {
 
 function UnknownCardView({ kind }: { kind: string }) {
 	return (
-		<div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-line bg-inset px-4 py-3 text-xs text-muted">
-			<span>이 카드는 새 버전에서 보입니다 ({kind}).</span>
-			<button onClick={() => location.reload()} className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-ink">
+		<div className="notice">
+			<InfoIcon size={16} />
+			<span className="flex-1">이 카드는 새 버전에서 보입니다 ({kind}).</span>
+			<button onClick={() => location.reload()} className="btn btn-secondary btn-sm">
 				새로고침
 			</button>
 		</div>

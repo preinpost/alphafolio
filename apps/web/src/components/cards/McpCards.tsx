@@ -8,7 +8,7 @@
  */
 import type { McpConfirmCard } from "@alphafolio/protocol";
 import { api, type McpExecuteResult } from "../../lib/api.ts";
-import { ConfirmBar, ConfirmError, useConfirm, Warnings, type ConfirmOutcome } from "./OrderCards.tsx";
+import { ConfirmBar, ConfirmCard, ConfirmError, useConfirm, Warnings, type ConfirmOutcome } from "./OrderCards.tsx";
 
 async function executeMcp(token: string): Promise<ConfirmOutcome<McpExecuteResult>> {
 	const r = await api.executeMcp(token);
@@ -16,17 +16,14 @@ async function executeMcp(token: string): Promise<ConfirmOutcome<McpExecuteResul
 	return { text: r.message, detail: r };
 }
 
-/** 이름 — 값 두 칸 (인자·결과 공용) */
+/** 이름 — 값 두 칸 (인자·결과 공용). 값은 자르지 않고 줄을 바꾼다 — 무엇이 실행되는지 전부 보여야 한다 */
 function Rows({ rows }: { rows: Array<{ key: string; label: string; value: string; title?: string | undefined }> }) {
 	return (
-		<dl className="space-y-1.5">
+		<dl className="kv left">
 			{rows.map((r) => (
-				<div key={r.key} className="grid grid-cols-[minmax(0,6.5rem)_1fr] gap-3 text-xs">
-					<dt className="truncate text-faint" title={r.title}>
-						{r.label}
-					</dt>
-					{/* 값은 자르지 않고 줄을 바꾼다 — 무엇이 실행되는지 전부 보여야 한다 */}
-					<dd className="min-w-0 break-words whitespace-pre-wrap text-ink tabular-nums">{r.value}</dd>
+				<div key={r.key} className="contents">
+					<dt title={r.title}>{r.label}</dt>
+					<dd>{r.value}</dd>
 				</div>
 			))}
 		</dl>
@@ -36,13 +33,13 @@ function Rows({ rows }: { rows: Array<{ key: string; label: string; value: strin
 function Result({ r }: { r: McpExecuteResult }) {
 	if (r.summary.length === 0 && !r.detail && !r.raw) return null;
 	return (
-		<div className="mt-2 space-y-2">
+		<div className="c-sec flex flex-col gap-2.5">
 			{r.summary.length > 0 && <Rows rows={r.summary.map((s, i) => ({ key: `${i}`, label: s.label, value: s.value }))} />}
-			{r.detail && <p className={`text-xs break-words ${r.ok ? "text-muted" : "text-danger"}`}>{r.detail}</p>}
+			{r.detail && <p className={`text-[12.5px] break-words ${r.ok ? "muted" : "danger-text"}`}>{r.detail}</p>}
 			{r.raw && (r.summary.length > 0 || r.raw !== r.detail) && (
-				<details className="text-[11px] text-faint">
+				<details>
 					<summary className="cursor-pointer select-none">원본 응답</summary>
-					<pre className="mt-1 max-h-60 overflow-auto rounded-lg bg-card p-2 font-mono break-all whitespace-pre-wrap">{r.raw}</pre>
+					<pre>{r.raw}</pre>
 				</details>
 			)}
 		</div>
@@ -51,24 +48,21 @@ function Result({ r }: { r: McpExecuteResult }) {
 
 export function McpConfirmCardView({ card }: { card: McpConfirmCard }) {
 	const c = useConfirm<McpExecuteResult>(card.token, card.expiresAt, true, executeMcp);
-	const border = card.destructive ? "border-danger/60" : "border-accent/60";
 
 	return (
-		<div className={`mt-2 rounded-xl border-2 ${border} bg-inset p-4`}>
-			<div className="flex items-baseline justify-between gap-3">
-				{/* 툴 이름·서버 설명(영문)은 제목에 마우스를 올리면 */}
-				<div
-					className={`min-w-0 text-sm font-semibold ${card.destructive ? "text-danger" : "text-ink"}`}
-					title={[card.tool, card.description].filter(Boolean).join("\n")}
-				>
-					{card.label ?? card.tool}
+		<ConfirmCard c={c} title={card.destructive ? "외부 계정 변경 · 삭제" : "외부 계정 변경"} badges={<span className="badge">{card.server}</span>} danger={card.destructive}>
+			<div className="c-main">
+				<div className="grow">
+					{/* 툴 이름·서버 설명(영문)은 제목에 마우스를 올리면 */}
+					<div className="sym" title={[card.tool, card.description].filter(Boolean).join("\n")}>
+						{card.label ?? card.tool}
+					</div>
+					{/* 한글 이름이 없는 툴(프리셋 밖)은 무엇을 하는지 설명이라도 보여야 한다 */}
+					{!card.label && card.description && <div className="how muted">{card.description}</div>}
 				</div>
-				<span className="shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted">{card.server}</span>
 			</div>
-			{/* 한글 이름이 없는 툴(프리셋 밖)은 무엇을 하는지 설명이라도 보여야 한다 */}
-			{!card.label && card.description && <div className="mt-1 text-xs text-muted">{card.description}</div>}
 
-			<div className="mt-3 border-t border-line pt-3">
+			<div className="c-sec">
 				{card.args.length > 0 ? (
 					<Rows
 						rows={card.args.map((a) => ({
@@ -79,19 +73,19 @@ export function McpConfirmCardView({ card }: { card: McpConfirmCard }) {
 						}))}
 					/>
 				) : (
-					<div className="text-xs text-faint">인자 없음</div>
+					<div className="muted text-[13px]">인자 없음</div>
 				)}
 			</div>
 
 			{c.phase === "idle" &&
 				card.notes.map((n) => (
-					<p key={n} className="mt-3 text-[11px] text-faint">
+					<p key={n} className="c-note">
 						{n}
 					</p>
 				))}
 			<Warnings items={card.warnings} />
-			<ConfirmBar c={c} verb={card.destructive ? "삭제·변경" : "실행"} />
+			<ConfirmBar c={c} verb={card.destructive ? "삭제·변경" : "실행"} danger={card.destructive} />
 			{c.detail && <Result r={c.detail} />}
-		</div>
+		</ConfirmCard>
 	);
 }

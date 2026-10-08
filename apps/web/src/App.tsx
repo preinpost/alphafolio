@@ -1,11 +1,13 @@
-import type { ConversationListItem, StreamMessage } from "@alphafolio/protocol";
+import type { ConversationListItem, MeDto, StreamMessage } from "@alphafolio/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ComponentType, type TouchEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type TouchEvent } from "react";
 import { api } from "./lib/api.ts";
 import { clearToken, getToken, isNativeApp } from "./lib/auth.ts";
 import { useChat, type ChatState } from "./lib/chat.ts";
 import { navigate, parseRoute, type View } from "./lib/route.ts";
 import { forgetSeen, isUnread, lastSession, markSeen } from "./lib/seen.ts";
+import { isDarkNow, onThemeApplied, setThemeMode } from "./lib/theme.ts";
+import { toast } from "./lib/toast.ts";
 import { applyUpdate, reportServerVersion } from "./lib/update.ts";
 import { ChatPage } from "./components/ChatPage.tsx";
 import { LedgerPage } from "./components/LedgerPage.tsx";
@@ -13,12 +15,15 @@ import { PortfolioPage } from "./components/PortfolioPage.tsx";
 import { LoginPage } from "./components/LoginPage.tsx";
 import { Logo } from "./components/Logo.tsx";
 import { SettingsPage } from "./components/SettingsPage.tsx";
+import { ToastHost } from "./components/Toasts.tsx";
 import {
+	BellIcon,
 	ChatIcon,
 	LogOutIcon,
-	MenuIcon,
+	MoonIcon,
 	PlusIcon,
 	SettingsIcon,
+	SunIcon,
 	TrashIcon,
 	TrendingIcon,
 	WalletIcon,
@@ -32,7 +37,8 @@ const NAV: Array<{ view: View; label: string; Icon: ComponentType<{ size?: numbe
 	{ view: "settings", label: "설정", Icon: SettingsIcon },
 ];
 
-const TITLE: Record<View, string> = { chat: "AlphaFolio", portfolio: "투자", ledger: "가계부", settings: "설정" };
+/** 단축키 표시 — 맥은 ⌘, 그 밖은 Ctrl */
+const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl ";
 
 export function App() {
 	const [authed, setAuthed] = useState(() => Boolean(getToken()));
@@ -41,7 +47,7 @@ export function App() {
 }
 
 /**
- * 로그인 후 셸 — 좌측 사이드바(데스크톱 고정 / 모바일 드로어) + 본문.
+ * 로그인 후 셸 — 데스크톱은 왼쪽 사이드바, 모바일은 하단 탭바 + (챗에서) 대화 목록 드로어.
  *
  * 채팅 상태는 여기서 들고 있는다. 사이드바에서 대화를 옮겨야 하고,
  * 다른 화면에 다녀와도 WebSocket 연결·스트리밍이 끊기지 않게 하기 위해서다.
@@ -63,7 +69,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 		onWatchEvent: (ev) => {
 			void qc.invalidateQueries({ queryKey: ["watch"] });
 			// 상태 변경(일시정지 등)은 목록만 갱신 — 발동·만료·비상 정지만 띄운다
-			if (["fired", "missed", "expired", "stopped", "ordered", "skipped"].includes(ev.kind)) setToast(ev);
+			if (["fired", "missed", "expired", "stopped", "ordered", "skipped"].includes(ev.kind)) setWatchToast(ev);
 		},
 		onMissing: () => {
 			lastSession.set(null);
@@ -71,11 +77,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 		},
 	});
 	const [view, setView] = useState<View>(initial.view);
-	const [toast, setToast] = useState<WatchToastEvent | null>(null);
+	const [watchToast, setWatchToast] = useState<WatchToastEvent | null>(null);
 	/** 이미 설정 화면일 때 감시 탭으로 옮기려면 다시 그려야 한다 (탭은 처음 그릴 때 주소에서 읽는다) */
 	const [settingsKey, setSettingsKey] = useState(0);
 	const [drawer, setDrawer] = useState(false);
-	const swipe = useDrawerSwipe(drawer, setDrawer);
+	// 대화 드로어는 챗 화면 전용 — 다른 화면의 가장자리 스와이프는 그대로 둔다
+	const swipe = useDrawerSwipe(drawer, setDrawer, view === "chat");
+	const me = useQuery({ queryKey: ["me"], queryFn: api.me });
 
 	// 드로어가 열린 채로 데스크톱 폭이 되면 닫는다 (오버레이가 남지 않게)
 	useEffect(() => {
@@ -129,102 +137,117 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 		navigate({ view: "chat", sessionId: id });
 	}
 
-	const sidebar = (
-		<Sidebar
-			view={view}
-			chat={chat}
-			onNavigate={go}
-			onNewChat={newChat}
-			onOpenConversation={openConversation}
-			onClose={() => setDrawer(false)}
-			onLogout={() => {
-				clearToken();
-				onLogout();
-			}}
-		/>
-	);
+	// ⌘1~4 화면 이동, Esc 드로어 닫기 — 핸들러는 최신 go 를 본다
+	const goRef = useRef(go);
+	goRef.current = go;
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent): void => {
+			if (e.key === "Escape") setDrawer(false);
+			if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+			const i = ["1", "2", "3", "4"].indexOf(e.key);
+			if (i < 0) return;
+			e.preventDefault();
+			goRef.current(NAV[i]!.view);
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, []);
+
+	function logout(): void {
+		void clearToken();
+		onLogout();
+	}
+
+	const page =
+		view === "chat" ? (
+			<ChatPage chat={chat} onOpenDrawer={() => setDrawer(true)} onNewChat={newChat} />
+		) : view === "ledger" ? (
+			<LedgerPage />
+		) : view === "portfolio" ? (
+			<PortfolioPage onAskChat={newChat} />
+		) : (
+			<SettingsPage key={settingsKey} onOpenConversation={openConversation} />
+		);
+
+	const drawerOpen = drawer || swipe.dragging;
 
 	return (
 		<div
-			className="flex min-h-0 flex-1 bg-canvas pr-[env(safe-area-inset-right)]"
+			className="app"
 			onTouchStart={swipe.onTouchStart}
 			onTouchMove={swipe.onTouchMove}
 			onTouchEnd={swipe.onTouchEnd}
 			onTouchCancel={swipe.onTouchEnd}
 		>
-			{/* 데스크톱 고정 사이드바 */}
-			<aside className="hidden w-64 shrink-0 border-r border-line bg-sidebar pl-[env(safe-area-inset-left)] md:flex">
-				{sidebar}
+			<aside className="sidebar">
+				<Sidebar
+					view={view}
+					chat={chat}
+					me={me.data}
+					onNavigate={go}
+					onNewChat={newChat}
+					onOpenConversation={openConversation}
+					onLogout={logout}
+				/>
 			</aside>
 
-			{/* 모바일 드로어 */}
-			<div
-				className={`fixed inset-0 z-40 md:hidden ${drawer || swipe.dragging ? "" : "pointer-events-none"}`}
-				aria-hidden={!drawer}
-			>
+			<main className="main">{page}</main>
+
+			{/* 모바일 하단 탭바 */}
+			<nav className="tabbar" aria-label="주요 화면">
+				{NAV.map(({ view: v, label, Icon }) => (
+					<button key={v} onClick={() => go(v)} aria-current={view === v ? "page" : undefined}>
+						<Icon size={21} />
+						{label}
+					</button>
+				))}
+			</nav>
+
+			{/* 모바일 대화 드로어 — 화면 이동은 탭바가 맡는다 */}
+			<div className={`drawer ${drawer ? "open" : ""} ${swipe.dragging ? "dragging" : ""}`} inert={!drawerOpen}>
 				<div
+					className="scrim"
 					onClick={() => setDrawer(false)}
 					style={swipe.dragging ? { opacity: swipe.progress, transition: "none" } : undefined}
-					className={`absolute inset-0 bg-black/40 transition-opacity duration-200 ${drawer ? "opacity-100" : "opacity-0"}`}
 				/>
-				<aside
+				<div
 					ref={swipe.drawerRef}
-					style={swipe.dragging ? { translate: `${swipe.offset}px 0`, transition: "none" } : undefined}
-					className={`absolute inset-y-0 left-0 flex w-72 max-w-[85%] bg-sidebar pl-[env(safe-area-inset-left)] shadow-xl transition-transform duration-200 ease-out ${
-						drawer ? "translate-x-0" : "-translate-x-full"
-					}`}
+					className="panel"
+					role="dialog"
+					aria-label="대화 목록"
+					style={swipe.dragging ? { transform: `translateX(${swipe.offset}px)`, transition: "none" } : undefined}
 				>
-					{sidebar}
-				</aside>
+					<div className="panel-h">
+						<strong>대화</strong>
+						<button className="icon-btn" onClick={() => setDrawer(false)} aria-label="닫기">
+							<XIcon size={18} />
+						</button>
+					</div>
+					<button className="btn btn-secondary side-new" onClick={newChat}>
+						<PlusIcon size={16} />새 대화
+					</button>
+					<ConversationList current={view === "chat" ? chat.sessionId : null} onOpen={openConversation} />
+				</div>
 			</div>
 
-			<main className="flex min-w-0 flex-1 flex-col pl-[env(safe-area-inset-left)] md:pl-0">
-				<header className="box-content flex h-12 shrink-0 items-center gap-1 px-1.5 pt-[env(safe-area-inset-top)] md:px-4">
-					<button
-						onClick={() => setDrawer(true)}
-						className="flex size-11 items-center justify-center rounded-xl text-muted transition hover:bg-hover active:bg-selected md:hidden"
-						aria-label="메뉴 열기"
-					>
-						<MenuIcon />
-					</button>
-					<div className="flex min-w-0 flex-1 items-center gap-2 px-1">
-						<span className="truncate text-sm font-medium text-ink">{TITLE[view]}</span>
-					</div>
-					{view === "chat" && (
-						<button
-							onClick={newChat}
-							className="flex size-11 items-center justify-center rounded-xl text-muted transition hover:bg-hover active:bg-selected disabled:opacity-40 md:hidden"
-							aria-label="새 대화"
-						>
-							<PlusIcon />
-						</button>
-					)}
-				</header>
-
-				{view === "chat" ? (
-					<ChatPage chat={chat} />
-				) : view === "ledger" ? (
-					<LedgerPage />
-				) : view === "portfolio" ? (
-					<PortfolioPage />
-				) : (
-					<SettingsPage key={settingsKey} onOpenConversation={openConversation} />
-				)}
-			</main>
-			{toast && (
-				<WatchToast
-					ev={toast}
-					onClose={() => setToast(null)}
-					onOpen={() => {
-						setToast(null);
-						const conv = toast.path?.match(/^\/c\/(.+)$/)?.[1];
-						if (conv) return openConversation(decodeURIComponent(conv));
-						history.pushState(null, "", "/settings/watch");
-						setView("settings");
-						setSettingsKey((k) => k + 1);
-					}}
-				/>
-			)}
+			<ToastHost
+				extra={
+					watchToast && (
+						<WatchToast
+							ev={watchToast}
+							onClose={() => setWatchToast(null)}
+							onOpen={() => {
+								setWatchToast(null);
+								const conv = watchToast.path?.match(/^\/c\/(.+)$/)?.[1];
+								if (conv) return openConversation(decodeURIComponent(conv));
+								history.pushState(null, "", "/settings/watch");
+								setView("settings");
+								setSettingsKey((k) => k + 1);
+							}}
+						/>
+					)
+				}
+			/>
 		</div>
 	);
 }
@@ -238,22 +261,17 @@ function WatchToast({ ev, onClose, onOpen }: { ev: WatchToastEvent; onClose: () 
 		return () => clearTimeout(id);
 	}, [ev, onClose]);
 	return (
-		<div className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-50 flex justify-center px-4">
-			<div className="w-full max-w-md rounded-xl border border-accent/50 bg-card p-3 shadow-lg">
-				<div className="flex items-start justify-between gap-3">
-					<button onClick={onOpen} className="min-w-0 text-left">
-						<div className="truncate text-sm font-medium text-ink">🔔 {ev.title}</div>
-						{ev.lines.map((l) => (
-							<div key={l} className="text-xs text-muted">
-								{l}
-							</div>
-						))}
-					</button>
-					<button onClick={onClose} className="shrink-0 text-xs text-faint" aria-label="닫기">
-						닫기
-					</button>
-				</div>
-			</div>
+		<div className="toast" role="status">
+			<BellIcon size={18} />
+			<button className="t" onClick={onOpen}>
+				{ev.title}
+				{ev.lines.map((l) => (
+					<small key={l}>{l}</small>
+				))}
+			</button>
+			<button onClick={onClose} aria-label="닫기">
+				<XIcon size={16} />
+			</button>
 		</div>
 	);
 }
@@ -261,110 +279,112 @@ function WatchToast({ ev, onClose, onOpen }: { ev: WatchToastEvent; onClose: () 
 interface SidebarProps {
 	view: View;
 	chat: ChatState;
+	me: MeDto | undefined;
 	onNavigate: (v: View) => void;
 	onNewChat: () => void;
 	onOpenConversation: (id: string) => void;
-	onClose: () => void;
 	onLogout: () => void;
 }
 
-function Sidebar({ view, chat, onNavigate, onNewChat, onOpenConversation, onClose, onLogout }: SidebarProps) {
+function Sidebar({ view, chat, me, onNavigate, onNewChat, onOpenConversation, onLogout }: SidebarProps) {
+	const dark = useSyncExternalStore(onThemeApplied, isDarkNow);
 	return (
-		<div className="flex w-full flex-col px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-			<div className="flex items-center justify-between px-1 pb-3">
+		<>
+			<div className="side-head">
 				{/* 로고 = 홈 — 챗 화면으로 돌아간다 (대화는 그대로, 새 대화는 아래 버튼) */}
-				<button
-					onClick={() => onNavigate("chat")}
-					className="-mx-1.5 flex items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-hover active:bg-selected"
-					aria-label="홈(챗)으로"
-				>
-					<Logo className="size-7 rounded-lg" />
-					<span className="text-sm font-semibold text-ink">AlphaFolio</span>
-				</button>
-				<button
-					onClick={onClose}
-					className="flex size-10 items-center justify-center rounded-xl text-muted transition hover:bg-hover active:bg-selected md:hidden"
-					aria-label="메뉴 닫기"
-				>
-					<XIcon size={16} />
+				<button className="brand" onClick={() => onNavigate("chat")} aria-label="홈(챗)으로">
+					<Logo />
+					AlphaFolio
 				</button>
 			</div>
-
-			<button
-				onClick={onNewChat}
-				className="mb-3 flex items-center gap-2 rounded-xl border border-line bg-card px-3 py-2.5 text-sm text-ink shadow-sm transition hover:bg-hover active:scale-[0.99] active:bg-hover disabled:opacity-50 md:py-2"
-			>
-				<PlusIcon size={16} />
-				새 대화
+			<button className="btn btn-secondary side-new" onClick={onNewChat}>
+				<PlusIcon size={16} />새 대화
 			</button>
 
-			<nav className="flex flex-col gap-0.5">
-				{NAV.map(({ view: v, label, Icon }) => (
-					<button
-						key={v}
-						onClick={() => onNavigate(v)}
-						className={`flex items-center gap-2.5 rounded-lg px-3 py-3 text-[15px] transition md:py-2 md:text-sm ${
-							view === v
-								? "bg-selected font-medium text-ink"
-								: "text-muted hover:bg-hover hover:text-ink active:bg-selected"
-						}`}
-					>
-						<Icon size={16} />
+			<nav className="nav" aria-label="주요 화면">
+				{NAV.map(({ view: v, label, Icon }, i) => (
+					<button key={v} className="nav-item" onClick={() => onNavigate(v)} aria-current={view === v ? "page" : undefined}>
+						<Icon />
 						{label}
+						<kbd>
+							{MOD}
+							{i + 1}
+						</kbd>
 					</button>
 				))}
 			</nav>
 
-			<ConversationList
-				current={view === "chat" ? chat.sessionId : null}
-				onOpen={onOpenConversation}
-			/>
+			<div className="side-label">최근 대화</div>
+			<ConversationList current={view === "chat" ? chat.sessionId : null} onOpen={onOpenConversation} />
 
-			<div className="mt-auto space-y-1 border-t border-line pt-3">
-				<div className="flex items-center gap-2 px-3 py-1 text-xs text-faint">
-					<span className={`size-1.5 rounded-full ${chat.connected ? "bg-success" : "bg-faint animate-pulse"}`} />
-					<span className="truncate" title={chat.model || undefined}>
-						{chat.connected ? modelName(chat.model) || "연결됨" : "연결 중…"}
+			<div className="side-foot">
+				<StatusLine connected={chat.connected} model={chat.model} />
+				<div className="me">
+					<span className="avatar">{(me?.user ?? "").slice(0, 2).toUpperCase()}</span>
+					<span className="who">
+						{me?.user ?? ""}
+						<small>{me ? (me.admin ? "관리자" : "사용자") : ""}</small>
 					</span>
+					<button
+						className="icon-btn"
+						onClick={() => setThemeMode(dark ? "light" : "dark")}
+						aria-label="테마 전환"
+						title={dark ? "라이트로" : "다크로"}
+					>
+						{dark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
+					</button>
+					<button className="icon-btn" onClick={onLogout} aria-label="로그아웃" title="로그아웃">
+						<LogOutIcon size={17} />
+					</button>
 				</div>
-				<AppVersion connected={chat.connected} />
-				<button
-					onClick={onLogout}
-					className="flex w-full items-center gap-2.5 rounded-lg px-3 py-3 text-[15px] text-muted transition hover:bg-hover hover:text-ink active:bg-selected md:py-2 md:text-sm"
-				>
-					<LogOutIcon size={16} />
-					로그아웃
-				</button>
 			</div>
-		</div>
+		</>
 	);
 }
 
 /**
- * 이 화면(번들)의 버전 + 서버 버전이 다르면 새로고침 안내.
+ * 연결 상태 · 모델 · 이 화면(번들)의 버전. 서버 버전이 다르면 새로고침 안내.
  * 배포 직후 서비스워커가 옛 번들을 주면 새 카드가 안 보인다 (PLAN §39) — 여기서 바로 드러난다.
  * 서버 버전은 소켓이 다시 붙을 때(= 배포로 서버가 재시작) 다시 읽는다. 상단 배너도 이 버전을 본다 (lib/update.ts).
  */
-function AppVersion({ connected }: { connected: boolean }) {
+function StatusLine({ connected, model }: { connected: boolean; model: string }) {
 	const health = useQuery({ queryKey: ["health", connected], queryFn: api.health, staleTime: Infinity, retry: false });
 	const server = health.data?.version;
 	useEffect(() => reportServerVersion(server), [server]);
 	const stale = !!server && server !== "unknown" && server !== __APP_VERSION__;
-	if (!stale) return <div className="px-3 pl-[1.625rem] text-[11px] text-faint">v{__APP_VERSION__}</div>;
 	return (
-		<button
-			onClick={() => void applyUpdate()}
-			className="block w-full px-3 pl-[1.625rem] text-left text-[11px] text-danger"
-			title="서버가 새 버전입니다. 새로고침하면 새 화면을 받습니다."
-		>
-			v{__APP_VERSION__} → v{server} 새로고침
-		</button>
+		<div className="status-line">
+			<span className={`led ${connected ? "" : "off"}`} />
+			<span className="t" title={model || undefined}>
+				{connected ? modelName(model) || "연결됨" : "연결 중…"}
+			</span>
+			{stale ? (
+				<button className="ver stale" onClick={() => void applyUpdate()} title="서버가 새 버전입니다. 새로고침하면 새 화면을 받습니다.">
+					v{server} 받기
+				</button>
+			) : (
+				<span className="ver">v{__APP_VERSION__}</span>
+			)}
+		</div>
 	);
 }
 
 /** "openrouter/deepseek/deepseek-v4.1-flash" → "deepseek-v4.1-flash" — 제공자·경로는 빼고 모델명만 (전체는 title 로) */
 function modelName(label: string): string {
 	return label.split("/").pop() ?? label;
+}
+
+const DAY = 86_400_000;
+
+/** 대화 묶음 — 마지막으로 바뀐 날 기준 (기기 현지 시각) */
+function groupOf(iso: string, now = new Date()): string {
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+	const t = Date.parse(iso);
+	if (t >= today) return "오늘";
+	if (t >= today - DAY) return "어제";
+	if (t >= today - 6 * DAY) return "지난 7일";
+	if (t >= today - 29 * DAY) return "지난 30일";
+	return "이전";
 }
 
 /**
@@ -390,8 +410,9 @@ function ConversationList({ current, onOpen }: { current: string | null; onOpen:
 			forgetSeen(item.id);
 			if (lastSession.get() === item.id) lastSession.set(null);
 			qc.setQueryData<ConversationListItem[]>(["sessions"], (old) => old?.filter((c) => c.id !== item.id));
+			toast("대화를 삭제했습니다");
 		} catch (err) {
-			window.alert(`삭제하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`);
+			toast(`삭제하지 못했습니다: ${err instanceof Error ? err.message : String(err)}`);
 		} finally {
 			setDeleting(null);
 			void qc.invalidateQueries({ queryKey: ["sessions"] });
@@ -405,31 +426,35 @@ function ConversationList({ current, onOpen }: { current: string | null; onOpen:
 		if (here && document.visibilityState === "visible") markSeen(here.id, here.modified);
 	}, [items, current]);
 
-	if (items.length === 0) return <div className="flex-1" />;
-
+	const now = new Date();
+	let last = "";
 	return (
-		<div className="-mx-1 mt-4 min-h-0 flex-1 overflow-y-auto px-1">
-			<div className="px-3 pb-1 text-xs text-faint">대화</div>
-			<div className="flex flex-col gap-0.5">
-				{items.slice(0, 50).map((c) => (
-					<ConversationRow
-						key={c.id}
-						item={c}
-						active={c.id === current}
-						busy={deleting === c.id}
-						onOpen={onOpen}
-						onDelete={() => void remove(c)}
-					/>
-				))}
-			</div>
+		<div className="convs thin-scroll">
+			{items.slice(0, 50).map((c) => {
+				const group = groupOf(c.modified, now);
+				const head = group !== last ? <div className="conv-group">{group}</div> : null;
+				last = group;
+				return (
+					<div key={c.id}>
+						{head}
+						<ConversationRow
+							item={c}
+							active={c.id === current}
+							busy={deleting === c.id}
+							onOpen={onOpen}
+							onDelete={() => void remove(c)}
+						/>
+					</div>
+				);
+			})}
 		</div>
 	);
 }
 
 /**
  * 대화 한 줄 + 삭제 버튼.
- * 휴지통: 마우스가 있으면 올린 행에만, 터치 기기는 보고 있는 대화에만 (드로어는 왼쪽 스와이프로 닫혀서
- * 스와이프 삭제는 쓰지 않는다). 터치에서 안 보이는 행은 투명이 아니라 아예 숨긴다 — 모르고 눌리지 않게.
+ * 휴지통: 마우스가 있으면 올린 행에만, 터치 기기는 보고 있는 대화에만 (styles.css .conv-del).
+ * 드로어는 왼쪽 스와이프로 닫혀서 스와이프 삭제는 쓰지 않는다.
  */
 function ConversationRow({
 	item,
@@ -446,31 +471,16 @@ function ConversationRow({
 }) {
 	const unread = !active && !item.streaming && isUnread(item.id, item.modified);
 	return (
-		<div
-			className={`group flex items-center rounded-lg text-sm transition ${busy ? "opacity-50" : ""} ${
-				active ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink"
-			}`}
-		>
-			<button
-				onClick={() => onOpen(item.id)}
-				className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg py-2.5 pl-3 text-left md:py-1.5 ${active ? "" : "active:bg-selected"}`}
-			>
-				<span className={`min-w-0 flex-1 truncate ${unread ? "font-medium text-ink" : ""}`}>{item.title}</span>
+		<div className={`conv ${unread ? "unread" : ""} ${busy ? "busy" : ""}`} aria-current={active ? "true" : undefined}>
+			<button className="conv-open" onClick={() => onOpen(item.id)}>
+				<span className="t">{item.title}</span>
 				{item.streaming ? (
-					<span className="size-2 shrink-0 animate-pulse rounded-full bg-accent" aria-label="응답 중" title="응답 중" />
+					<span className="dot live" role="img" aria-label="응답 중" title="응답 중" />
 				) : unread ? (
-					<span className="size-2 shrink-0 rounded-full bg-accent" aria-label="새 답" title="새 답" />
+					<span className="dot" role="img" aria-label="새 답" title="새 답" />
 				) : null}
 			</button>
-			<button
-				onClick={onDelete}
-				disabled={busy}
-				aria-label={`"${item.title}" 삭제`}
-				title="삭제"
-				className={`mr-1 ml-0.5 flex size-9 shrink-0 items-center justify-center rounded-md text-faint transition hover:bg-hover hover:text-danger focus-visible:opacity-100 md:size-7 ${
-					active ? "opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" : "opacity-0 group-hover:opacity-100 pointer-coarse:hidden"
-				}`}
-			>
+			<button className="conv-del" onClick={onDelete} disabled={busy} aria-label={`"${item.title}" 삭제`} title="삭제">
 				<TrashIcon size={15} />
 			</button>
 		</div>
@@ -484,22 +494,22 @@ const SLOP_PX = 8;
 
 /**
  * 모바일 드로어 스와이프 — 가장자리에서 밀어 열고, 열린 드로어를 왼쪽으로 밀어 닫는다.
- * 손가락을 따라 움직이고, 폭의 30% 이상 끌었으면 확정한다.
+ * 손가락을 따라 움직이고, 폭의 30% 이상 끌었으면 확정한다. enabled=false 면 열기만 막는다.
  */
-function useDrawerSwipe(open: boolean, setOpen: (v: boolean) => void) {
-	const drawerRef = useRef<HTMLElement>(null);
+function useDrawerSwipe(open: boolean, setOpen: (v: boolean) => void, enabled: boolean) {
+	const drawerRef = useRef<HTMLDivElement>(null);
 	const start = useRef<{ x: number; y: number; axis: "x" | "y" | null; from: "open" | "closed" } | null>(null);
 	const [drag, setDrag] = useState<{ dx: number; from: "open" | "closed" } | null>(null);
 	const lastDx = useRef(0);
 
-	const width = (): number => drawerRef.current?.offsetWidth || 288;
+	const width = (): number => drawerRef.current?.offsetWidth || 310;
 	const isDesktop = (): boolean => window.matchMedia("(min-width: 768px)").matches;
 
 	function onTouchStart(e: TouchEvent): void {
 		const t = e.touches[0];
 		if (!t || e.touches.length > 1 || isDesktop()) return;
 		if (open) start.current = { x: t.clientX, y: t.clientY, axis: null, from: "open" };
-		else if (t.clientX < EDGE_PX) start.current = { x: t.clientX, y: t.clientY, axis: null, from: "closed" };
+		else if (enabled && t.clientX < EDGE_PX) start.current = { x: t.clientX, y: t.clientY, axis: null, from: "closed" };
 	}
 
 	function onTouchMove(e: TouchEvent): void {

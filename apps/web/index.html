@@ -6,7 +6,11 @@
 			name="viewport"
 			content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
 		/>
-		<meta name="theme-color" content="#f6f8fb" />
+		<meta name="theme-color" content="#f6f8fa" />
+		<!-- 웹폰트 (styles.css @import) — 연결을 미리 열어 첫 글자가 늦게 바뀌지 않게 -->
+		<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 		<link rel="icon" type="image/png" href="/favicon-64.png" />
@@ -14,7 +18,7 @@
 		<title>AlphaFolio</title>
 		<script>
 			// 첫 페인트 전에 테마를 적용한다 (번쩍임 방지).
-			// 키·값은 src/lib/theme.ts 와 일치해야 한다.
+			// 키·값·색은 src/lib/theme.ts 와 일치해야 한다.
 			(function () {
 				try {
 					var mode = localStorage.getItem("af_theme") || "system";
@@ -23,7 +27,7 @@
 						(mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 					if (dark) document.documentElement.classList.add("dark");
 					var meta = document.querySelector('meta[name="theme-color"]');
-					if (meta) meta.setAttribute("content", dark ? "#0e1622" : "#f6f8fb");
+					if (meta) meta.setAttribute("content", dark ? "#090f16" : "#f6f8fa");
 				} catch (e) {}
 			})();
 		</script>

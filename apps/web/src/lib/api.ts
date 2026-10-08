@@ -20,9 +20,12 @@ import { API_BASE, clearToken, getToken } from "./auth.ts";
 
 export class ApiError extends Error {
 	readonly status: number;
-	constructor(status: number, message: string) {
+	/** 429 — 서버가 알려 준 잠금 남은 시간(초). 로그인 화면이 카운트다운에 쓴다 */
+	readonly retryAfterSec: number | null;
+	constructor(status: number, message: string, retryAfterSec: number | null = null) {
 		super(message);
 		this.status = status;
+		this.retryAfterSec = retryAfterSec;
 	}
 }
 
@@ -56,28 +59,27 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 	return body as T;
 }
 
-/** 초대 코드로 가입 — 성공하면 바로 로그인 토큰 */
-export async function signup(code: string, user: string, password: string): Promise<string> {
-	const res = await fetch(`${API_BASE}/api/auth/signup`, {
+/** 로그인·가입 공용 — 토큰 없이 보내고, 성공하면 토큰을 돌려준다 */
+async function authPost(path: string, payload: Record<string, string>, fallback: string): Promise<string> {
+	const res = await fetch(`${API_BASE}${path}`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ code, user, password }),
+		body: JSON.stringify(payload),
 	});
 	const body = (await res.json().catch(() => null)) as { token?: string; error?: string } | null;
-	if (!res.ok || !body?.token) throw new ApiError(res.status, body?.error ?? "가입 실패");
+	if (!res.ok || !body?.token) {
+		const retry = Number(res.headers.get("retry-after"));
+		throw new ApiError(res.status, body?.error ?? fallback, res.status === 429 && retry > 0 ? retry : null);
+	}
 	return body.token;
 }
 
-export async function login(user: string, password: string): Promise<string> {
-	const res = await fetch(`${API_BASE}/api/auth/login`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ user, password }),
-	});
-	const body = (await res.json().catch(() => null)) as { token?: string; error?: string } | null;
-	if (!res.ok || !body?.token) throw new ApiError(res.status, body?.error ?? "로그인 실패");
-	return body.token;
-}
+/** 초대 코드로 가입 — 성공하면 바로 로그인 토큰 */
+export const signup = (code: string, user: string, password: string): Promise<string> =>
+	authPost("/api/auth/signup", { code, user, password }, "가입 실패");
+
+export const login = (user: string, password: string): Promise<string> =>
+	authPost("/api/auth/login", { user, password }, "로그인 실패");
 
 export interface SecretStatus {
 	name: string;
@@ -333,6 +335,12 @@ export const api = {
 			method: "POST",
 			body: JSON.stringify(tx),
 		}),
+
+	/** 거래 고치기 — 거래 id 로 서버가 가계부를 찾는다 (내가 멤버인 가계부의 거래만). 금액은 양수 + type */
+	updateTransaction: (
+		id: string,
+		patch: { date?: string; amount?: number; type?: "expense" | "income"; category?: string; merchant?: string; memo?: string },
+	) => request<LedgerTransaction>(`/api/ledger/transactions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
 
 	/** 거래 id 로 서버가 가계부를 찾는다 (내가 멤버인 가계부의 거래만) */
 	deleteTransaction: (id: string) =>
