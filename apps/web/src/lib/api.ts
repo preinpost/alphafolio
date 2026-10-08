@@ -120,6 +120,29 @@ export interface McpExecuteResult {
 	raw: string;
 }
 
+/** 설정 화면의 툴 한 줄 — 서버 mcp-api.ts McpToolView 와 같은 모양 */
+export interface McpToolView {
+	name: string;
+	title: string | null;
+	/** 확인 카드 제목 (프리셋 쓰기 툴의 한글 이름) */
+	label: string | null;
+	/** 서버가 보낸 설명 원문 — 연결 전 프리셋은 null */
+	description: string | null;
+	mode: "read" | "confirm";
+	reason: string;
+	destructive: boolean;
+	note: string | null;
+	params: Array<{ name: string; type: string; required: boolean; description: string | null }>;
+}
+
+export interface McpToolsView {
+	/** server = 서버에서 받은 목록, preset = 연결 전 프리셋 이름만, none = 연결해야 안다 */
+	source: "server" | "preset" | "none";
+	fetchedAt: number | null;
+	tools: McpToolView[] | null;
+	error: string | null;
+}
+
 export type McpAddInput =
 	| { preset: string }
 	| { name: string; url: string; auth: "oauth" | "none" }
@@ -312,6 +335,9 @@ export const api = {
 	// ⚠️ MCP 쓰기가 실제로 실행되는 유일한 클라이언트 경로. 확인 카드의 버튼에서만 호출한다 (PLAN §39)
 	executeMcp: (token: string) =>
 		request<McpExecuteResult>("/api/mcp/execute", { method: "POST", body: JSON.stringify({ token }) }),
+	/** 툴 목록 — 서버가 10분 캐시. refresh 는 다시 받는다 */
+	mcpTools: (id: string) => request<McpToolsView>(`/api/mcp/servers/${encodeURIComponent(id)}/tools`),
+	refreshMcpTools: (id: string) => request<McpToolsView>(`/api/mcp/servers/${encodeURIComponent(id)}/tools/refresh`, { method: "POST" }),
 	testMcp: (id: string) => request<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, { method: "POST" }),
 
 	// ── 가계부 (ledgerId 를 비우면 서버가 기본 가계부를 고른다) ─────────────

@@ -437,7 +437,7 @@ describe("mcp_call 게이트웨이", () => {
 	it("연결이 필요한 서버는 호출하지 않고 설정 안내", async () => {
 		const { srv, run } = setup({ state: "needs_auth" });
 		const r = await run({});
-		assert.match(r.content[0]!.text, /설정 → 연결 → MCP 서버/);
+		assert.match(r.content[0]!.text, /설정 → MCP 서버/);
 		assert.equal(srv.log.length, 0);
 	});
 

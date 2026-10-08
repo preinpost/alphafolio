@@ -68,6 +68,11 @@ export class McpPool {
 		return list;
 	}
 
+	/** 툴 목록을 받은 시각 — 아직 없으면 null (설정 화면의 "몇 시에 받음") */
+	toolsAt(id: string): number | null {
+		return this.entries.get(id)?.tools?.at ?? null;
+	}
+
 	/** 설정 삭제·연결 해제 때 */
 	drop(id: string): void {
 		const hit = this.entries.get(id);

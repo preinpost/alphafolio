@@ -6,7 +6,23 @@
  */
 import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { judgeTool, McpSession, PRESETS, rawResult, renderCallResult, summarizeResult, type FetchLike, type McpServerHandle, type SummaryLine } from "@alphafolio/mcp";
+import {
+	judgeTool,
+	McpPool,
+	McpSession,
+	PRESETS,
+	rawResult,
+	readReason,
+	renderCallResult,
+	summarizeResult,
+	toolParams,
+	type FetchLike,
+	type McpParamView,
+	type McpPreset,
+	type McpServerHandle,
+	type McpTool,
+	type SummaryLine,
+} from "@alphafolio/mcp";
 import { explainMcpError, type McpWriteRequest } from "@alphafolio/mcp/tools";
 import type { CardOutcomeStore } from "./card-outcomes.ts";
 import { HttpError, readJson } from "./ledger-api.ts";
@@ -87,7 +103,7 @@ async function executeMcpWrite(deps: McpApiDeps, user: string, token: string): P
 	// 준비한 뒤 서버 주소를 바꿨다면 다른 곳으로 보내지 않는다
 	if (rec.url !== mcp.url) throw new HttpError(400, "그 사이 MCP 서버 주소가 바뀌었습니다. 챗에서 다시 요청해 주세요.");
 	const h = handleFor(deps, user, rec);
-	if (h.state === "needs_auth") throw new HttpError(400, `${rec.name} 연결이 필요합니다 — 설정 → 연결 → MCP 서버`);
+	if (h.state === "needs_auth") throw new HttpError(400, `${rec.name} 연결이 필요합니다 — 설정 → MCP 서버`);
 
 	console.log(`[mcp] 쓰기 실행 user=${user} server=${mcp.serverId} tool=${mcp.tool} nonce=${nonce}`);
 	const session = new McpSession({
@@ -139,6 +155,81 @@ function handleFor(deps: McpApiDeps, user: string, rec: McpServerRecord): McpSer
 /** mcp_call 이 호출마다 읽는 이 사용자의 서버 목록 */
 export function mcpHandles(deps: McpApiDeps, user: string): McpServerHandle[] {
 	return deps.store.list(user).map((rec) => handleFor(deps, user, rec));
+}
+
+// ── 툴 목록 (설정 화면) ─────────────────────────────────────────────────
+// 서버가 보낸 이름·설명 원문과 우리 판정(바로 실행 / 확인 카드)을 함께 보여 준다 — 에이전트도 같은 설명을 보고 툴을 고른다.
+
+/** 설정 화면의 툴 한 줄 */
+export interface McpToolView {
+	name: string;
+	/** 서버가 준 사람용 제목 (title · annotations.title) */
+	title: string | null;
+	/** 확인 카드 제목 (프리셋 쓰기 툴의 한글 이름) */
+	label: string | null;
+	/** 서버가 보낸 설명 원문 — 연결 전 프리셋은 null */
+	description: string | null;
+	mode: "read" | "confirm";
+	/** 왜 그렇게 판정했나 */
+	reason: string;
+	destructive: boolean;
+	/** 확인 카드에 붙는 안내 (생략한 값의 기본값 등) */
+	note: string | null;
+	params: McpParamView[];
+}
+
+export interface McpToolsView {
+	/** server = 서버에서 받은 목록, preset = 연결 전 프리셋 이름만, none = 연결해야 안다 */
+	source: "server" | "preset" | "none";
+	/** 받은 시각 (ms) — 10분 캐시 */
+	fetchedAt: number | null;
+	tools: McpToolView[] | null;
+	/** 받으려다 실패한 이유 (프리셋이면 이름 목록은 그대로 준다) */
+	error: string | null;
+}
+
+/** 사용자별 세션·툴 캐시 — 서버 id 는 사용자 안에서만 유일해서 사용자마다 풀을 따로 둔다 */
+const pools = new WeakMap<McpApiDeps, Map<string, McpPool>>();
+function poolFor(deps: McpApiDeps, user: string): McpPool {
+	let byUser = pools.get(deps);
+	if (!byUser) pools.set(deps, (byUser = new Map()));
+	let pool = byUser.get(user);
+	if (!pool) byUser.set(user, (pool = new McpPool(deps.fetch)));
+	return pool;
+}
+
+function toolView(t: McpTool, preset: McpPreset | undefined): McpToolView {
+	const v = judgeTool(t, preset);
+	return {
+		name: t.name,
+		title: t.title ?? t.annotations?.title ?? null,
+		label: v.mode === "confirm" ? v.label : null,
+		description: t.description?.trim() || null,
+		mode: v.mode,
+		reason: v.mode === "read" ? readReason(t, preset) : v.reason,
+		destructive: v.mode === "confirm" && v.destructive,
+		note: preset?.notes?.[t.name] ?? null,
+		params: toolParams(t),
+	};
+}
+
+/** 프리셋 서버는 연결 전에도 이름과 판정을 안다 (설명은 서버에서만 온다) */
+function presetTools(p: McpPreset): McpToolView[] {
+	return [...p.allow, ...Object.keys(p.writeLabels)].map((name) => toolView({ name }, p));
+}
+
+async function toolsView(deps: McpApiDeps, user: string, rec: McpServerRecord, refresh: boolean): Promise<McpToolsView> {
+	const h = handleFor(deps, user, rec);
+	const fallback = (error: string | null): McpToolsView =>
+		h.preset ? { source: "preset", fetchedAt: null, tools: presetTools(h.preset), error } : { source: "none", fetchedAt: null, tools: null, error };
+	if (h.state === "needs_auth") return fallback(null);
+	const pool = poolFor(deps, user);
+	try {
+		const list = await pool.tools(h, refresh);
+		return { source: "server", fetchedAt: pool.toolsAt(h.id), tools: list.map((t) => toolView(t, h.preset)), error: null };
+	} catch (err) {
+		return fallback(explainMcpError(rec.name, err));
+	}
 }
 
 function listing(deps: McpApiDeps, user: string) {
@@ -213,8 +304,13 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 		// 폐기 실패해도 지운다 — 사용자는 이 서버를 더 이상 쓰지 않겠다고 했다
 		await deps.auth.disconnect(user, id).catch(() => undefined);
 		await deps.store.remove(user, id);
+		poolFor(deps, user).drop(id);
 		return listing(deps, user);
 	}
+
+	// 툴 목록 — 캐시(10분)에서. refresh 는 서버에서 다시 받는다
+	if (action === "/tools" && req.method === "GET") return toolsView(deps, user, rec, false);
+	if (action === "/tools/refresh" && req.method === "POST") return toolsView(deps, user, rec, true);
 
 	if (action === "/oauth/start" && req.method === "POST") {
 		const body = await readJson(req);
@@ -228,21 +324,18 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 
 	if (action === "/disconnect" && req.method === "POST") {
 		await deps.auth.disconnect(user, id);
+		poolFor(deps, user).drop(id);
 		return listing(deps, user);
 	}
 
-	// 연결 테스트 — 새 세션으로 툴 목록을 받아 읽기/차단 개수를 보여 준다 (툴을 호출하지는 않는다)
+	// 연결 테스트 — 툴 목록을 새로 받아 읽기/차단 개수를 보여 준다 (툴을 호출하지는 않는다).
+	// 받은 목록은 툴 목록 캐시도 갱신한다 — 화면의 개수와 테스트 결과가 어긋나지 않게
 	if (action === "/test" && req.method === "POST") {
 		const h = handleFor(deps, user, rec);
 		if (h.state === "needs_auth") return { ok: false, message: "먼저 [연결] 로 로그인하세요" };
-		const session = new McpSession({
-			url: h.url,
-			fetch: deps.fetch,
-			headers: () => h.headers(),
-			...(h.onUnauthorized ? { onUnauthorized: h.onUnauthorized } : {}),
-		});
+		const pool = poolFor(deps, user);
 		try {
-			const tools = await session.listTools();
+			const tools = await pool.tools(h, true);
 			const reads = tools.filter((t) => judgeTool(t, h.preset).mode === "read").length;
 			const writes = tools.length - reads;
 			return {
@@ -252,9 +345,9 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 				writes,
 			};
 		} catch (err) {
+			// 세션이 깨졌을 수 있다 — 다음 요청은 새 세션으로
+			pool.drop(id);
 			return { ok: false, message: explainMcpError(rec.name, err) };
-		} finally {
-			void session.close();
 		}
 	}
 
@@ -274,7 +367,7 @@ function escapeHtml(s: string): string {
 export async function handleMcpCallback(url: URL, res: ServerResponse, deps: McpApiDeps): Promise<void> {
 	const result = await deps.auth.callback(url.searchParams);
 	if (result.clientKind === "web" && deps.publicUrl) {
-		const back = new URL(`${deps.publicUrl}/settings/connect`);
+		const back = new URL(`${deps.publicUrl}/settings/mcp`);
 		back.searchParams.set("mcp", result.ok ? "ok" : "error");
 		back.searchParams.set("msg", result.message.slice(0, 200));
 		res.writeHead(302, { location: back.toString(), "cache-control": "no-store", "referrer-policy": "no-referrer" });

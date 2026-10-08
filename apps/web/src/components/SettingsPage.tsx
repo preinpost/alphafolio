@@ -2,7 +2,8 @@
  * 설정 — 탭으로 묶는다 (데스크톱은 왼쪽 세로 탭, 좁으면 가로로 밀어 넘기는 탭).
  *
  *   계정    내 계정 (비밀번호·모든 기기 로그아웃)
- *   연결    증권(KIS·토스)·뉴스 키 + 원격 MCP 서버 (TradingView 등)
+ *   연결    증권(KIS·토스)·뉴스 키 · 알림(텔레그램)
+ *   MCP 서버 원격 MCP 서버 (TradingView 등) — 서버별 툴과 판정(바로 실행 / 확인 카드)
  *   감시    봉 마감 감시 목록 — 일시정지·다시 켜기·삭제·비상 정지 (PLAN §40). 만들기는 챗에서
  *   AI 모델 LLM 키 (비우면 서버 기본 계정)
  *   화면    테마 · 단축키
@@ -38,11 +39,12 @@ const THEMES: Array<{ value: ThemeMode; label: string; preview: string; side: st
 	{ value: "system", label: "시스템", preview: "linear-gradient(135deg, oklch(0.977 0.004 255) 50%, oklch(0.165 0.018 258) 50%)", side: "transparent" },
 ];
 
-type Tab = "account" | "connect" | "watch" | "ai" | "display" | "admin";
+type Tab = "account" | "connect" | "mcp" | "watch" | "ai" | "display" | "admin";
 
 const TABS: Array<{ value: Tab; label: string; admin?: boolean }> = [
 	{ value: "account", label: "계정" },
 	{ value: "connect", label: "연결" },
+	{ value: "mcp", label: "MCP 서버" },
 	{ value: "watch", label: "감시" },
 	{ value: "ai", label: "AI 모델" },
 	{ value: "display", label: "화면" },
@@ -178,10 +180,14 @@ export function SettingsPage({ onOpenConversation }: { onOpenConversation?: (id:
 							</Tabs.Panel>
 
 							<Tabs.Panel value="connect" className="set-panel">
-								<PanelHead title="연결">증권사·거래소 키와 알림 받을 곳, 원격 MCP 서버를 설정합니다.</PanelHead>
+								<PanelHead title="연결">증권사·거래소 키와 알림 받을 곳을 설정합니다.</PanelHead>
 								{storageWarnings}
 								{keyNote}
 								{keyGroups("connect")}
+							</Tabs.Panel>
+
+							<Tabs.Panel value="mcp" className="set-panel">
+								<PanelHead title="MCP 서버">외부 도구 서버를 붙이면 에이전트가 조회 툴은 바로 쓰고, 쓰기 툴은 확인 카드로 묻습니다.</PanelHead>
 								<McpSettings />
 							</Tabs.Panel>
 

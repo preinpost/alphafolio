@@ -176,7 +176,7 @@ export class McpAuthManager {
 	/** mcp_call 이 요청마다 부른다 */
 	async accessHeaders(user: string, serverId: string): Promise<Record<string, string>> {
 		const rec = this.opts.store.get(user, serverId);
-		if (!rec?.oauth) throw new McpNeedsAuthError("연결(로그인)이 필요합니다. 설정 → 연결 → MCP 서버에서 [연결] 을 눌러 주세요.");
+		if (!rec?.oauth) throw new McpNeedsAuthError("연결(로그인)이 필요합니다. 설정 → MCP 서버에서 [연결] 을 눌러 주세요.");
 		let oauth = rec.oauth;
 		const exp = oauth.tokens.expiresAt;
 		if (exp !== undefined && exp - REFRESH_SKEW_MS <= this.now()) oauth = await this.refresh(user, serverId);
@@ -213,11 +213,11 @@ export class McpAuthManager {
 	private async doRefresh(user: string, serverId: string): Promise<StoredOAuth> {
 		const rec = this.opts.store.get(user, serverId);
 		const oauth = rec?.oauth;
-		if (!rec || !oauth) throw new McpNeedsAuthError("연결(로그인)이 필요합니다. 설정 → 연결 → MCP 서버에서 [연결] 을 눌러 주세요.");
+		if (!rec || !oauth) throw new McpNeedsAuthError("연결(로그인)이 필요합니다. 설정 → MCP 서버에서 [연결] 을 눌러 주세요.");
 		if (!oauth.tokens.refreshToken) {
 			await this.opts.store.setOAuth(user, serverId, null);
 			this.opts.store.setProblem(user, serverId, "로그인이 만료됐습니다 (갱신 토큰 없음)");
-			throw new McpNeedsAuthError("로그인이 만료됐습니다. 설정 → 연결 → MCP 서버에서 다시 연결해 주세요.");
+			throw new McpNeedsAuthError("로그인이 만료됐습니다. 설정 → MCP 서버에서 다시 연결해 주세요.");
 		}
 		try {
 			const tokens = await refreshTokens({
@@ -236,7 +236,7 @@ export class McpAuthManager {
 				await this.opts.store.setOAuth(user, serverId, null);
 				this.opts.store.setProblem(user, serverId, "로그인이 만료됐습니다");
 				console.warn(`[mcp] 갱신 거절 → 연결 해제 user=${user} server=${serverId}: ${err.code}`);
-				throw new McpNeedsAuthError("로그인이 만료됐습니다. 설정 → 연결 → MCP 서버에서 다시 연결해 주세요.");
+				throw new McpNeedsAuthError("로그인이 만료됐습니다. 설정 → MCP 서버에서 다시 연결해 주세요.");
 			}
 			throw err;
 		}

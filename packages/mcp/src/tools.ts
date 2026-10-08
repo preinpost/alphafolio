@@ -74,7 +74,7 @@ export function describeArgs(tool: McpTool, args: Record<string, unknown>, prese
 	}));
 }
 
-const SETTINGS_HINT = "설정 → 연결 → MCP 서버";
+const SETTINGS_HINT = "설정 → MCP 서버";
 
 /** 사람에게 보여 줄 오류 문장 — 토큰·헤더 값은 담지 않는다 */
 export function explainMcpError(server: string, err: unknown): string {

@@ -15,7 +15,7 @@ import { installFakeD1, type FakeD1 } from "../../../packages/ledger/test/fake-d
 import { createFakeServer, MCP_URL, type FakeServer } from "../../../packages/mcp/test/fake-server.ts";
 import { parsePublicUrl } from "../src/config.ts";
 import { McpAuthManager } from "../src/mcp-auth.ts";
-import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpExecuteResult, type McpWritePayload } from "../src/mcp-api.ts";
+import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpExecuteResult, type McpToolsView, type McpWritePayload } from "../src/mcp-api.ts";
 import { OrderTokenGuard } from "../src/order-tokens.ts";
 import { McpConfigError, McpStore, normalizeHeaders } from "../src/mcp-store.ts";
 
@@ -273,6 +273,74 @@ describe("쓰기 확인 카드 → 실행 (PLAN §39)", () => {
 	});
 });
 
+describe("툴 목록 (설정 화면)", () => {
+	const get = (path: string, method = "GET") =>
+		handleMcp(Object.assign(Readable.from([]), { method }) as unknown as IncomingMessage, path, "ms", deps) as Promise<McpToolsView>;
+
+	it("연결 전에는 목록 없음, 연결하면 서버 원문 + 판정 + 파라미터. 캐시는 다시 받기 전까지 유지", async () => {
+		srv = createFakeServer({
+			acceptToken: latest,
+			rotateRefresh: true,
+			tools: [
+				{ name: "get_quote", description: "  Quote for a symbol.  ", inputSchema: { type: "object", properties: { symbol: { type: "string", description: "Ticker" }, venues: { type: "array", items: { type: "string" } } }, required: ["symbol"] } },
+				{ name: "delete_alert", annotations: { title: "Delete alert" } },
+				{ name: "ask_question" },
+			],
+		});
+		auth = new McpAuthManager({ store, publicUrl: PUBLIC, fetch: srv.fetch, policy, now: () => clock });
+		deps = { ...deps, auth, fetch: srv.fetch };
+		const id = await addOAuth();
+		const before = await get(`/api/mcp/servers/${id}/tools`);
+		assert.deepEqual(before, { source: "none", fetchedAt: null, tools: null, error: null });
+
+		await auth.callback(await connect("ms", id));
+		const view = await get(`/api/mcp/servers/${id}/tools`);
+		assert.equal(view.source, "server");
+		assert.equal(typeof view.fetchedAt, "number");
+		const [quote, del, ask] = view.tools ?? [];
+		assert.deepEqual(quote, {
+			name: "get_quote",
+			title: null,
+			label: null,
+			description: "Quote for a symbol.",
+			mode: "read",
+			reason: "이름에 읽기 동사(get)가 있음",
+			destructive: false,
+			note: null,
+			params: [
+				{ name: "symbol", type: "string", required: true, description: "Ticker" },
+				{ name: "venues", type: "string[]", required: false, description: null },
+			],
+		});
+		assert.equal(del?.mode, "confirm");
+		assert.equal(del?.destructive, true);
+		assert.equal(del?.title, "Delete alert");
+		assert.equal(ask?.mode, "confirm");
+		assert.equal(ask?.reason, "읽기 툴인지 알 수 없음");
+
+		const lists = () => srv.log.filter((l) => l.rpc === "tools/list").length;
+		const n = lists();
+		await get(`/api/mcp/servers/${id}/tools`);
+		assert.equal(lists(), n, "10분 안에는 캐시");
+		await get(`/api/mcp/servers/${id}/tools/refresh`, "POST");
+		assert.equal(lists(), n + 1);
+	});
+
+	it("TradingView 프리셋은 연결 전에도 이름 35개와 판정 (설명 없음)", async () => {
+		await store.add("ms", { name: "TradingView", url: "https://mcp.tradingview.com/mcp", auth: "oauth", preset: "tradingview" });
+		const id = store.list("ms")[0]!.id;
+		const view = await get(`/api/mcp/servers/${id}/tools`);
+		assert.equal(view.source, "preset");
+		assert.equal(view.tools?.length, 35);
+		assert.equal(view.tools?.filter((t) => t.mode === "read").length, 25);
+		assert.equal(view.tools?.every((t) => t.description === null), true);
+		const create = view.tools?.find((t) => t.name === "mcp-tv-create-alert");
+		assert.equal(create?.label, "TradingView 알림 만들기");
+		assert.match(create?.note ?? "", /TradingView 기본값/);
+		assert.equal(view.tools?.find((t) => t.name === "mcp-tv-get-news")?.reason, "TradingView 읽기 목록에 있는 툴");
+	});
+});
+
 describe("연결 해제 · 콜백 응답", () => {
 	it("해제하면 두 토큰을 폐기 요청하고 저장분을 지운다", async () => {
 		const id = await addOAuth();
@@ -300,7 +368,7 @@ describe("연결 해제 · 콜백 응답", () => {
 		await handleMcpCallback(new URL(`${PUBLIC}/api/mcp/oauth/callback?${await connect("ms", id)}`), web.res, deps);
 		assert.equal(web.out.status, 302);
 		const loc = new URL(web.out.headers?.location ?? "");
-		assert.equal(loc.pathname, "/settings/connect");
+		assert.equal(loc.pathname, "/settings/mcp");
 		assert.equal(loc.searchParams.get("mcp"), "ok");
 
 		const { url } = await auth.start("ms", id, "app");

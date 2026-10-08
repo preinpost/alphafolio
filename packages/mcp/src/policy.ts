@@ -262,3 +262,48 @@ export function judgeTool(tool: Pick<McpTool, "name" | "annotations">, preset?: 
 	if (words.some((w) => READ_WORDS.has(w))) return { mode: "read" };
 	return { mode: "confirm", reason: "읽기 툴인지 알 수 없음", destructive, label: null };
 }
+
+/**
+ * 읽기 판정의 이유 — 설정 화면이 툴 옆에 보여 준다 (judgeTool 이 read 를 낸 경우에만 부른다).
+ * 판정 순서는 judgeTool 과 같다.
+ */
+export function readReason(tool: Pick<McpTool, "name" | "annotations">, preset?: McpPreset): string {
+	if (preset) return `${preset.name} 읽기 목록에 있는 툴`;
+	if (tool.annotations?.readOnlyHint === true) return "서버가 읽기 전용으로 표시 (readOnlyHint)";
+	const word = nameWords(tool.name).find((w) => READ_WORDS.has(w));
+	return word ? `이름에 읽기 동사(${word})가 있음` : "읽기";
+}
+
+export interface McpParamView {
+	name: string;
+	/** "string" · "string | string[]" · "object" … (스키마에 없으면 "") */
+	type: string;
+	required: boolean;
+	description: string | null;
+}
+
+/** inputSchema → 파라미터 목록 (최상위만 — 설정 화면 표시용) */
+export function toolParams(tool: Pick<McpTool, "inputSchema">): McpParamView[] {
+	const schema = tool.inputSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined;
+	const required = new Set(schema?.required ?? []);
+	return Object.entries(schema?.properties ?? {}).map(([name, prop]) => ({
+		name,
+		type: typeName(prop),
+		required: required.has(name),
+		description: typeof prop.description === "string" ? prop.description : null,
+	}));
+}
+
+function typeName(prop: Record<string, unknown> | undefined): string {
+	if (!prop) return "";
+	const variants = (prop.anyOf ?? prop.oneOf) as Array<Record<string, unknown>> | undefined;
+	if (Array.isArray(variants)) return [...new Set(variants.map(typeName).filter(Boolean))].join(" | ");
+	const t = prop.type;
+	if (Array.isArray(t)) return t.join(" | ");
+	if (t === "array") {
+		const inner = typeName(prop.items as Record<string, unknown> | undefined);
+		return inner ? `${inner.includes("|") ? `(${inner})` : inner}[]` : "array";
+	}
+	if (Array.isArray(prop.enum)) return prop.enum.map((v) => JSON.stringify(v)).join(" | ");
+	return typeof t === "string" ? t : "";
+}
