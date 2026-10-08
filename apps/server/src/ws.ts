@@ -22,6 +22,7 @@ import { verifyToken } from "./auth.ts";
 import { checkImages, MAX_WS_PAYLOAD } from "./images.ts";
 import type { RuntimeManager } from "./runtimes.ts";
 import { serializeMessages } from "./serialize.ts";
+import type { CardOutcomeStore } from "./card-outcomes.ts";
 import { CotStreamFilter } from "./thinkingText.ts";
 import type { AccountStore } from "./accounts.ts";
 
@@ -33,6 +34,8 @@ interface WsDeps {
 	runtimes: RuntimeManager;
 	/** 호출 시점 판정 — 앱에서 키를 넣으면 재시작 없이 true 가 된다 */
 	ledgerEnabled: () => boolean;
+	/** 확인 카드 버튼 결과 — 기록에 붙여 보낸다 */
+	cardOutcomes: CardOutcomeStore;
 }
 
 /** pi 이벤트의 우리가 쓰는 부분만 좁게 기술한 형태. */
@@ -113,7 +116,7 @@ export function attachWebSocket(server: Server, deps: WsDeps): WsHub {
 		const snapshot = (): void => {
 			if (!hasViewers(user, sessionId)) return;
 			const conv = deps.runtimes.peek(user, sessionId);
-			if (conv) toViewers(user, sessionId, { type: "message_end", messages: serializeMessages(conv.messages) });
+			if (conv) toViewers(user, sessionId, { type: "message_end", messages: serializeMessages(conv.messages, (t) => deps.cardOutcomes.get(user, t)) });
 		};
 
 		switch (e.type) {
@@ -188,7 +191,7 @@ export function attachWebSocket(server: Server, deps: WsDeps): WsHub {
 			model: conv.modelLabel,
 			ledgerEnabled: deps.ledgerEnabled(),
 			isStreaming: conv.isStreaming,
-			messages: serializeMessages(conv.messages),
+			messages: serializeMessages(conv.messages, (t) => deps.cardOutcomes.get(c.user, t)),
 		});
 	}
 

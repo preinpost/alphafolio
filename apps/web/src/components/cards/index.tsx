@@ -4,13 +4,22 @@
  * 카드는 **확인 다이얼로그뿐**이다 — 사람이 [확인]·[취소] 를 눌러야 실행되는 주문·감시·외부 MCP 쓰기.
  * 조회 결과(시세·지표·보유·가계부 등)는 카드 없이 답변 텍스트로만 보인다 (serialize.ts 가 걸러 보낸다).
  */
-import type { UICard } from "@alphafolio/protocol";
+import type { CardOutcome, UICard } from "@alphafolio/protocol";
 import { BinanceFuturesCardView } from "./FuturesCards.tsx";
 import { McpConfirmCardView } from "./McpCards.tsx";
 import { WatchConfirmCardView } from "./WatchCards.tsx";
-import { BinanceOrderCardView, BinanceTransferCardView, ConditionalOrderCardView, OrderChangeCardView, OrderPreviewCardView } from "./OrderCards.tsx";
+import { BinanceOrderCardView, BinanceTransferCardView, CardOutcomeContext, ConditionalOrderCardView, OrderChangeCardView, OrderPreviewCardView } from "./OrderCards.tsx";
 
-export function CardView({ card }: { card: UICard }) {
+/** outcome — 서버가 기억하는 버튼 결과 (실행·실패·닫기). 카드의 useConfirm 이 처음 상태로 쓴다 */
+export function CardView({ card, outcome }: { card: UICard; outcome?: CardOutcome | undefined }) {
+	return (
+		<CardOutcomeContext.Provider value={outcome}>
+			<CardBody card={card} />
+		</CardOutcomeContext.Provider>
+	);
+}
+
+function CardBody({ card }: { card: UICard }) {
 	switch (card.kind) {
 		case "order-preview-card":
 			return <OrderPreviewCardView card={card} />;

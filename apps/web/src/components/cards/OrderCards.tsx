@@ -5,8 +5,8 @@
  *    에이전트는 토큰이 담긴 카드를 띄울 수만 있고, 실행은 사람의 클릭이 한다.
  *    (외부 웹·뉴스 본문에 심긴 지시문이 주문으로 이어지지 않게 하는 장치)
  */
-import { useEffect, useState } from "react";
-import type { BinanceOrderCard, BinanceTransferCard, ConditionalOrderCard, OrderChangeCard, OrderPreviewCard } from "@alphafolio/protocol";
+import { createContext, useContext, useEffect, useState } from "react";
+import type { BinanceOrderCard, BinanceTransferCard, CardOutcome, ConditionalOrderCard, OrderChangeCard, OrderPreviewCard } from "@alphafolio/protocol";
 import { api } from "../../lib/api.ts";
 
 function money(value: number, currency: "KRW" | "USD"): string {
@@ -15,7 +15,16 @@ function money(value: number, currency: "KRW" | "USD"): string {
 		: `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 }
 
-type Phase = "idle" | "sending" | "done" | "failed" | "expired";
+type Phase = "idle" | "sending" | "done" | "failed" | "expired" | "dismissed";
+
+/** 서버가 기억하는 이 카드의 버튼 결과 — CardView 가 넣는다. 다시 열어도 실행·닫기 결과가 그대로 보인다 */
+export const CardOutcomeContext = createContext<CardOutcome | undefined>(undefined);
+
+/** 처음 그릴 상태 — 기록이 있으면 그 결과, 없으면 남은 시간으로 (지난 카드가 1초 동안 버튼을 보이지 않게) */
+function initialPhase(saved: CardOutcome | undefined, expiresAt: number | null): Phase {
+	if (saved) return saved.state;
+	return secondsLeft(expiresAt) > 0 ? "idle" : "expired";
+}
 
 const BROKER_LABEL = { toss: "토스", kis: "한국투자", binance: "Binance" } as const;
 
@@ -53,10 +62,19 @@ export function useConfirm<D = never>(
 	ok: boolean,
 	run: (token: string) => Promise<ConfirmOutcome<D>> = executeOrder,
 ) {
-	const [phase, setPhase] = useState<Phase>("idle");
-	const [message, setMessage] = useState<string | null>(null);
-	const [detail, setDetail] = useState<D | null>(null);
+	const saved = useContext(CardOutcomeContext);
+	const [phase, setPhase] = useState<Phase>(() => initialPhase(saved, expiresAt));
+	const [message, setMessage] = useState<string | null>(saved?.message ?? null);
+	const [detail, setDetail] = useState<D | null>((saved?.detail as D | undefined) ?? null);
 	const [remain, setRemain] = useState(() => secondsLeft(expiresAt));
+
+	// 다른 탭·기기에서 처리한 결과가 기록으로 늦게 오면 따른다 (보내는 중이면 이 화면의 응답을 기다린다)
+	useEffect(() => {
+		if (!saved) return;
+		setPhase((p) => (p === "sending" ? p : saved.state));
+		setMessage(saved.message);
+		setDetail((saved.detail as D | undefined) ?? null);
+	}, [saved?.at]);
 
 	// 남은 시간 표시 — 토큰은 2분이라 사용자가 흐름을 알 수 있어야 한다
 	useEffect(() => {
@@ -88,7 +106,12 @@ export function useConfirm<D = never>(
 	}
 	/** 실패 뒤 같은 토큰으로 다시 (서버가 토큰을 소비하지 않은 실패만 의미가 있다 — 감시 켜기의 한도 확인 등) */
 	const retry = () => setPhase(secondsLeft(expiresAt) > 0 ? "idle" : "expired");
-	return { phase, message, detail, remain, confirm, retry, dismiss: () => setPhase("expired") };
+	/** 닫기 — 서버에도 남긴다 (다시 열어도 닫은 카드로) */
+	const dismiss = () => {
+		setPhase("dismissed");
+		if (token) void api.dismissCard(token).catch(() => {});
+	};
+	return { phase, message, detail, remain, confirm, retry, dismiss };
 }
 
 export function ConfirmBar({
@@ -131,7 +154,8 @@ export function ConfirmBar({
 					)}
 				</div>
 			)}
-			{c.phase === "expired" && <span className="text-sm text-muted">확인이 취소되었습니다. 필요하면 다시 요청하세요.</span>}
+			{c.phase === "expired" && <span className="text-sm text-muted">확인 시간이 지나 만료되었습니다. 필요하면 다시 요청하세요.</span>}
+			{c.phase === "dismissed" && <span className="text-sm text-muted">닫았습니다. 필요하면 다시 요청하세요.</span>}
 		</div>
 	);
 }

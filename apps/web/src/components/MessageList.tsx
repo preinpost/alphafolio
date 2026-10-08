@@ -293,7 +293,7 @@ function Block({ block, busy }: { block: UIContentBlock; busy: boolean }) {
 		return (
 			<div className="space-y-2">
 				<ToolChip name={block.name} state={state} seed={block.id} />
-				{block.result?.card && <CardView card={block.result.card} />}
+				{block.result?.card && <CardView card={block.result.card} outcome={block.result.outcome} />}
 			</div>
 		);
 	}

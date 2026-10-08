@@ -11,6 +11,7 @@ import { createHmac } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { TriggerSpec } from "@alphafolio/broker";
 import type { WatchSummary } from "@alphafolio/broker/watch-tools";
+import type { CardOutcomeStore } from "./card-outcomes.ts";
 import { HttpError, readJson } from "./ledger-api.ts";
 import { createOrderToken, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
 import type { Currency, ExecRecord } from "./trade-store.ts";
@@ -214,13 +215,22 @@ function asHttp(err: unknown): never {
 }
 
 /** 처리한 경로면 응답 본문, 아니면 undefined */
-export async function handleWatch(req: IncomingMessage, path: string, user: string, ops: WatchOps): Promise<unknown> {
+export async function handleWatch(req: IncomingMessage, path: string, user: string, ops: WatchOps, outcomes?: CardOutcomeStore): Promise<unknown> {
 	try {
 		if (path === "/api/watch" && req.method === "GET") return await ops.view(user);
 		// ⚠️ 확인 카드의 [켜기] 만 부른다 — 에이전트는 사용자 인증 토큰이 없어 여기에 올 수 없다
 		if (path === "/api/watch/arm" && req.method === "POST") {
 			const body = await readJson(req);
-			return { ok: true, watch: await ops.arm(user, String(body.token ?? "")) };
+			const token = String(body.token ?? "");
+			const arm = () => ops.arm(user, token);
+			// 카드가 켠 직후 보여 주는 문장과 같게 (WatchCards)
+			const watch = outcomes
+				? await outcomes.run(user, token, arm, (w) => ({
+						state: "done",
+						message: w.order ? `자동 매매를 켰습니다 (${w.id}) — 조건이 맞으면 주문합니다` : `감시를 켰습니다 (${w.id}) — 봉이 닫힐 때마다 확인합니다`,
+					}))
+				: await arm();
+			return { ok: true, watch };
 		}
 		if (path === "/api/watch/stop-all" && req.method === "POST") return { stopped: await ops.stopAll(user, "app") };
 		if (path === "/api/watch/limits" && req.method === "PUT") {

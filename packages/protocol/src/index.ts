@@ -270,10 +270,24 @@ export type UICard =
 
 // ── 메시지 ──────────────────────────────────────────────────────────────
 
+/**
+ * 확인 카드가 어떻게 끝났는지 — 서버가 기억한다 (대화를 다시 열어도 실행한 카드가 "취소" 로 보이지 않게).
+ * 기록이 없는데 시간이 지났으면 화면이 "만료" 로 그린다.
+ */
+export interface CardOutcome {
+	/** done 실행함 · failed 실행 실패(거절 포함) · dismissed 사람이 닫음 */
+	state: "done" | "failed" | "dismissed";
+	message: string | null;
+	/** 카드가 따로 그리는 값 (MCP 실행 결과 요약) */
+	detail?: unknown;
+	at: number;
+}
+
 export interface UIToolResult {
 	text: string;
 	isError: boolean;
 	card?: UICard;
+	outcome?: CardOutcome;
 }
 
 export type UIContentBlock =

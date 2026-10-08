@@ -262,6 +262,9 @@ export const api = {
 			body: JSON.stringify({ token }),
 		}),
 
+	/** 확인 카드 [닫기] — 서버가 기억한다 (다시 열어도 닫은 카드로 보이게) */
+	dismissCard: (token: string) => request<{ ok: boolean }>("/api/cards/dismiss", { method: "POST", body: JSON.stringify({ token }) }),
+
 	orders: (status: "OPEN" | "CLOSED" = "OPEN") =>
 		request<{ orders: BrokerOrder[] }>(`/api/orders?status=${status}`),
 

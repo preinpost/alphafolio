@@ -8,6 +8,7 @@ import { createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { judgeTool, McpSession, PRESETS, rawResult, renderCallResult, summarizeResult, type FetchLike, type McpServerHandle, type SummaryLine } from "@alphafolio/mcp";
 import { explainMcpError, type McpWriteRequest } from "@alphafolio/mcp/tools";
+import type { CardOutcomeStore } from "./card-outcomes.ts";
 import { HttpError, readJson } from "./ledger-api.ts";
 import { createOrderToken, ORDER_TOKEN_TTL_MS, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
 import type { McpAuthManager, OAuthClientKind } from "./mcp-auth.ts";
@@ -20,6 +21,8 @@ export interface McpApiDeps {
 	publicUrl: string | undefined;
 	/** 쓰기 확인 토큰 (PLAN §39) — 서명 키는 mcpConfirmSecret(마스터) */
 	confirm: { secret: string; guard: OrderTokenGuard<McpWritePayload> };
+	/** 확인 카드 결과 기록 — 대화를 다시 열어도 결과가 보이게 */
+	outcomes?: CardOutcomeStore;
 }
 
 // ── 쓰기 확인 (PLAN §39) ────────────────────────────────────────────────
@@ -161,7 +164,10 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 	// ⚠️ 확인 카드의 [확인] 버튼만 부른다. 에이전트는 사용자 인증 토큰이 없어 여기에 올 수 없다
 	if (path === "/api/mcp/execute" && req.method === "POST") {
 		const body = await readJson(req);
-		return executeMcpWrite(deps, user, String(body.token ?? ""));
+		const token = String(body.token ?? "");
+		const run = () => executeMcpWrite(deps, user, token);
+		if (!deps.outcomes) return run();
+		return deps.outcomes.run(user, token, run, (r) => ({ state: r.ok ? "done" : "failed", message: r.message, detail: r }));
 	}
 
 	if (path === "/api/mcp/servers" && req.method === "POST") {

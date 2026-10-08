@@ -8,7 +8,7 @@
  * 바꾼 부분:
  *   - 카드 파싱을 KIS 전용 차트에서 details.kind 기반 일반 파서로 교체
  */
-import type { UICard, UIContentBlock, UIMessage, UIToolResult } from "@alphafolio/protocol";
+import type { CardOutcome, UICard, UIContentBlock, UIMessage, UIToolResult } from "@alphafolio/protocol";
 import { sanitizeAssistantText } from "./thinkingText.ts";
 
 type AnyMessage = {
@@ -59,8 +59,11 @@ function textFromContent(content: unknown): string {
 	return "";
 }
 
-/** pi의 AgentMessage[] 를 UI 메시지로 변환한다. */
-export function serializeMessages(messages: unknown[]): UIMessage[] {
+/**
+ * pi의 AgentMessage[] 를 UI 메시지로 변환한다.
+ * outcomeOf — 확인 카드 토큰 → 버튼 결과 (card-outcomes.ts). 있으면 카드에 붙여 다시 열어도 결과가 보인다.
+ */
+export function serializeMessages(messages: unknown[], outcomeOf?: (token: string) => CardOutcome | undefined): UIMessage[] {
 	const msgs = messages as AnyMessage[];
 
 	// toolCallId → 결과 매핑 (toolResult는 별도 메시지로 오므로 먼저 모은다)
@@ -68,10 +71,12 @@ export function serializeMessages(messages: unknown[]): UIMessage[] {
 	for (const m of msgs) {
 		if (m.role === "toolResult" && typeof m.toolCallId === "string") {
 			const card = parseCard(m.details);
+			const outcome = card?.token && outcomeOf ? outcomeOf(card.token) : undefined;
 			results.set(m.toolCallId, {
 				text: textFromContent(m.content),
 				isError: m.isError === true,
 				...(card ? { card } : {}),
+				...(outcome ? { outcome } : {}),
 			});
 		}
 	}

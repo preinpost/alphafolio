@@ -112,6 +112,11 @@ export interface AlphaFolioConversation {
 	prompt(text: string, images?: ImageInput[]): Promise<void>;
 	steer(text: string, images?: ImageInput[]): Promise<void>;
 	followUp(text: string, images?: ImageInput[]): Promise<void>;
+	/**
+	 * 모델만 보는 메시지를 대화에 넣는다 (화면에는 안 나온다 — serialize 가 custom 을 버린다). 새 답을 시작하지 않는다.
+	 * 응답 중이면 진행 중인 흐름에 끼워 넣고(steer), 쉬고 있으면 기록에만 남아 다음 질문 때 함께 읽힌다.
+	 */
+	note(customType: string, text: string, details?: unknown): Promise<void>;
 	abort(): Promise<void>;
 	/** 지금 모델이 이미지를 읽을 수 있는가 — 못 읽는데 보내면 SDK 가 이미지를 조용히 뺄 수 있어 미리 막는다 */
 	readonly acceptsImages: boolean;
@@ -236,6 +241,7 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 			followUp: async (text, images) => {
 				await session.followUp(text, images?.length ? toContent(images) : undefined);
 			},
+			note: (customType, text, details) => session.sendCustomMessage({ customType, content: text, display: false, details }),
 			abort: () => session.abort(),
 			get acceptsImages() {
 				const input = (session.model as { input?: string[] } | undefined)?.input;

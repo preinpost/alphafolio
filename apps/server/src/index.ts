@@ -65,6 +65,7 @@ import { TriggerError, TriggerStore } from "./triggers.ts";
 import { Watcher, type WatchEvent } from "./watcher.ts";
 import { OrderRunner } from "./order-runner.ts";
 import { TradeStore } from "./trade-store.ts";
+import { CardOrigins, CardOutcomeStore, outcomeNote } from "./card-outcomes.ts";
 import { TelegramBots } from "./notify/telegram-bot.ts";
 import { handleWatch, watchConfirmSecret, WatchOps, type WatchTokenPayload } from "./watch-api.ts";
 import { createSafeFetch } from "@alphafolio/mcp";
@@ -143,6 +144,18 @@ async function main(): Promise<void> {
 	// 사용자별 시크릿 — 같은 D1의 user_secrets 테이블에 암호화 보관
 	const secrets = new SecretStore(ledgerConfig, cfg.auth.secret, cfg.auth.ephemeralSecret);
 
+	// 확인 카드 버튼 결과 — 대화 기록(세션 파일)과 같은 곳에 둔다
+	// 새 결과는 그 카드가 나온 대화의 에이전트에게도 알린다 — 연쇄 카드에서 앞 카드를 눌렀는지 알고 이어 가게
+	const cardOrigins = new CardOrigins();
+	const cardOutcomes = new CardOutcomeStore(join(cfg.dataDir, "card-outcomes.jsonl"), (user, token, outcome) => {
+		const origin = cardOrigins.get(user, token);
+		if (!origin) return; // 재시작 전에 띄운 카드 — 어느 대화인지 모른다
+		void runtimes
+			.conversation(user, origin.sessionId)
+			.then((conv) => conv?.note("card-outcome", outcomeNote(origin.label, outcome), { state: outcome.state }))
+			.catch((err: unknown) => console.warn(`[card] 에이전트에 결과 알리기 실패: ${err instanceof Error ? err.message : String(err)}`));
+	});
+
 	// 사용자별 원격 MCP 서버 (PLAN §38) — 사용자 입력 URL 로 서버가 요청하므로 SSRF 방어 fetch 만 쓴다
 	const mcpPolicy = { allowPrivate: cfg.mcpAllowPrivate };
 	const mcpFetch = createSafeFetch(mcpPolicy);
@@ -154,6 +167,7 @@ async function main(): Promise<void> {
 		publicUrl: cfg.publicUrl,
 		// 쓰기 확인 카드 — 주문과 같은 구조, 서명 키만 분리 (PLAN §39)
 		confirm: { secret: mcpConfirmSecret(cfg.auth.secret), guard: new OrderTokenGuard<McpWritePayload>() },
+		outcomes: cardOutcomes,
 	};
 
 	setLedgerConfigProvider(ledgerConfig);
@@ -455,6 +469,11 @@ async function main(): Promise<void> {
 		}),
 		idleMinutes: cfg.idleMinutes,
 	});
+	// 확인 카드가 어느 대화에서 나왔는지 — 버튼 결과를 그 대화에 알린다 (cardOutcomes)
+	runtimes.onEvent((user, sessionId, raw) => {
+		const e = raw as { type?: string; toolName?: string; result?: unknown };
+		if (e.type === "tool_execution_end") cardOrigins.remember(user, sessionId, e.toolName ?? "", e.result);
+	});
 
 	// 계정 — env 계정(슈퍼관리자) + 초대 코드로 가입한 D1 계정 (PLAN §25)
 	const accounts = new AccountStore(ledgerConfig, { name: cfg.auth.admin, password: cfg.auth.adminPassword }, cfg.auth.secret);
@@ -691,7 +710,7 @@ async function main(): Promise<void> {
 
 			// ── 감시 트리거 (PLAN §40) ─────────────────────────
 			if (path === "/api/watch" || path.startsWith("/api/watch/")) {
-				const result = await handleWatch(req, path, user, watchOps);
+				const result = await handleWatch(req, path, user, watchOps, cardOutcomes);
 				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
 				json(res, 200, result);
 				return;
@@ -794,18 +813,39 @@ async function main(): Promise<void> {
 			//    (사용자 인증 토큰을 갖고 있지 않다).
 			if (path === "/api/orders/execute" && req.method === "POST") {
 				const body = await readJson(req);
-				const verified = orderGuard.verify(String(body.token ?? ""), cfg.auth.secret, user);
-				if (!verified.ok) throw new HttpError(400, failureMessage(verified.reason));
+				const token = String(body.token ?? "");
+				// 결과는 카드에 남긴다 — 대화를 다시 열어도 실행한 카드가 "취소" 로 보이지 않게
+				const result = await cardOutcomes.run(
+					user,
+					token,
+					async () => {
+						const verified = orderGuard.verify(token, cfg.auth.secret, user);
+						if (!verified.ok) throw new HttpError(400, failureMessage(verified.reason));
 
-				const { action, nonce } = verified.payload;
-				// 주문을 보내기 **전에** 소비한다 — 더블클릭·재전송이 두 번 나가지 않게.
-				// 실패해도 재사용을 허용하지 않는 쪽이 안전하다 (재요청은 새 확인을 받는다).
-				orderGuard.consume(nonce);
-				console.log(`[order] 실행 user=${user} ${describeAction(action)} nonce=${nonce}`);
+						const { action, nonce } = verified.payload;
+						// 주문을 보내기 **전에** 소비한다 — 더블클릭·재전송이 두 번 나가지 않게.
+						// 실패해도 재사용을 허용하지 않는 쪽이 안전하다 (재요청은 새 확인을 받는다).
+						orderGuard.consume(nonce);
+						console.log(`[order] 실행 user=${user} ${describeAction(action)} nonce=${nonce}`);
 
-				// 동작 종류·증권사는 토큰 값만 본다 (execute.ts)
-				const result = await executeOrderAction(action, nonce, brokerAccess(user));
+						// 동작 종류·증권사는 토큰 값만 본다 (execute.ts)
+						return executeOrderAction(action, nonce, brokerAccess(user));
+					},
+					(r) => {
+						// 카드가 실행 직후 보여 주는 문장과 같게 (OrderCards executeOrder)
+						const id = r.orderId ?? r.conditionalOrderId;
+						return { state: "done", message: `${r.message}${id ? ` (${id.slice(0, 12)}${id.length > 12 ? "…" : ""})` : ""}` };
+					},
+				);
 				json(res, 200, { ok: true, ...result });
+				return;
+			}
+
+			// 확인 카드 [닫기] — 기록만 남긴다 (다시 열어도 닫은 카드로 보이게). 실행 결과가 있으면 덮지 않는다
+			if (path === "/api/cards/dismiss" && req.method === "POST") {
+				const body = await readJson(req);
+				cardOutcomes.record(user, body.token, { state: "dismissed", message: null });
+				json(res, 200, { ok: true });
 				return;
 			}
 
@@ -878,6 +918,7 @@ async function main(): Promise<void> {
 		accounts,
 		runtimes,
 		ledgerEnabled: ledgerReady,
+		cardOutcomes,
 	});
 
 	server.listen(cfg.port, cfg.host, () => {
