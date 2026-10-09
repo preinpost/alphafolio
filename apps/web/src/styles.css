@@ -2224,6 +2224,43 @@ html.ua-keyboard .hide-on-keyboard {
       width: 44px;
       height: 44px;
     }
+    /* 한 줄 컴포저 — [첨부][입력][보내기]. 안내 문구는 있을 때만 위에 한 줄 더 */
+    .composer {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        "attach attach attach"
+        "hint hint hint"
+        "img text send";
+      align-items: end;
+      column-gap: 2px;
+      padding: 5px;
+      border-radius: 24px;
+    }
+    .composer .attach-list {
+      grid-area: attach;
+      padding: 6px 6px 8px;
+    }
+    .composer textarea {
+      grid-area: text;
+      padding: 10px 4px;
+    }
+    .composer .bar-row {
+      display: contents;
+    }
+    .composer .bar-row > .icon-btn {
+      grid-area: img;
+      border-radius: 50%;
+    }
+    .composer .hint {
+      grid-area: hint;
+      margin: 4px 12px 2px;
+    }
+    .composer .send {
+      grid-area: send;
+      margin-left: 0;
+      border-radius: 50%;
+    }
     .suggest {
       grid-template-columns: 1fr;
     }
