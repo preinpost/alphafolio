@@ -157,6 +157,50 @@ export function atr(bars: Bar[], period = 14): Array<number | null> {
 	return out;
 }
 
+/**
+ * MFI (Money Flow Index) — 거래량을 반영한 RSI.
+ * 대표가격 (고+저+종)/3 × 거래량을 그 봉의 자금 흐름으로 보고, 대표가격이 오른 봉은 유입·내린 봉은 유출로
+ * period 개를 합산한다. 거래량이 빠진 봉이 구간에 있으면 null (0 으로 채우면 값이 왜곡된다).
+ */
+export function mfi(bars: Bar[], period = 14): Array<number | null> {
+	const out: Array<number | null> = new Array(bars.length).fill(null);
+	const tp = bars.map((b) => (b.high + b.low + b.close) / 3);
+	for (let i = period; i < bars.length; i++) {
+		let pos = 0;
+		let neg = 0;
+		let ok = true;
+		for (let j = i - period + 1; j <= i; j++) {
+			const vol = (bars[j] as Bar).volume;
+			if (vol === undefined || !Number.isFinite(vol)) {
+				ok = false;
+				break;
+			}
+			const cur = tp[j] as number;
+			const prev = tp[j - 1] as number;
+			if (cur > prev) pos += cur * vol;
+			else if (cur < prev) neg += cur * vol;
+		}
+		if (!ok || pos + neg === 0) continue;
+		out[i] = neg === 0 ? 100 : 100 - 100 / (1 + pos / neg);
+	}
+	return out;
+}
+
+/**
+ * 마지막 봉 거래량 ÷ 직전 period 봉 평균 (마지막 봉 제외 — 감시의 vol_ratio20 과 같은 정의).
+ * 거래량이 없거나 평균이 0 이면 null.
+ */
+export function volumeStats(bars: Bar[], period = 20): { volume: number | null; avg: number | null; ratio: number | null } {
+	const lastVol = bars.at(-1)?.volume;
+	const volume = lastVol !== undefined && Number.isFinite(lastVol) ? lastVol : null;
+	const window = bars.slice(Math.max(0, bars.length - 1 - period), bars.length - 1).map((b) => b.volume);
+	if (window.length < period || window.some((v) => v === undefined || !Number.isFinite(v))) {
+		return { volume, avg: null, ratio: null };
+	}
+	const avg = (window as number[]).reduce((a, b) => a + b, 0) / period;
+	return { volume, avg, ratio: volume !== null && avg > 0 ? Math.round((volume / avg) * 100) / 100 : null };
+}
+
 /** 최근 구간의 지지/저항 (직전 저점·고점). 마지막 봉은 제외한다. */
 export function supportResistance(
 	bars: Bar[],
@@ -203,6 +247,14 @@ export interface IndicatorSnapshot {
 	atr: number | null;
 	/** ATR 을 가격 대비 %로 — 종목 간 변동성 비교용 */
 	atrPct: number | null;
+	/** MFI(14) — 거래량 가중 과매수(80↑)·과매도(20↓). 거래량이 없으면 null */
+	mfi: number | null;
+	/** 마지막 봉 거래량 (장중이면 집계 중인 값) */
+	volume: number | null;
+	/** 직전 20봉 평균 거래량 (마지막 봉 제외) */
+	volumeAvg20: number | null;
+	/** 마지막 봉 거래량 ÷ 직전 20봉 평균 */
+	volumeRatio20: number | null;
 	support: number | null;
 	resistance: number | null;
 	periodHigh: number;
@@ -256,6 +308,8 @@ export function analyze(bars: Bar[]): IndicatorSnapshot | null {
 	const upper = last(bb.upper);
 	const lower = last(bb.lower);
 	const atrValue = last(atrSeries);
+	const mfiValue = last(mfi(bars, 14));
+	const vol = volumeStats(bars, 20);
 	const { support, resistance } = supportResistance(bars, 20);
 
 	const bollingerPct =
@@ -291,6 +345,13 @@ export function analyze(bars: Bar[]): IndicatorSnapshot | null {
 		else if (prevDiff > eps && curDiff < -eps) signals.push("5·20일선 데드크로스");
 	}
 
+	if (mfiValue !== null) {
+		if (mfiValue >= 80) signals.push(`MFI ${mfiValue.toFixed(1)} 과매수권`);
+		else if (mfiValue <= 20) signals.push(`MFI ${mfiValue.toFixed(1)} 과매도권`);
+	}
+	// 장중 봉은 거래량이 덜 쌓여 배수가 낮게 나온다 — 급증만 라벨로 단다 (장중에 이미 2배면 사실이다)
+	if (vol.ratio !== null && vol.ratio >= 2) signals.push(`거래량 급증 (20봉 평균의 ${vol.ratio}배)`);
+
 	if (bollingerPct !== null) {
 		if (bollingerPct >= 100) signals.push("볼린저 상단 돌파");
 		else if (bollingerPct <= 0) signals.push("볼린저 하단 이탈");
@@ -316,6 +377,10 @@ export function analyze(bars: Bar[]): IndicatorSnapshot | null {
 		bollingerPct,
 		atr: atrValue,
 		atrPct: atrValue !== null && price > 0 ? Math.round((atrValue / price) * 1000) / 10 : null,
+		mfi: mfiValue === null ? null : Math.round(mfiValue * 10) / 10,
+		volume: vol.volume,
+		volumeAvg20: vol.avg,
+		volumeRatio20: vol.ratio,
 		support,
 		resistance,
 		periodHigh: Math.max(...bars.map((b) => b.high)),

@@ -70,4 +70,17 @@ describe("renderTiming", () => {
 		assert.doesNotMatch(text, /\[단기 1주\]/);
 		assert.match(text, /⚠️ 재무 조회 실패/);
 	});
+
+	it("역추세 참고는 두 모드를 돌려도 한 번만, 판정 아님·물타기 경고와 함께 나온다", () => {
+		const down = Array.from({ length: 60 }, (_, i) => 20_000 - i * 50);
+		const bottom = down[down.length - 1] as number;
+		const bars = barsOf([...down, ...[1, 2, 3].map((k) => bottom + k * 15)].map((c, i) => Math.round(c + ((i * 37) % 7) * 10)));
+		const results = both(bars);
+		assert.ok(results.some((r) => r.dipPlan !== null), "이 국면에서 역추세 참고가 나와야 한다");
+		const { text, details } = renderTiming({ symbol: "005930", name: "삼성전자", currency: "KRW", results, notes: [] });
+		assert.equal(text.match(/역추세 분할 참고/g)?.length, 1);
+		assert.match(text, /판정 아님/);
+		assert.match(text, /물타기/);
+		assert.ok(details.result.dipPlan !== undefined, "카드에도 실린다");
+	});
 });

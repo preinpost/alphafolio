@@ -28,6 +28,7 @@ import {
 	type Quote,
 } from "./normalize.ts";
 import { resolveName } from "./names.ts";
+import { localClock, localDate, MARKETS, mondayOf, SPECIAL_DAYS } from "./triggers/market-time.ts";
 import { NoBrokerConfiguredError, type BrokerAccess } from "./portfolio.ts";
 import { tossCandles, tossPrices } from "./toss/api.ts";
 import type { TossContext } from "./toss/client.ts";
@@ -115,6 +116,25 @@ export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promi
 	}
 
 	throw lastError ?? new Error(`시세를 찾지 못했습니다: ${symbol}`);
+}
+
+/**
+ * 주식 차트의 마지막 봉이 아직 닫히지 않았는가 (정규장 기준).
+ * 장중 봉은 거래량이 덜 쌓여 "20봉 평균 대비 배수" 가 낮게 나온다 — 모델이 거래량 부족으로 읽지 않게 툴이 알린다.
+ * 월봉은 이번 달 봉이면 진행 중으로 본다 (월말 마지막 거래일 마감 뒤도 진행 중으로 나오지만 알림용이라 둔다).
+ */
+export function stockBarOpen(domestic: boolean, period: ChartPeriod, lastDate: string | undefined, now = Date.now()): boolean {
+	if (!lastDate || !/^\d{8}$/.test(lastDate)) return false;
+	const venue = domestic ? "krx" : "us";
+	const m = MARKETS[venue];
+	const { ymd: today, hm } = localClock(now, m.tz);
+	const last = `${lastDate.slice(0, 4)}-${lastDate.slice(4, 6)}-${lastDate.slice(6, 8)}`;
+	const beforeClose = hm < (SPECIAL_DAYS[venue][today]?.close ?? m.close);
+	if (period === "D") return last === today && beforeClose;
+	if (period === "M") return last.slice(0, 7) === today.slice(0, 7);
+	const { weekday } = localDate(now, m.tz);
+	if (weekday === 0 || weekday === 6 || (weekday === 5 && !beforeClose)) return false;
+	return mondayOf(last) === mondayOf(today);
 }
 
 export interface ChartResult {

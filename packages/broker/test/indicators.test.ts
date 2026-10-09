@@ -12,12 +12,15 @@ import {
 	bollinger,
 	ema,
 	macd,
+	mfi,
 	rsi,
 	sma,
 	supportResistance,
 	trendOf,
+	volumeStats,
 	type Bar,
 } from "../src/indicators.ts";
+import { stockBarOpen } from "../src/quote.ts";
 
 /** 종가 배열 → 봉 배열 (고저는 종가 기준으로 좁게 만든다) */
 function barsOf(closes: number[], startDate = 20260101): Bar[] {
@@ -137,6 +140,87 @@ describe("ATR", () => {
 			close: 100,
 		}));
 		approx(atr(bars, 14)[39], 10, 1e-6, "ATR");
+	});
+});
+
+/** 종가·거래량 → 봉 (고저 = 종가라 대표가격 = 종가) */
+function volBarsOf(closes: number[], volumes: Array<number | undefined>): Bar[] {
+	return closes.map((c, i) => ({ date: String(20260101 + i), open: c, high: c, low: c, close: c, volume: volumes[i] }));
+}
+
+describe("MFI", () => {
+	it("손으로 계산한 값과 일치한다 (period 2)", () => {
+		// 유입 11×200 / 유출 10.5×300 → 41.12, 다음 봉은 유출 10.5×300 / 유입 12×400 → 60.38
+		const r = mfi(volBarsOf([10, 11, 10.5, 12], [100, 200, 300, 400]), 2);
+		assert.equal(r[1], null);
+		approx(r[2] ?? null, 41.1215, 1e-3, "MFI[2]");
+		approx(r[3] ?? null, 60.3774, 1e-3, "MFI[3]");
+	});
+
+	it("계속 오르면 100", () => {
+		const closes = Array.from({ length: 20 }, (_, i) => 100 + i);
+		approx(mfi(volBarsOf(closes, closes.map(() => 1000)), 14)[19] ?? null, 100, 1e-9, "MFI");
+	});
+
+	it("구간에 거래량이 빠진 봉이 있으면 null (0 으로 채워 왜곡하지 않는다)", () => {
+		const closes = Array.from({ length: 20 }, (_, i) => 100 + (i % 3));
+		const vols: Array<number | undefined> = closes.map(() => 1000);
+		vols[15] = undefined;
+		assert.equal(mfi(volBarsOf(closes, vols), 14)[19], null);
+	});
+});
+
+describe("거래량", () => {
+	it("마지막 봉 ÷ 직전 20봉 평균 (마지막 봉은 평균에서 뺀다 — 감시 vol_ratio20 과 같다)", () => {
+		const vols = [...new Array(20).fill(100), 300];
+		const r = volumeStats(volBarsOf(new Array(21).fill(50), vols), 20);
+		assert.deepEqual(r, { volume: 300, avg: 100, ratio: 3 });
+	});
+
+	it("봉이 모자라거나 거래량이 없으면 배수는 null", () => {
+		assert.equal(volumeStats(volBarsOf([1, 2, 3], [10, 10, 10]), 20).ratio, null);
+		assert.deepEqual(volumeStats(barsOf(new Array(30).fill(10)), 20), { volume: null, avg: null, ratio: null });
+	});
+
+	it("analyze 가 거래량 급증·MFI 과매수 신호를 낸다", () => {
+		const closes = Array.from({ length: 40 }, (_, i) => 100 + i);
+		const snap = analyze(volBarsOf(closes, [...new Array(39).fill(1000), 2500]));
+		assert.equal(snap?.volumeRatio20, 2.5);
+		assert.equal(snap?.mfi, 100);
+		assert.match(snap?.signals.join() ?? "", /거래량 급증 \(20봉 평균의 2\.5배\)/);
+		assert.match(snap?.signals.join() ?? "", /MFI 100\.0 과매수권/);
+	});
+
+	it("거래량이 없는 봉이면 MFI·거래량 필드가 null 이고 죽지 않는다", () => {
+		const snap = analyze(barsOf(Array.from({ length: 40 }, (_, i) => 100 + i)));
+		assert.equal(snap?.mfi, null);
+		assert.equal(snap?.volume, null);
+		assert.equal(snap?.volumeRatio20, null);
+	});
+});
+
+describe("주식 마지막 봉 진행 중 판정", () => {
+	// 2026-10-09 은 금요일. 뉴욕은 서머타임(UTC−4), 서울은 UTC+9
+	const nyFri14 = Date.UTC(2026, 9, 9, 18); // 뉴욕 14:00
+	const nyFri17 = Date.UTC(2026, 9, 9, 21); // 뉴욕 17:00 (마감 뒤)
+	const seoulFri10 = Date.UTC(2026, 9, 9, 1); // 서울 10:00
+
+	it("일봉 — 오늘 봉이고 마감 전이면 진행 중", () => {
+		assert.equal(stockBarOpen(false, "D", "20261009", nyFri14), true);
+		assert.equal(stockBarOpen(false, "D", "20261009", nyFri17), false);
+		assert.equal(stockBarOpen(false, "D", "20261008", nyFri14), false);
+		assert.equal(stockBarOpen(true, "D", "20261009", seoulFri10), true);
+	});
+
+	it("주봉 — 이번 주 봉이면 금요일 마감 전까지 진행 중", () => {
+		assert.equal(stockBarOpen(false, "W", "20261005", nyFri14), true);
+		assert.equal(stockBarOpen(false, "W", "20261005", nyFri17), false);
+		assert.equal(stockBarOpen(false, "W", "20260928", nyFri14), false);
+	});
+
+	it("날짜 형식이 이상하면 진행 중으로 보지 않는다", () => {
+		assert.equal(stockBarOpen(false, "D", undefined, nyFri14), false);
+		assert.equal(stockBarOpen(false, "D", "2026-10-09", nyFri14), false);
 	});
 });
 

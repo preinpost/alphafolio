@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Bar } from "../src/indicators.ts";
 import { isOnTick, tickSize, type Market } from "../src/orders.ts";
-import { evaluateTiming, SHORT_TIME_STOP_DAYS, type Horizon, type TimingResult } from "../src/timing.ts";
+import { DIP_FIRST_WEIGHT, evaluateTiming, SHORT_TIME_STOP_DAYS, type Horizon, type TimingResult } from "../src/timing.ts";
 
 function barsOf(closes: number[]): Bar[] {
 	return closes.map((c, i) => ({
@@ -134,6 +134,54 @@ describe("불변식 (합성 시계열 전수)", () => {
 			assert.ok(loss <= r.sizing.riskBudgetKrw, `${label}: 손실 ${loss} > 한도 ${r.sizing.riskBudgetKrw}`);
 			assert.equal(r.sizing.riskBudgetKrw, r.sizing.riskPct === 0.5 ? 500_000 : 1_000_000, label);
 		}
+	});
+});
+
+describe("역추세 분할 참고 (판정 아님)", () => {
+	const results = [
+		...all().map((x) => ({ ...x, market: "KR" as Market })),
+		...all("US").map((x) => ({ ...x, market: "US" as Market })),
+		...all("KR", "short").map((x) => ({ ...x, market: "KR" as Market })),
+	];
+	const plans = results.filter((x) => x.r.dipPlan !== null);
+
+	it("하락 국면에서 실제로 나온다", () => {
+		assert.ok(plans.length > 0, "역추세 참고가 한 번도 나오지 않았다");
+	});
+
+	it("미보유 관망에서만 나오고, 추세 추종 시나리오가 있으면 나오지 않는다", () => {
+		for (const { label, r, held } of plans) {
+			assert.equal(held, false, `${label}: 보유 중인데 역추세 참고`);
+			assert.equal(r.verdict, "관망", `${label}: ${r.verdict} 인데 역추세 참고`);
+			assert.notEqual(r.scenarios[0]?.title, "되돌림 매수", `${label}: 되돌림 시나리오와 겹친다`);
+		}
+	});
+
+	it("판정을 바꾸지 않는다 — 판정 규칙의 결과가 그대로다", () => {
+		for (const { label, r } of plans) assert.equal(r.sizing, null, `${label}: 판정 아님인데 수량 제안`);
+	});
+
+	it("손절 < 현재가, 단계 가격은 오름차순·호가단위, 비중 합 100, 1차는 상한 이하", () => {
+		for (const { label, r, market } of plans) {
+			const d = r.dipPlan as NonNullable<TimingResult["dipPlan"]>;
+			assert.ok(d.stopLoss < r.price, `${label}: 손절 ${d.stopLoss} ≥ 현재가 ${r.price}`);
+			assert.ok(d.stopPct < 0, label);
+			assert.ok(d.stopLoss < (d.steps[0]?.triggerPrice ?? 0), `${label}: 손절이 지지보다 위`);
+			for (let i = 1; i < d.steps.length; i++) {
+				assert.ok((d.steps[i - 1]?.triggerPrice ?? 0) < (d.steps[i]?.triggerPrice ?? 0), `${label}: 단계 가격이 오름차순이 아니다`);
+			}
+			for (const s of d.steps) assert.ok(isOnTick(market, s.triggerPrice), `${label}: ${s.triggerPrice} 호가단위 아님`);
+			assert.equal(d.steps.reduce((a, s) => a + s.weightPct, 0), 100, label);
+			assert.equal(d.steps[0]?.weightPct, DIP_FIRST_WEIGHT, label);
+			assert.ok(d.reasons.length > 0, label);
+		}
+	});
+
+	it("지지가 이미 깨졌으면(현재가 ≤ 지지) 내지 않는다", () => {
+		// 봉마다 고저 폭(±1%)보다 크게 내려야 직전 저점이 현재가 위에 남는다
+		const r = evaluateTiming({ bars: barsOf(Array.from({ length: 90 }, (_, i) => 30_000 - i * 300)), market: "KR" });
+		assert.ok((r?.snapshot.support ?? 0) > (r?.price ?? 0), "전제: 지지가 깨진 국면");
+		assert.equal(r?.dipPlan, null);
 	});
 });
 

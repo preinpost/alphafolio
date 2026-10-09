@@ -12,6 +12,28 @@ export function money(value: number, currency: "KRW" | "USD"): string {
 	return currency === "KRW" ? won(value) : usd(value);
 }
 
+/** 거래량 — 주식은 정수, 코인은 소수 수량이라 1,000 미만일 때만 소수를 남긴다 */
+export const volumeText = (n: number): string =>
+	n >= 1000 ? Math.round(n).toLocaleString("en-US") : n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
+/**
+ * 거래량 한 줄 — "거래량 1,234,567 (20봉 평균 1,000,000의 1.23배)".
+ * 마지막 봉이 진행 중이면 배수가 낮게 나온다고 붙인다 (모델이 "거래량 부족" 으로 읽지 않게).
+ */
+export function volumeLine(
+	s: { volume: number | null; volumeAvg20: number | null; volumeRatio20: number | null },
+	lastOpen: boolean,
+): string {
+	if (s.volume === null) return "";
+	return (
+		`거래량 ${volumeText(s.volume)}` +
+		(s.volumeAvg20 !== null && s.volumeRatio20 !== null
+			? ` (20봉 평균 ${volumeText(s.volumeAvg20)}의 ${s.volumeRatio20}배)`
+			: "") +
+		(lastOpen ? " — 마지막 봉이 진행 중이라 거래량이 덜 쌓였다 (배수가 낮게 나온다 — 거래량 부족으로 해석하지 않는다)" : "")
+	);
+}
+
 export function signed(n: number, currency: "KRW" | "USD"): string {
 	return `${n >= 0 ? "+" : "-"}${money(Math.abs(n), currency)}`;
 }

@@ -10,11 +10,11 @@ import { resolveName } from "../names.ts";
 import { evaluateTiming, type Horizon, type TimingInput, type TimingResult } from "../timing.ts";
 import { position52w, sectionNote, settle, skipped } from "../research.ts";
 import { marketOf } from "../orders.ts";
-import { fetchChart, fetchQuote } from "../quote.ts";
+import { fetchChart, fetchQuote, stockBarOpen } from "../quote.ts";
 import { fetchPortfolio, NoBrokerConfiguredError, STOCK_SOURCES } from "../portfolio.ts";
 import { NaverCredentialsMissingError, searchNews, type NaverCredentials } from "../news.ts";
 import type { BrokerToolDeps, FinancialsDetails, TimingCardResult, TimingDetails, ResearchFinancials, ResearchNews, ResearchDetails } from "./contracts.ts";
-import { money } from "./format.ts";
+import { money, volumeLine } from "./format.ts";
 
 const HORIZON_LABEL: Record<Horizon, string> = { swing: "스윙 (몇 주)", short: "단기 1주" };
 
@@ -119,9 +119,21 @@ export function renderTiming(opts: {
 
 	const m = (v: number | null): string => (v === null ? "—" : money(v, currency));
 	const { snapshot } = result;
+	// 두 모드의 지지·20일선·돌파가는 같은 봉에서 나오므로 한 번만 쓴다
+	const dip = ordered.find((r) => r.dipPlan !== null)?.dipPlan ?? null;
+	const dipLines = dip
+		? [
+				"",
+				`역추세 분할 참고 (판정 아님 — 추세 전환 확인 전에 들어가는 계획이다. 근거: ${dip.reasons.join(", ")}):`,
+				`  손절 ${m(dip.stopLoss)} (현재가 대비 ${dip.stopPct}%) — 종가 이탈 시 1차 물량까지 손절하고 계획을 취소한다`,
+				...dip.steps.map((s) => `  ${s.step}차 ${s.weightPct}%: ${s.trigger}`),
+				"  손절가를 지키지 않고 추가 매수하면 분할이 아니라 물타기다.",
+			]
+		: [];
 	const lines = [
 		`${name} (${symbol}) 타점 판정 ${alt ? "[스윙·단기 둘 다]" : `[${HORIZON_LABEL[result.horizon]}]`} — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
 		...ordered.flatMap((r, i) => [...(i > 0 ? [""] : []), ...timingLines(r, m, { skipShared: i > 0 })]),
+		...dipLines,
 		"",
 		result.holding
 			? `보유 ${result.holding.quantity}주 · 평단 ${m(result.holding.avgPrice)} (${result.holding.pnlPct >= 0 ? "+" : ""}${result.holding.pnlPct}%) · 손익분기 ${m(result.breakeven)}`
@@ -232,6 +244,9 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 			const symbol = chart.symbol;
 			const market = marketOf(symbol);
 			const currency: "KRW" | "USD" = market === "KR" ? "KRW" : "USD";
+			if (stockBarOpen(market === "KR", "D", chart.bars.at(-1)?.date)) {
+				notes.push("오늘 봉은 장중이라 거래량이 덜 쌓였다 — 거래량 배수를 거래량 부족으로 해석하지 않는다");
+			}
 
 			// 보유·총자산과 재무는 없어도 판정은 한다 (각각 해당 층·수량 제안만 빠진다)
 			const [portfolio, fin] = await Promise.all([
@@ -324,6 +339,13 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 						lastDate: snap.lastDate,
 						trend: snap.trend,
 						rsi: snap.rsi,
+						mfi: snap.mfi,
+						atr: snap.atr,
+						atrPct: snap.atrPct,
+						volume: snap.volume,
+						volumeAvg20: snap.volumeAvg20,
+						volumeRatio20: snap.volumeRatio20,
+						lastOpen: stockBarOpen(market === "KR", "D", snap.lastDate),
 						ma20: snap.ma20,
 						ma60: snap.ma60,
 						support: snap.support,
@@ -395,10 +417,13 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 			if (technical.status === "ok") {
 				const t = technical.data;
 				lines.push(
-					`[지표] ${t.lastDate} 기준 · ${t.trend} · RSI ${t.rsi ?? "—"} · 20일선 ${m(t.ma20)} · 60일선 ${m(t.ma60)}` +
+					`[지표] ${t.lastDate} 기준 · ${t.trend} · RSI ${t.rsi ?? "—"} · MFI ${t.mfi ?? "—"} · 20일선 ${m(t.ma20)} · 60일선 ${m(t.ma60)}` +
 						` · 지지 ${m(t.support)} / 저항 ${m(t.resistance)} · 100봉 ${pct(t.periodChangePct)}` +
+						(t.atr !== null ? ` · ATR(14) ${m(t.atr)} (가격의 ${t.atrPct}%)` : "") +
 						(t.signals.length > 0 ? ` · 신호: ${t.signals.join(", ")}` : ""),
 				);
+				const vol = volumeLine(t, t.lastOpen);
+				if (vol) lines.push(`[거래량] ${vol}`);
 			}
 			if (financials.status === "ok") {
 				const f = financials.data;

@@ -62,6 +62,23 @@ describe("답변 문장 지침", () => {
 		assert.ok(prompt.includes("테마주"));
 	});
 
+	it("저점·역추세 질문은 툴이 계산한 분할 참고로 답하고, 숫자를 지어내지 않는다", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		const section = prompt.slice(prompt.indexOf("### 저점·역추세 질문"), prompt.indexOf("### 등락 이유"));
+		assert.ok(section.length > 0, "저점 섹션이 등락 이유 앞에 있어야 한다");
+		assert.ok(section.includes("역추세 분할 참고 (판정 아님)"));
+		assert.ok(section.includes("손절가를 가장 먼저"));
+		assert.ok(section.includes("지어내지 않는다"));
+		assert.ok(section.includes("물타기"));
+	});
+
+	it("거래량·ATR·MFI 를 함께 보고, 손익비는 목표 거리와 함께 읽는다", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		assert.ok(prompt.includes("거래량·ATR·MFI 를 함께"));
+		assert.ok(prompt.includes("거래량 부족으로 해석하지 않는다"));
+		assert.ok(prompt.includes("손익비는 목표까지의 거리와 함께"));
+	});
+
 	it("라이선스(MIT) 고지가 함께 있다", () => {
 		const license = readFileSync(new URL("../vendor/fluent-korean/LICENSE", import.meta.url), "utf8");
 		assert.match(license, /MIT License/);

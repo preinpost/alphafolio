@@ -105,6 +105,14 @@ export interface ResearchDetails {
 		lastDate: string;
 		trend: string;
 		rsi: number | null;
+		mfi: number | null;
+		atr: number | null;
+		atrPct: number | null;
+		volume: number | null;
+		volumeAvg20: number | null;
+		volumeRatio20: number | null;
+		/** 마지막 봉이 장중(거래량 집계 중)인가 */
+		lastOpen: boolean;
 		ma20: number | null;
 		ma60: number | null;
 		support: number | null;

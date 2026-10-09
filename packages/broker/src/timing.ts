@@ -66,6 +66,25 @@ export interface TimingInput {
 	horizon?: Horizon;
 }
 
+/**
+ * 역추세 분할 참고 — **판정이 아니다.** 관망(하락 추세·과매도·지지 근접)인데 사용자가 저점 매수를 원할 때
+ * 모델이 비율·가격을 지어내지 않도록 툴이 계산해 둔다. 판정 규칙(백테스트)과 별개라 verdict 를 바꾸지 않는다.
+ */
+export interface DipPlan {
+	/** 왜 이 참고를 냈는지 (하락 추세·RSI 과매도 등) */
+	reasons: string[];
+	/** 지지 한 틱 아래 — 종가 이탈 시 1차 물량까지 손절, 계획 취소 */
+	stopLoss: number;
+	/** 현재가 대비 손절 폭 % (음수) */
+	stopPct: number;
+	steps: Array<{ step: 1 | 2 | 3; trigger: string; triggerPrice: number; weightPct: number }>;
+}
+
+/** 역추세 1차 비중 상한 — 추세 확인 전 물량이라 작게 */
+export const DIP_FIRST_WEIGHT = 30;
+/** 1차 진입 조건: 지지 위 종가 유지 봉 수 */
+export const DIP_HOLD_BARS = 2;
+
 export interface TimingResult {
 	horizon: Horizon;
 	verdict: Verdict;
@@ -91,6 +110,8 @@ export interface TimingResult {
 	roundTripCostPct: number;
 	/** 매수 판정일 때만 — 총자산 1% 리스크 기준 수량 */
 	sizing: { riskPct: number; riskBudgetKrw: number; quantity: number } | null;
+	/** 미보유 관망에서 저점 근거가 있을 때만 — 판정 아님 */
+	dipPlan: DipPlan | null;
 	holding: { quantity: number; avgPrice: number; pnlPct: number } | null;
 	snapshot: IndicatorSnapshot;
 }
@@ -261,6 +282,12 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 			: [...bull.map((b) => `▲ ${b}`), ...bear.map((b) => `▼ ${b}`)]),
 		...caution.map((c) => `⚠ ${c} — 비중 절반`),
 	];
+	// 거래량·MFI 는 백테스트로 정한 판정 규칙에 넣지 않았다 — 상태를 바꾸지 않고 근거로만 보여 준다
+	const flow = [
+		snap.mfi !== null ? `MFI ${snap.mfi}` : "",
+		snap.volumeRatio20 !== null ? `거래량 20봉 평균의 ${snap.volumeRatio20}배` : "",
+	].filter(Boolean);
+	if (flow.length > 0) momentumReasons.push(`참고(판정 미반영): ${flow.join(" · ")}`);
 
 	// ── 밸류층 (국내·데이터 있을 때만) ──────────────────────
 	let valueState: LayerState = "중립";
@@ -339,6 +366,8 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	if (atr !== null) riskReasons.push(`ATR ${f(atr)} (가격의 ${snap.atrPct}%)`);
 	if (entry.type === "breakout") riskReasons.push(`저항 ${f(snap.resistance as number)} 이 ATR 이내 — ${f(base)} 돌파 시 진입 기준`);
 	if (stopLoss !== null) riskReasons.push(`손절 ${f(stopLoss)} (${(((stopLoss - base) / base) * 100).toFixed(1)}%)`);
+	// 손익비가 높아도 목표가 멀면 닿기 어렵다 — 필요한 상승률을 같이 보여 준다 (모델이 계산하지 않게)
+	if (target1 !== null) riskReasons.push(`목표1 ${f(target1)} (+${(((target1 - base) / base) * 100).toFixed(1)}%)`);
 	if (riskReward !== null) riskReasons.push(`손익비 1 : ${riskReward}`);
 	const riskState: LayerState = riskReward === null ? "중립" : riskReward >= 1.5 ? "우호" : riskReward < 1 ? "비우호" : "중립";
 	if (riskReward !== null && riskReward < 1) riskReasons.push("목표까지 여유보다 손절 폭이 크다");
@@ -583,6 +612,54 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		];
 	}
 
+	// ── 역추세 분할 참고 (판정 아님) ─────────────────────────
+	// 추세 추종 시나리오(매수·되돌림)가 이미 있으면 내지 않는다. 지지가 깨졌으면(현재가 ≤ 지지) 손절 기준이 없어 내지 않는다.
+	let dipPlan: DipPlan | null = null;
+	if (!held && verdict === "관망" && !buyScenarios && support !== null && support < price && breakdown !== null && breakdown > 0) {
+		const reasons: string[] = [];
+		if (trendState === "비우호") reasons.push("하락 추세 (역배열)");
+		if (rsiNow !== null && rsiNow <= 30) reasons.push(`RSI ${rsiNow} 과매도`);
+		if (snap.mfi !== null && snap.mfi <= 20) reasons.push(`MFI ${snap.mfi} 과매도`);
+		if (atr !== null && price - support <= atr) reasons.push(`지지 ${f(support)} 까지 ATR 이내`);
+		if (reasons.length > 0) {
+			const steps: DipPlan["steps"] = [];
+			// 지지를 호가단위로 올린다 — 내리면 손절(지지 한 틱 아래)과 같은 가격이 될 수 있다
+			const floored = roundToTick(market, support);
+			const up = floored >= support ? floored : floored + tickSize(market, support);
+			const supportTick = market === "US" ? Math.round(up * 100) / 100 : up;
+			steps.push({
+				step: 1,
+				trigger: `지지 ${f(supportTick)} 위에서 종가 ${DIP_HOLD_BARS}봉 이상 유지 (현재가 대비 ${(((supportTick - price) / price) * 100).toFixed(1)}%)`,
+				triggerPrice: supportTick,
+				weightPct: DIP_FIRST_WEIGHT,
+			});
+			const ma20Tick = snap.ma20 !== null ? roundToTick(market, snap.ma20) : null;
+			if (ma20Tick !== null && ma20Tick > price && (breakout === null || ma20Tick < breakout)) {
+				steps.push({
+					step: 2,
+					trigger: `20일선 ${f(ma20Tick)} 종가 탈환 (현재가 대비 +${(((ma20Tick - price) / price) * 100).toFixed(1)}%)`,
+					triggerPrice: ma20Tick,
+					weightPct: 30,
+				});
+			}
+			if (breakout !== null && breakout > price) {
+				const used = steps.reduce((a, s) => a + s.weightPct, 0);
+				steps.push({
+					step: steps.length === 1 ? 2 : 3,
+					trigger: `${f(breakout)} 돌파 — 상승 전환 확인 (현재가 대비 +${(((breakout - price) / price) * 100).toFixed(1)}%)`,
+					triggerPrice: breakout,
+					weightPct: 100 - used,
+				});
+			}
+			dipPlan = {
+				reasons,
+				stopLoss: breakdown,
+				stopPct: Math.round(((breakdown - price) / price) * 1000) / 10,
+				steps,
+			};
+		}
+	}
+
 	// ── 손익분기·포지션 크기 ────────────────────────────────
 	const costPct = ROUND_TRIP_COST_PCT[market];
 	const basis = held ? held.avgPrice : price;
@@ -615,6 +692,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		breakeven,
 		roundTripCostPct: costPct,
 		sizing,
+		dipPlan,
 		holding: held
 			? {
 					quantity: held.quantity,
