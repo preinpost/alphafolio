@@ -2066,7 +2066,8 @@ html.ua-keyboard .hide-on-keyboard {
     top: -48px;
     left: 50%;
     z-index: 5;
-    transform: translateX(-50%);
+    /* transform 은 pop-in 애니메이션(scale)이 덮어쓴다 — 중앙 정렬은 별도 속성으로 */
+    translate: -50% 0;
   }
   .composer {
     max-width: 760px;
