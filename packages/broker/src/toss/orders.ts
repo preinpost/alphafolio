@@ -184,16 +184,22 @@ export function getConditionalOrder(ctx: TossContext, accountSeq: number, id: st
 	return tossGet(ctx, `/api/v1/conditional-orders/${encodeURIComponent(id)}`, { accountSeq, group: "CONDITIONAL_ORDER_HISTORY" });
 }
 
-/** 주문 목록. status 는 OPEN(미체결) / CLOSED(종료). */
+/**
+ * 주문 목록. status 는 OPEN(미체결) / CLOSED(종료).
+ * from·to 는 주문일(KST, YYYY-MM-DD) 범위, cursor 는 다음 쪽 (CLOSED 만 — 규격: limit 최대 100).
+ */
 export function listOrders(
 	ctx: TossContext,
 	accountSeq: number,
-	opts?: { status?: "OPEN" | "CLOSED"; symbol?: string; limit?: number },
+	opts?: { status?: "OPEN" | "CLOSED"; symbol?: string; limit?: number; from?: string; to?: string; cursor?: string },
 ): Promise<{ orders: TossOrder[]; nextCursor?: string | null }> {
 	const query: TossRequestOptions["query"] = {
 		status: opts?.status ?? "OPEN",
 		symbol: opts?.symbol,
 		limit: opts?.limit ?? 30,
+		from: opts?.from,
+		to: opts?.to,
+		cursor: opts?.cursor,
 	};
 	return tossGet<{ orders: TossOrder[]; nextCursor?: string | null }>(ctx, "/api/v1/orders", {
 		query,

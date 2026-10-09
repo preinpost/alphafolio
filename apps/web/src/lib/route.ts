@@ -3,11 +3,11 @@
  *
  *   /            새 대화
  *   /c/<id>      그 대화 — 새로고침·북마크·다른 기기에서 같은 주소로 이어진다
- *   /portfolio   투자 · /ledger 가계부 · /settings 설정
+ *   /portfolio   투자 · /journal 매매일지 · /ledger 가계부 · /settings 설정
  *
  * 서버는 모르는 경로에 index.html 을 준다 (SPA fallback). iOS 앱(capacitor://localhost)도 같다.
  */
-export type View = "chat" | "ledger" | "portfolio" | "settings";
+export type View = "chat" | "ledger" | "portfolio" | "journal" | "settings";
 
 export interface Route {
 	view: View;
@@ -15,7 +15,7 @@ export interface Route {
 	sessionId: string | null;
 }
 
-const VIEWS: Record<string, View> = { portfolio: "portfolio", ledger: "ledger", settings: "settings" };
+const VIEWS: Record<string, View> = { portfolio: "portfolio", journal: "journal", ledger: "ledger", settings: "settings" };
 
 export function parseRoute(pathname: string): Route {
 	const parts = pathname.split("/").filter(Boolean);

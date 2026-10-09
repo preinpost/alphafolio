@@ -46,11 +46,14 @@ import {
 	targetVenue,
 	type OrderTarget,
 	type TriggerSpec,
+	fillSources,
+	resolveNames,
 } from "@alphafolio/broker";
 import { createBrokerTokenStore } from "./broker-tokens.ts";
 import { createOrderToken, failureMessage, OrderTokenGuard } from "./order-tokens.ts";
 import { kstParts, SnapshotScheduler, SnapshotStore } from "./snapshots.ts";
 import { handleManualAssets, ManualAssetStore } from "./manual-assets.ts";
+import { handleJournal, JournalRecorder, JournalStore, JournalSync, parseOrderNote } from "./journal.ts";
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
 import { APP_VERSION, loadConfig, loadDotEnv } from "./config.ts";
 import { corsFor } from "./cors.ts";
@@ -370,6 +373,20 @@ async function main(): Promise<void> {
 	};
 
 	/**
+	 * 매매일지 (PLAN §42) — 앱이 낸 주문·자동 매매는 저절로 남고, 연결된 계좌의 체결은 가져온다.
+	 * 일지 쓰기가 실패해도 주문·체결은 그대로다 (기다리지 않고 오류는 로그만).
+	 */
+	const journalStore = new JournalStore(ledgerConfig);
+	const journalNames = (user: string, symbols: string[]) => resolveNames(brokerAccess(user), symbols);
+	const journalSync = new JournalSync({
+		store: journalStore,
+		sources: (user, since) => fillSources(brokerAccess(user), { binanceSymbols: () => journalStore.binanceSymbols(user, since) }),
+		names: journalNames,
+	});
+	const journalRecorder = new JournalRecorder({ store: journalStore, names: journalNames });
+	tradeStore.onFilled = (rec) => journalRecorder.recordExec(rec, triggerStore.get(rec.member, rec.triggerId) ?? null);
+
+	/**
 	 * 주문 확인 토큰.
 	 *
 	 * 에이전트는 `order_prepare` 로 토큰을 받을 수만 있고, 실행은 사람이
@@ -466,6 +483,16 @@ async function main(): Promise<void> {
 				const a = brokerAccess(user);
 				return { kis: has(a.kis), toss: has(a.toss) };
 			},
+		}),
+		journal: (user) => ({
+			list: (filter) => journalStore.list(user, filter),
+			add: (trade, notes) =>
+				journalStore
+					.create(user, { ...trade, ...notes, status: "filled", source: "manual", context: null, conversationId: null })
+					.then((e) => e ?? Promise.reject(new Error("기록하지 못했습니다"))),
+			update: (id, notes) => journalStore.update(user, id, notes),
+			// 모델이 연달아 부르지 않게 1분 — 화면 버튼은 바로
+			sync: () => journalSync.run(user, { minIntervalMs: 60_000 }),
 		}),
 		idleMinutes: cfg.idleMinutes,
 	});
@@ -796,6 +823,14 @@ async function main(): Promise<void> {
 				return;
 			}
 
+			// ── 매매일지 (PLAN §42) ─────────────────────────────
+			if (path === "/api/journal" || path.startsWith("/api/journal/")) {
+				const result = await handleJournal(req, url, path, user, { store: journalStore, sync: journalSync });
+				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
+				json(res, 200, result);
+				return;
+			}
+
 			if (path === "/api/portfolio" && req.method === "GET") {
 				json(res, 200, await fetchPortfolio(brokerAccess(user)));
 				return;
@@ -829,7 +864,12 @@ async function main(): Promise<void> {
 						console.log(`[order] 실행 user=${user} ${describeAction(action)} nonce=${nonce}`);
 
 						// 동작 종류·증권사는 토큰 값만 본다 (execute.ts)
-						return executeOrderAction(action, nonce, brokerAccess(user));
+						const r = await executeOrderAction(action, nonce, brokerAccess(user));
+						// 매매일지 — 접수된 주문을 남긴다 (체결은 가져오기가 채운다). 기다리지 않는다: 일지가 주문 응답을 막지 않게
+						void journalRecorder
+							.recordOrder(user, action, r, { note: parseOrderNote(body.note), conversationId: cardOrigins.get(user, token)?.sessionId ?? null })
+							.catch((err: unknown) => console.warn(`[journal] 주문 기록 실패 user=${user}: ${err instanceof Error ? err.message : err}`));
+						return r;
 					},
 					(r) => {
 						// 카드가 실행 직후 보여 주는 문장과 같게 (OrderCards executeOrder)

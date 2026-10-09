@@ -10,6 +10,7 @@ import { isDarkNow, onThemeApplied, setThemeMode } from "./lib/theme.ts";
 import { toast } from "./lib/toast.ts";
 import { applyUpdate, reportServerVersion } from "./lib/update.ts";
 import { ChatPage } from "./components/ChatPage.tsx";
+import { JournalPage } from "./components/JournalPage.tsx";
 import { LedgerPage } from "./components/LedgerPage.tsx";
 import { PortfolioPage } from "./components/PortfolioPage.tsx";
 import { LoginPage } from "./components/LoginPage.tsx";
@@ -19,6 +20,7 @@ import { ToastHost } from "./components/Toasts.tsx";
 import {
 	BellIcon,
 	ChatIcon,
+	JournalIcon,
 	LogOutIcon,
 	MoonIcon,
 	PlusIcon,
@@ -33,6 +35,7 @@ import {
 const NAV: Array<{ view: View; label: string; Icon: ComponentType<{ size?: number }> }> = [
 	{ view: "chat", label: "챗", Icon: ChatIcon },
 	{ view: "portfolio", label: "투자", Icon: TrendingIcon },
+	{ view: "journal", label: "일지", Icon: JournalIcon },
 	{ view: "ledger", label: "가계부", Icon: WalletIcon },
 	{ view: "settings", label: "설정", Icon: SettingsIcon },
 ];
@@ -137,14 +140,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 		navigate({ view: "chat", sessionId: id });
 	}
 
-	// ⌘1~4 화면 이동, Esc 드로어 닫기 — 핸들러는 최신 go 를 본다
+	// ⌘1~5 화면 이동, Esc 드로어 닫기 — 핸들러는 최신 go 를 본다
 	const goRef = useRef(go);
 	goRef.current = go;
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
 			if (e.key === "Escape") setDrawer(false);
 			if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-			const i = ["1", "2", "3", "4"].indexOf(e.key);
+			const i = ["1", "2", "3", "4", "5"].indexOf(e.key);
 			if (i < 0) return;
 			e.preventDefault();
 			goRef.current(NAV[i]!.view);
@@ -165,6 +168,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 			<LedgerPage />
 		) : view === "portfolio" ? (
 			<PortfolioPage onAskChat={newChat} />
+		) : view === "journal" ? (
+			<JournalPage onOpenConversation={openConversation} />
 		) : (
 			<SettingsPage key={settingsKey} onOpenConversation={openConversation} />
 		);

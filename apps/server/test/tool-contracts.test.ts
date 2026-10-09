@@ -19,6 +19,7 @@ function registry() {
 		mcpServers: (user) => { accessed.push(`mcp:${user}`); return []; },
 		mcpFetch: unavailable, prepareMcpWrite: () => unavailable,
 		watch: (user) => ({ prepareWatch: unavailable, listWatches: async () => { accessed.push(`watch:${user}`); return []; }, pauseWatch: unavailable, channels: () => [] }),
+		journal: (user) => ({ list: async () => { accessed.push(`journal:${user}`); return []; }, add: unavailable, update: unavailable, sync: unavailable }),
 	};
 	return { opts, accessed };
 }
@@ -61,14 +62,17 @@ const examples: Record<string, Array<Record<string, unknown>>> = {
 	mcp_call: [{}, { server: "example", tool: "get_quote", describe: true }],
 	range_trade: [{ action: "list" }, { action: "pause", id: "watch-1" }, { action: "prepare", symbol: "ETHUSDT", interval: "5m", buyPrice: 2700, sellPrice: 2720, amount: 1000, stopPct: 5, buyCostPct: 0.1, sellCostPct: 0.1 }],
 	watch_alert: [{ action: "list" }, { action: "pause", id: "watch-1" }, { action: "prepare", symbol: "ETHUSDT", market: "binance", interval: "1h", all: [{ left: "close", op: "<", right: 2600 }] }],
+	journal_add: [{ symbol: "005930", side: "BUY", quantity: 10, price: 71000, daysAgo: 1, thesis: "20일선 지지", tags: ["눌림"], emotion: "차분" }, { symbol: "AAPL", side: "SELL", quantity: 1.5 }],
+	journal_update: [{ id: "j0123456789abcdef", review: "손절가를 지켰다" }, { id: "j0123456789abcdef", stopPrice: 0, emotion: "" }],
+	journal_list: [{}, { period: "this_month", refresh: true }, { symbol: "005930", missingNotes: true, side: "BUY" }],
 };
 
 describe("사용자별 도구 등록 계약", () => {
-	it("등록된 36개 도구가 선언된 목록과 정확히 일치하고 이름이 중복되지 않는다", () => {
+	it("등록된 39개 도구가 선언된 목록과 정확히 일치하고 이름이 중복되지 않는다", () => {
 		const { opts } = registry();
 		const tools = createUserTools(opts, "ms");
 		const names = tools.map((t) => t.name);
-		assert.equal(names.length, 36);
+		assert.equal(names.length, 39);
 		assert.equal(new Set(names).size, names.length);
 		assert.deepEqual(names, [...CUSTOM_TOOL_NAMES]);
 		assert.deepEqual(Object.keys(examples).sort(), [...names].sort());
@@ -77,7 +81,7 @@ describe("사용자별 도구 등록 계약", () => {
 	it("생성 단계에서 자격증명이나 네트워크에 접근하지 않는다", () => {
 		globalThis.fetch = (async () => { throw new Error("unexpected network request"); }) as typeof fetch;
 		const { opts } = registry();
-		assert.equal(createUserTools(opts, "ms").length, 36);
+		assert.equal(createUserTools(opts, "ms").length, 39);
 	});
 
 	it("모든 도구에 설명·객체 스키마·실행 함수가 있고 호출 예제가 스키마에 맞는다", () => {
@@ -110,6 +114,9 @@ describe("사용자별 도구 등록 계약", () => {
 			["binance_futures", { action: "open", symbol: "BTCUSDT", leverage: 2.5 }],
 			["binance_futures", { action: "open", symbol: "BTCUSDT", quantity: 0.001 }],
 			["binance_order", { action: "place", symbol: "BTCUSDT", quantity: 0.001 }],
+			["journal_add", { symbol: "005930", side: "buy", quantity: 1 }],
+			["journal_add", { symbol: "005930", side: "BUY", quantity: 1, emotion: "행복" }],
+			["journal_list", { period: "last_week" }],
 		] as const) assert.equal(Check(tools.get(name)!.parameters, args), false, name);
 	});
 
@@ -118,11 +125,11 @@ describe("사용자별 도구 등록 계약", () => {
 		for (const user of ["ms", "sj"]) {
 			const tools = createUserTools(opts, user);
 			const before = accessed.length;
-			for (const name of ["mcp_call", "watch_alert"]) {
+			for (const name of ["mcp_call", "watch_alert", "journal_list"]) {
 				const tool = tools.find((t) => t.name === name)!;
 				await tool.execute("test", (name === "watch_alert" ? { action: "list" } : {}) as never, undefined, undefined, undefined as never);
 			}
-			assert.deepEqual(accessed.slice(before), [`mcp:${user}`, `watch:${user}`]);
+			assert.deepEqual(accessed.slice(before), [`mcp:${user}`, `watch:${user}`, `journal:${user}`]);
 		}
 	});
 
@@ -147,7 +154,7 @@ describe("사용자별 도구 등록 계약", () => {
 describe("시스템 프롬프트와 도구 계약", () => {
 	it("페르소나가 지시하는 자체 도구 이름은 실제로 등록되어 있다", () => {
 		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "ms" });
-		const refs = [...prompt.matchAll(/`((?:ledger_|market_|portfolio_|finance_|order_|binance_|kis_|data_)[a-z_]+|stock_research|toss_query|mcp_call|watch_alert|range_trade)`/g)].map((m) => m[1]!);
+		const refs = [...prompt.matchAll(/`((?:ledger_|market_|portfolio_|finance_|order_|binance_|kis_|data_|journal_)[a-z_]+|stock_research|toss_query|mcp_call|watch_alert|range_trade)`/g)].map((m) => m[1]!);
 		assert.ok(refs.length > 20);
 		for (const name of refs) assert.ok((CUSTOM_TOOL_NAMES as readonly string[]).includes(name), name);
 	});

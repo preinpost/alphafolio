@@ -46,6 +46,15 @@ export const WalletIcon = icon(
 	</>,
 );
 
+/** 매매일지 — 펼친 공책 */
+export const JournalIcon = icon(
+	<>
+		<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H18a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6.5A1.5 1.5 0 0 1 5 18.5z" />
+		<path d="M5 18.5A1.5 1.5 0 0 1 6.5 17H19" />
+		<path d="M9 7.5h6M9 11h4" />
+	</>,
+);
+
 export const SettingsIcon = icon(
 	<>
 		<circle cx="12" cy="12" r="3" />

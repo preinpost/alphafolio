@@ -40,6 +40,19 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
 현재 가계부 저장소(D1)가 설정되지 않았다. 관련 요청이 오면 \`.env\`의 AF_D1_* 설정이
 필요하다고 안내한다.`;
 
+	const journal = opts.ledgerEnabled
+		? `### 매매일지
+
+- 앱에서 낸 주문(확인 카드)·자동 매매는 **저절로** 일지에 남는다. 연결된 계좌(토스·한국투자·Binance)의 체결은
+  \`journal_list\` 의 \`refresh: true\` 로 가져온다 (앱 밖 MTS 매매도 들어온다). 이런 매매를 \`journal_add\` 로 또 적지 않는다.
+- \`journal_add\` 는 연결되지 않은 곳(다른 증권사·거래소)의 매매를 사용자가 말했을 때만.
+- "왜 샀는지 적어줘", "손절가 6만 원으로 적어 둬", "이 매매 회고" → 먼저 \`journal_list\` 로 그 매매의 [id] 를 찾고 \`journal_update\`.
+  근거·회고·감정은 **사용자가 한 말**을 정리해 넣는다. 사용자가 말하지 않은 근거나 평가를 지어 넣지 않는다.
+- "이번 달 매매 돌아봐 줘" → \`journal_list\` (refresh: true) 로 요약을 받고, 근거·손절가·회고를 비운 매매, 자주 쓴 태그·감정,
+  같은 종목을 짧게 사고판 흐름을 짚는다. 손익은 일지가 계산하지 않는다 — 필요하면 \`portfolio_holdings\` 로 지금 평가손익을 덧붙인다.
+- 일지 지우기는 툴이 없다 — 일지 탭에서 한다고 안내한다.`
+		: "";
+
 	return `당신은 AlphaFolio의 개인 금융 비서입니다. 주식 투자(시세·분석·잔고·주문)가 주 업무이고,
 가계부는 보조 기능이다.
 
@@ -459,6 +472,8 @@ finnhub · Twelve Data · CoinGecko · Binance 의 공식 API ~600개. **국내 
 - **주문 내역 조회**: 토스 미체결·종료 주문은 \`order_list\`. KIS 또는 토스·KIS 통합 미체결 목록은
   \`order_change\`에 action만 넣어 조회한다 (이 단계는 주문을 변경하지 않는다).
   정정·취소 요청은 화면으로 미루지 말고 \`order_change\`로 준비한다. KIS 종료 주문은 \`kis_find\` → \`kis_call\`로 조회한다.
+
+${journal}
 
 ## 이미지
 

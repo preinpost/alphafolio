@@ -23,6 +23,7 @@ import { createUserTools } from "./tool-registry.ts";
 import type { FetchLike, McpServerHandle } from "@alphafolio/mcp";
 import type { McpWriteRequest } from "@alphafolio/mcp/tools";
 import type { WatchToolDeps } from "@alphafolio/broker/watch-tools";
+import type { JournalToolDeps } from "@alphafolio/broker/journal-tools";
 import type { DataCreds } from "@alphafolio/broker";
 import type { BrokerAccess, NaverCredentials } from "@alphafolio/broker";
 import type { ConversationListItem } from "@alphafolio/protocol";
@@ -61,6 +62,8 @@ export interface RuntimeManagerOptions {
 	prepareMcpWrite: (user: string) => (req: McpWriteRequest) => { token: string; expiresAt: number };
 	/** 감시 트리거 (PLAN §40) — 툴은 준비·목록·일시정지만. 켜기는 사람이 확인 카드로 */
 	watch: (user: string) => WatchToolDeps;
+	/** 매매일지 (PLAN §42) — 쓰기·고치기·목록·체결 가져오기. 지우기는 화면에서만 */
+	journal: (user: string) => JournalToolDeps;
 	/** 사용자가 직접 저장한 LLM 키 (providerId → key). env 값은 넣지 않는다 — pi 가 알아서 읽는다. */
 	llmKeys: (user: string) => Record<string, string>;
 	/** 유휴 대화 정리 기준(분). 0이면 정리하지 않는다. 응답 중인 대화는 기준과 무관하게 남는다. */

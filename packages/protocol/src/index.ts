@@ -79,6 +79,55 @@ export interface ManualAssetDto {
 	updatedAt: string;
 }
 
+/** 매매일지 한 줄 (PLAN §42) — 서버 broker/journal JournalEntry 와 같은 모양 */
+export interface JournalEntryDto {
+	id: string;
+	at: number;
+	/** KST YYYY-MM-DD */
+	date: string;
+	broker: "kis" | "toss" | "binance" | "binance_stock" | "other";
+	symbol: string;
+	name: string | null;
+	side: "BUY" | "SELL";
+	quantity: number;
+	price: number | null;
+	currency: string;
+	fee: number | null;
+	/** pending = 접수됐지만 체결 확인 전 · canceled = 체결 없이 끝남 */
+	status: "pending" | "filled" | "canceled";
+	/** manual 직접 기록 · order 챗 주문(확인 카드) · auto 자동 매매 · import 증권사에서 가져옴 */
+	source: "manual" | "order" | "auto" | "import";
+	thesis: string | null;
+	targetPrice: number | null;
+	stopPrice: number | null;
+	tags: string[];
+	emotion: string | null;
+	review: string | null;
+	context: {
+		orderType?: "LIMIT" | "MARKET";
+		limitPrice?: number;
+		ordered?: number;
+		orderAmount?: number;
+		trigger?: string;
+		condition?: string;
+		leg?: "normal" | "stop" | "take";
+		arrivalPrice?: number | null;
+		slippageBps?: number | null;
+	} | null;
+	conversationId: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
+/** POST /api/journal/sync */
+export interface JournalSyncResultDto {
+	added: number;
+	updated: number;
+	sources: Array<{ broker: string; label: string; fills: number; error: string | null }>;
+	warnings: string[];
+	skipped?: boolean;
+}
+
 /** 화폐별 금액 — 원(krw) · 달러(usd) · 코인 USDT 환산(usdt, 스테이블 포함) */
 export interface CurrencySplitDto {
 	krw: number;

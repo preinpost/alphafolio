@@ -36,9 +36,9 @@ export function BrokerBadge({ broker }: { broker: "toss" | "kis" | "binance" }) 
 	return <span className="badge">{BROKER_LABEL[broker]}</span>;
 }
 
-/** 주문 실행 — 결과 문장 (주문번호 앞 12자) */
-async function executeOrder(token: string): Promise<string> {
-	const r = await api.executeOrder(token);
+/** 주문 실행 — 결과 문장 (주문번호 앞 12자). note 는 매매일지의 근거 한 줄 */
+async function executeOrder(token: string, note?: string): Promise<string> {
+	const r = await api.executeOrder(token, note?.trim() || undefined);
 	const id = r.orderId ?? r.conditionalOrderId;
 	return `${r.message}${id ? ` (${id.slice(0, 12)}${id.length > 12 ? "…" : ""})` : ""}`;
 }
@@ -281,8 +281,23 @@ export function Line({ k, children, r, tone }: { k: ReactNode; children: ReactNo
 	);
 }
 
+/**
+ * 매매 근거 한 줄 (선택) — 주문과 함께 매매일지에 남는다 (PLAN §42). 주문 내용에는 영향이 없다.
+ * 누르기 전에만 보인다 — 나간 뒤에는 일지 탭에서 고친다.
+ */
+export function JournalNote({ phase, value, onChange }: { phase: string; value: string; onChange: (v: string) => void }) {
+	if (phase !== "idle") return null;
+	return (
+		<label className="c-journal">
+			<span>매매 근거 (선택) — 매매일지에 남습니다</span>
+			<input className="input input-sm" maxLength={1000} placeholder="예: 20일선 지지 확인, 실적 발표 전 분할 매수" value={value} onChange={(e) => onChange(e.target.value)} />
+		</label>
+	);
+}
+
 export function OrderPreviewCardView({ card }: { card: OrderPreviewCard }) {
-	const c = useConfirm(card.token, card.expiresAt, card.ok);
+	const [note, setNote] = useState("");
+	const c = useConfirm(card.token, card.expiresAt, card.ok, (token) => executeOrder(token, note));
 	const sideLabel = card.side === "BUY" ? "매수" : "매도";
 	if (!card.ok) return <Problems title={`주문을 준비하지 못했습니다 — ${card.name}(${card.symbol})`} errors={card.errors} />;
 
@@ -305,6 +320,7 @@ export function OrderPreviewCardView({ card }: { card: OrderPreviewCard }) {
 				</div>
 			</div>
 			<Warnings items={card.warnings} />
+			<JournalNote phase={c.phase} value={note} onChange={setNote} />
 			<ConfirmBar c={c} verb="주문" note={`주문을 누르면 ${BROKER_LABEL[card.broker]}로 바로 전송됩니다.`} />
 		</ConfirmCard>
 	);
@@ -436,7 +452,9 @@ const BINANCE_TITLE = { place: "주문 확인", cancel: "주문 취소", replace
 
 /** Binance 현물 — 신규·취소·재주문·OCO·OTO·전체 취소 (값은 거래소 단위로 보정된 문자열) */
 export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
-	const c = useConfirm(card.token, card.expiresAt, card.ok);
+	const [note, setNote] = useState("");
+	// 신규 주문만 일지에 남는다 — 취소·OCO 등은 근거를 받지 않는다
+	const c = useConfirm(card.token, card.expiresAt, card.ok, (token) => executeOrder(token, card.action === "place" ? note : undefined));
 	// 미국 주식 직접 거래 — 수량은 주, 대금은 USDC
 	const stock = card.market === "stock";
 	const pair = stock ? card.base : `${card.base}/${card.quote}`;
@@ -528,6 +546,7 @@ export function BinanceOrderCardView({ card }: { card: BinanceOrderCard }) {
 					.join(" · ")}
 			</div>
 			<Warnings items={card.warnings} />
+			{card.action === "place" && <JournalNote phase={c.phase} value={note} onChange={setNote} />}
 			<ConfirmBar c={c} verb={verb} danger={danger} note={card.action === "place" ? "누르면 Binance 로 바로 전송됩니다." : undefined} />
 		</ConfirmCard>
 	);

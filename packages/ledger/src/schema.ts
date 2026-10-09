@@ -313,6 +313,51 @@ CREATE TABLE IF NOT EXISTS manual_assets (
 CREATE INDEX IF NOT EXISTS idx_manual_assets_member ON manual_assets(member);
 `.trim(),
 	},
+	{
+		// 매매일지 (PLAN §42) — 사용자 개인 것 (직접 입력 자산처럼 member 단위, 공유하지 않는다).
+		// 한 줄 = 한 번의 매매. 앱에서 낸 주문·자동 매매·증권사 체결 내역 가져오기·직접 기록이 같은 표에 쌓인다.
+		// trade_journal_refs: 증권사 주문 하나(ref) → 일지 한 줄. (member, ref) 가 PK 라 같은 체결을 두 번 가져오지 않는다.
+		//   한 줄이 주문 여러 개를 가질 수 있다 (자동 매매의 자식 주문 · 정정으로 번호가 바뀐 주문).
+		// at = 체결(또는 주문) 시각 epoch ms, date = 그 시각의 KST 날짜. tags 는 JSON 배열, context 는 당시 맥락 JSON.
+		id: "0013_trade_journal",
+		sql: `
+CREATE TABLE IF NOT EXISTS trade_journal (
+  id              TEXT PRIMARY KEY,
+  member          TEXT NOT NULL,
+  at              INTEGER NOT NULL,
+  date            TEXT NOT NULL,
+  broker          TEXT NOT NULL,
+  symbol          TEXT NOT NULL,
+  name            TEXT,
+  side            TEXT NOT NULL,
+  quantity        REAL NOT NULL,
+  price           REAL,
+  currency        TEXT NOT NULL,
+  fee             REAL,
+  status          TEXT NOT NULL,
+  source          TEXT NOT NULL,
+  thesis          TEXT,
+  target_price    REAL,
+  stop_price      REAL,
+  tags            TEXT NOT NULL DEFAULT '[]',
+  emotion         TEXT,
+  review          TEXT,
+  context         TEXT,
+  conversation_id TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_member ON trade_journal(member, at);
+
+CREATE TABLE IF NOT EXISTS trade_journal_refs (
+  member   TEXT NOT NULL,
+  ref      TEXT NOT NULL,
+  entry_id TEXT NOT NULL,
+  PRIMARY KEY (member, ref)
+);
+CREATE INDEX IF NOT EXISTS idx_journal_refs_entry ON trade_journal_refs(entry_id);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

@@ -51,3 +51,4 @@ export * from "./binance/bstocks.ts";
 export * from "./binance/stocks.ts";
 export * from "./triggers/venues/binance-stock.ts";
 export * from "./triggers/venues/targets.ts";
+export * from "./journal/index.ts";

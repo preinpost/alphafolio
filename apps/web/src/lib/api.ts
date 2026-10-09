@@ -10,6 +10,8 @@ import type {
 	LedgerMemberDto,
 	LedgerSummaryRow,
 	LedgerTransaction,
+	JournalEntryDto,
+	JournalSyncResultDto,
 	ManualAssetDto,
 	MyLedgerDto,
 	PortfolioDto,
@@ -205,6 +207,25 @@ export interface WatchEventItem {
 	};
 }
 
+/** 매매일지 직접 기록·고치기 본문 — 메모 칸은 null 이면 지운다 */
+export interface JournalManualInput {
+	date: string;
+	symbol: string;
+	name: string | null;
+	side: "BUY" | "SELL";
+	quantity: number;
+	price: number | null;
+	currency: string | null;
+	broker: JournalEntryDto["broker"];
+	fee: number | null;
+	thesis: string | null;
+	targetPrice: number | null;
+	stopPrice: number | null;
+	tags: string[];
+	emotion: string | null;
+	review: string | null;
+}
+
 /** 자동 매매 통화 — 국장 원 · 미장 달러 · 코인 USDT (Binance 현물) */
 export type TradeCurrency = "KRW" | "USD" | "USDT";
 
@@ -281,10 +302,11 @@ export const api = {
 	quote: (symbol: string) => request<QuoteDto>(`/api/quote?symbol=${encodeURIComponent(symbol)}`),
 
 	// ⚠️ 실제 주문이 나가는 유일한 클라이언트 경로. 확인 카드의 버튼에서만 호출한다.
-	executeOrder: (token: string) =>
+	// note — 매매일지에 남길 근거 한 줄 (선택). 주문 내용에는 영향이 없다
+	executeOrder: (token: string, note?: string) =>
 		request<{ ok: boolean; message: string; orderId?: string; conditionalOrderId?: string }>("/api/orders/execute", {
 			method: "POST",
-			body: JSON.stringify({ token }),
+			body: JSON.stringify(note ? { token, note } : { token }),
 		}),
 
 	/** 확인 카드 [닫기] — 서버가 기억한다 (다시 열어도 닫은 카드로 보이게) */
@@ -339,6 +361,18 @@ export const api = {
 	mcpTools: (id: string) => request<McpToolsView>(`/api/mcp/servers/${encodeURIComponent(id)}/tools`),
 	refreshMcpTools: (id: string) => request<McpToolsView>(`/api/mcp/servers/${encodeURIComponent(id)}/tools/refresh`, { method: "POST" }),
 	testMcp: (id: string) => request<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, { method: "POST" }),
+
+	// ── 매매일지 (PLAN §42) — 내 것만 ─────────────────────────────────────
+	journal: (params: { from?: string; to?: string; symbol?: string; missing?: boolean }) =>
+		request<{ items: JournalEntryDto[] }>(`/api/journal?${query({ ...params, missing: params.missing ? "1" : undefined })}`),
+	addJournal: (body: JournalManualInput) => request<JournalEntryDto>("/api/journal", { method: "POST", body: JSON.stringify(body) }),
+	/** 메모는 어느 기록이든, 매매 칸은 직접 기록만 (서버가 막는다) */
+	updateJournal: (id: string, patch: Partial<JournalManualInput>) =>
+		request<JournalEntryDto>(`/api/journal/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+	deleteJournal: (id: string) => request<{ deleted: true }>(`/api/journal/${encodeURIComponent(id)}`, { method: "DELETE" }),
+	/** 연결된 계좌의 체결 가져오기 — force 가 아니면 10분 안에 다시 부르지 않는다 */
+	syncJournal: (force: boolean, days?: number) =>
+		request<JournalSyncResultDto>("/api/journal/sync", { method: "POST", body: JSON.stringify({ force, ...(days ? { days } : {}) }) }),
 
 	// ── 가계부 (ledgerId 를 비우면 서버가 기본 가계부를 고른다) ─────────────
 	transactions: (

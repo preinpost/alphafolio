@@ -7,16 +7,17 @@ import { createStreamTools, STREAM_TOOL_NAMES } from "@alphafolio/broker/stream-
 import { createDerivativesTools, DERIVATIVES_TOOL_NAMES } from "@alphafolio/broker/derivatives-tools";
 import { createMcpTools, MCP_TOOL_NAMES } from "@alphafolio/mcp/tools";
 import { createWatchTools, WATCH_TOOL_NAMES } from "@alphafolio/broker/watch-tools";
+import { createJournalTools, JOURNAL_TOOL_NAMES } from "@alphafolio/broker/journal-tools";
 import type { RuntimeManagerOptions } from "./runtimes.ts";
 
 export const CUSTOM_TOOL_NAMES = [
 	...LEDGER_TOOL_NAMES, ...BROKER_TOOL_NAMES, ...ORDER_TOOL_NAMES, ...DATA_TOOL_NAMES,
-	...STREAM_TOOL_NAMES, ...DERIVATIVES_TOOL_NAMES, ...MCP_TOOL_NAMES, ...WATCH_TOOL_NAMES,
+	...STREAM_TOOL_NAMES, ...DERIVATIVES_TOOL_NAMES, ...MCP_TOOL_NAMES, ...WATCH_TOOL_NAMES, ...JOURNAL_TOOL_NAMES,
 ] as const;
 
 type ToolOptions = Pick<RuntimeManagerOptions,
 	"ledgerConfig" | "brokerAccess" | "naverCreds" | "dataCreds" | "prepareOrder" |
-	"mcpServers" | "mcpFetch" | "prepareMcpWrite" | "watch"
+	"mcpServers" | "mcpFetch" | "prepareMcpWrite" | "watch" | "journal"
 >;
 
 /**
@@ -46,5 +47,7 @@ export function createUserTools(opts: ToolOptions, user: string) {
 		...createDerivativesTools({ brokers: opts.brokerAccess(user) }),
 		...createMcpTools({ servers: () => opts.mcpServers(user), fetch: opts.mcpFetch, prepareWrite: opts.prepareMcpWrite(user) }),
 		...createWatchTools(opts.watch(user)),
+		// 매매일지는 개인 것이고 돈을 움직이지 않는다 — 확인 카드 없이 바로 쓴다
+		...createJournalTools(opts.journal(user)),
 	].map((tool) => (CONFIRM_CARD_TOOLS.has(tool.name) ? { ...tool, exposure: "model-only" as const } : tool));
 }

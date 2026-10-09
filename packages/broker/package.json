@@ -11,7 +11,8 @@
     "./data-tools": "./src/data-tools.ts",
     "./stream-tools": "./src/stream-tools.ts",
     "./derivatives-tools": "./src/derivatives/tool.ts",
-    "./watch-tools": "./src/triggers/tool.ts"
+    "./watch-tools": "./src/triggers/tool.ts",
+    "./journal-tools": "./src/journal/tool.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

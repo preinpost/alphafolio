@@ -89,6 +89,8 @@ const fromRow = (r: Row): ExecRecord => ({
 export class TradeStore {
 	private readonly d1: () => D1Config;
 	private readonly now: () => number;
+	/** 체결이 있는 신호가 끝났다 — 매매일지 (PLAN §42). 기다리지 않고, 실패해도 체결 기록은 그대로다 */
+	onFilled: ((rec: ExecRecord) => Promise<unknown>) | null = null;
 
 	constructor(d1: () => D1Config, now: () => number = Date.now) {
 		this.d1 = d1;
@@ -123,6 +125,12 @@ export class TradeStore {
 			"UPDATE trigger_execs SET state = ?, report = ?, children = ?, filled_qty = ?, amount = ?, reserved = 0, updated_at = ? WHERE id = ?",
 			[report.status, JSON.stringify(report), JSON.stringify(report.children), report.filledQty, amount, this.now(), id],
 		);
+		const onFilled = this.onFilled;
+		if (onFilled && report.filledQty > 0) {
+			void d1Query<Row>(this.d1(), "SELECT * FROM trigger_execs WHERE id = ?", [id])
+				.then((r) => (r.results[0] ? onFilled(fromRow(r.results[0])) : null))
+				.catch((err: unknown) => console.warn(`[journal] 자동 매매 기록 실패 ${id}: ${err instanceof Error ? err.message : err}`));
+		}
 	}
 
 	/** 오늘(시장 현지 날짜) 매수에 쓴 금액 — 체결 금액 + 진행 중 예약 */
