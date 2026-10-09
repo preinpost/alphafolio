@@ -304,8 +304,12 @@ function EntryList({ list, total, onOpen }: { list: JournalEntryDto[]; total: nu
 						{e.name && <span className="mono muted jr-sym">{e.symbol}</span>}
 					</span>
 					<span className="meta">
-						{tradeText(e)} · {BROKER_LABEL[e.broker]}
-						<span className="src">{SOURCE_LABEL[e.source]}</span> <StatusBadge e={e} />
+						<span className="nw">{tradeText(e)} ·</span>{" "}
+						<span className="nw">
+							{BROKER_LABEL[e.broker]}
+							{/* 계좌 체결이 대부분이라 목록에서는 나머지 출처만 표시한다 */}
+							{e.source !== "import" && <span className="src">{SOURCE_LABEL[e.source]}</span>} <StatusBadge e={e} />
+						</span>
 					</span>
 					<span className={`jr-thesis ${e.thesis ? "" : "muted"}`}>
 						{e.thesis ?? "근거를 적어 두세요"}

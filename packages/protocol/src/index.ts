@@ -95,7 +95,7 @@ export interface JournalEntryDto {
 	fee: number | null;
 	/** pending = 접수됐지만 체결 확인 전 · canceled = 체결 없이 끝남 */
 	status: "pending" | "filled" | "canceled";
-	/** manual 직접 기록 · order 챗 주문(확인 카드) · auto 자동 매매 · import 증권사에서 가져옴 */
+	/** manual 직접 기록 · order 챗 주문(확인 카드) · auto 자동 매매 · import 증권사 계좌 체결 */
 	source: "manual" | "order" | "auto" | "import";
 	thesis: string | null;
 	targetPrice: number | null;

@@ -19,7 +19,7 @@ export const SOURCE_LABEL: Record<JournalEntryDto["source"], string> = {
 	manual: "직접",
 	order: "챗 주문",
 	auto: "자동 매매",
-	import: "가져옴",
+	import: "계좌 체결",
 };
 
 export type PeriodId = "30d" | "90d" | "year" | "all";
@@ -47,9 +47,13 @@ export function periodFrom(id: PeriodId, today: string): string | undefined {
 }
 
 /** 금액 — 원은 정수, 달러는 센트까지, 코인 등은 그 통화 단위로 */
+/** 달러에 묶인 코인 — 1 이상이면 센트까지만 (958.24467 USDT → 958.24 USDT) */
+const STABLE = new Set(["USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI"]);
+
 export function money(v: number, currency: string): string {
 	if (currency === "KRW") return `${Math.round(v).toLocaleString("ko-KR")}원`;
 	if (currency === "USD") return `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 6 : 2 })}`;
+	if (STABLE.has(currency) && Math.abs(v) >= 1) return `${v.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currency}`;
 	return `${Number(v.toPrecision(8)).toLocaleString("en-US", { maximumFractionDigits: 8 })} ${currency}`;
 }
 

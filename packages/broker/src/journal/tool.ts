@@ -33,7 +33,7 @@ export function journalMoney(v: number, currency: string): string {
 
 const qtyText = (q: number): string => Number(q.toPrecision(10)).toLocaleString("en-US", { maximumFractionDigits: 8 });
 const BROKER = { kis: "한국투자", toss: "토스", binance: "Binance", binance_stock: "Binance 주식", other: "기타" } as const;
-const SOURCE = { manual: "직접 기록", order: "챗 주문", auto: "자동 매매", import: "가져옴" } as const;
+const SOURCE = { manual: "직접 기록", order: "챗 주문", auto: "자동 매매", import: "계좌 체결" } as const;
 const STATUS = { pending: " (체결 확인 전)", filled: "", canceled: " (체결 없이 끝남)" } as const;
 
 /** 목록 한 줄 — 모델이 id 로 고칠 수 있게 id 를 앞에 */

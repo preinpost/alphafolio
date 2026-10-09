@@ -2978,6 +2978,13 @@ html.ua-keyboard .hide-on-keyboard {
   .jr-row .side-tag {
     margin-top: 1px;
   }
+  /* 좁은 화면 — 말줄임 대신 "수량 @ 가격 ·" / "증권사 출처" 단위로 줄바꿈 */
+  .jr-row .meta {
+    white-space: normal;
+  }
+  .jr-row .meta .nw {
+    white-space: nowrap;
+  }
   .jr-row.jr-dim .grow,
   .jr-row.jr-dim .amt {
     opacity: 0.55;

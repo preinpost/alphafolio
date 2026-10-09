@@ -47,6 +47,9 @@ describe("매매일지 화면", () => {
 		assert.equal(money(229.5, "USD"), "$229.50");
 		assert.equal(money(0.0123, "USD"), "$0.0123");
 		assert.equal(money(2700.5, "USDT"), "2,700.5 USDT");
+		assert.equal(money(958.24467, "USDT"), "958.24 USDT");
+		assert.equal(money(0.00001234, "USDT"), "0.00001234 USDT");
+		assert.equal(money(1.23456789, "BTC"), "1.2345679 BTC");
 		assert.equal(tradeText(e({})), "10주 @ 71,000원");
 		assert.equal(tradeText(e({ broker: "binance", quantity: 0.25, price: 2700, currency: "USDT" })), "0.25 @ 2,700 USDT");
 		assert.equal(tradeText(e({ broker: "binance", quantity: 0, price: null, currency: "USDT", context: { orderAmount: 100 } })), "100 USDT어치");
