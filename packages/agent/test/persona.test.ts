@@ -84,4 +84,34 @@ describe("답변 문장 지침", () => {
 		assert.match(license, /MIT License/);
 		assert.match(license, /snflkd/);
 	});
+
+	it("읽기 쉬운 구성 — 결론 먼저, 같은 숫자는 한 번, 한 칸에 값 하나, 소제목은 명사형", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		assert.ok(prompt.includes("결론(무엇이 문제이고 사용자가 무엇을 정해야 하는지)을 맨 앞에"));
+		assert.ok(prompt.includes("같은 사실·숫자는 한 번만 쓴다"));
+		assert.ok(prompt.includes("표 한 칸에는 값 하나만"));
+		assert.ok(prompt.includes("소제목·표 머리글·표 칸은 명사형"));
+		assert.ok(!prompt.includes("질문과 관련된 행·열은 줄이지 않는다"), "열까지 다 넣으라는 옛 문구");
+		// 문장 지침 머리말에도 있어야 원문 '문장 단위 2번' 예외와 이어진다
+		const head = prompt.slice(prompt.indexOf("# 답변 문장 지침"));
+		assert.ok(head.includes("소제목·표 머리글·표 칸은 명사형으로 끝낸다"));
+	});
+
+	it("내부 용어(툴·20봉)를 쓰지 않고 약어는 처음 한 번 풀어 쓴다", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		assert.ok(prompt.includes('"툴", "툴 판정", "툴 계산값", "툴 시나리오"'));
+		assert.ok(prompt.includes('"20봉 평균" → "20일 평균"'));
+		assert.ok(prompt.includes("처음 나올 때 한 번만 괄호로 짧게 풀어 쓰고"));
+	});
+
+	it("보유 점검은 위험 큰 종목 먼저, 종목마다 한 번만", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "x" });
+		const section = prompt.slice(prompt.indexOf("### 보유 종목 점검"), prompt.indexOf("### 저점·역추세 질문"));
+		assert.ok(section.length > 0, "보유 점검 섹션이 저점 섹션 앞에 있어야 한다");
+		for (const part of ["portfolio_holdings", "portfolio_signals", "한눈에 보기", "보유 현황 표", "먼저 볼 종목", "나머지 종목", "뉴스 배경"]) {
+			assert.ok(section.includes(part), part);
+		}
+		assert.ok(section.includes("다른 절에서 다시 다루지 않는다"));
+		assert.ok(section.includes("별도 표를 또 만들지 않는다"));
+	});
 });
