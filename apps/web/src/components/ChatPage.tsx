@@ -18,7 +18,7 @@ export function ChatPage({ chat, onOpenDrawer, onNewChat }: { chat: ChatState; o
 				title={title}
 				sub={model ? <span className="mono" title={chat.model}>{model}</span> : undefined}
 				leading={
-					<button className="icon-btn mobile-only" onClick={onOpenDrawer} aria-label="대화 목록 열기" style={{ marginLeft: -8 }}>
+					<button className="icon-btn mobile-only" onClick={onOpenDrawer} aria-label="메뉴 열기" style={{ marginLeft: -8 }}>
 						<MenuIcon size={20} />
 					</button>
 				}
@@ -51,6 +51,8 @@ export function ChatPage({ chat, onOpenDrawer, onNewChat }: { chat: ChatState; o
 							streaming={chat.streaming}
 							// 대화를 옮기는 중(ready 전)에는 보내지 않는다 — 어느 대화로 갈지 모호하다
 							disabled={!chat.connected || !chat.sessionId}
+							// 모바일은 대화가 시작되면 면책 문구를 접는다 — 빈 새 대화 화면에서는 보인다
+							compactDisclaimer={chat.messages.length > 0}
 						/>
 					</>
 				}

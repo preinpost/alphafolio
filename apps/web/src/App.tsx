@@ -175,10 +175,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 		);
 
 	const drawerOpen = drawer || swipe.dragging;
+	// 대화를 읽는 중(모바일)에는 탭바를 접어 본문을 넓힌다 — 화면 이동은 드로어가 맡는다.
+	// 빈 새 대화(첫 화면)에서는 탭바를 그대로 둔다.
+	const reading = view === "chat" && hasMessages;
 
 	return (
 		<div
-			className="app"
+			className={`app ${reading ? "chat-reading" : ""}`}
 			onTouchStart={swipe.onTouchStart}
 			onTouchMove={swipe.onTouchMove}
 			onTouchEnd={swipe.onTouchEnd}
@@ -208,7 +211,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 				))}
 			</nav>
 
-			{/* 모바일 대화 드로어 — 화면 이동은 탭바가 맡는다 */}
+			{/* 모바일 대화 드로어 — 대화를 읽는 중에는 탭바가 접히므로 화면 이동도 여기서 한다 */}
 			<div className={`drawer ${drawer ? "open" : ""} ${swipe.dragging ? "dragging" : ""}`} inert={!drawerOpen}>
 				<div
 					className="scrim"
@@ -219,11 +222,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 					ref={swipe.drawerRef}
 					className="panel"
 					role="dialog"
-					aria-label="대화 목록"
+					aria-label="메뉴"
 					style={swipe.dragging ? { transform: `translateX(${swipe.offset}px)`, transition: "none" } : undefined}
 				>
 					<div className="panel-h">
-						<strong>대화</strong>
+						<strong>AlphaFolio</strong>
 						<button className="icon-btn" onClick={() => setDrawer(false)} aria-label="닫기">
 							<XIcon size={18} />
 						</button>
@@ -231,6 +234,15 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 					<button className="btn btn-secondary side-new" onClick={newChat}>
 						<PlusIcon size={16} />새 대화
 					</button>
+					<nav className="nav" aria-label="주요 화면">
+						{NAV.map(({ view: v, label, Icon }) => (
+							<button key={v} className="nav-item" onClick={() => go(v)} aria-current={view === v ? "page" : undefined}>
+								<Icon />
+								{label}
+							</button>
+						))}
+					</nav>
+					<div className="side-label">최근 대화</div>
 					<ConversationList current={view === "chat" ? chat.sessionId : null} onOpen={openConversation} />
 				</div>
 			</div>

@@ -160,6 +160,7 @@ export function ConfirmCard({
 						{mmss(c.remain)} 후 만료
 					</span>
 				)}
+				{(c.phase === "expired" || c.phase === "dismissed") && <span className="left">{c.phase === "expired" ? "만료됨" : "닫음"}</span>}
 			</div>
 			{children}
 		</section>

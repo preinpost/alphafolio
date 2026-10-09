@@ -310,6 +310,10 @@ html.ua-keyboard .composer-bar {
   .composer-bar {
     padding-bottom: 10px;
   }
+  /* 대화를 읽는 중에는 탭바가 접힌다 (App.tsx .chat-reading) — 홈 인디케이터 여백을 컴포저가 맡는다 */
+  html:not(.ua-keyboard) .chat-reading .composer-bar {
+    padding-bottom: max(0.5rem, min(var(--composer-safe-bottom-max), var(--safe-b)));
+  }
 }
 /* 키보드가 열리면 화면이 좁으니 보조 문구는 접는다 */
 html.ua-keyboard .hide-on-keyboard {
@@ -333,6 +337,13 @@ html.ua-keyboard .hide-on-keyboard {
   --tw-prose-th-borders: var(--border);
   --tw-prose-td-borders: var(--border);
   line-height: 1.68;
+}
+/*
+ * 말풍선 본문은 폭을 끝까지 쓴다. Safari 의 text-wrap: pretty(기본 p 규칙)는 문단 전체의 줄 길이를
+ * 고르게 맞추느라 줄을 일찍 꺾어서, 좁은 모바일 화면에서 오른쪽이 크게 빈다.
+ */
+.prose p {
+  text-wrap: wrap;
 }
 .prose a {
   text-underline-offset: 3px;
@@ -839,11 +850,14 @@ html.ua-keyboard .hide-on-keyboard {
     .icon-btn.mobile-only {
       display: inline-grid !important;
     }
-    /* 키보드가 열리면 탭바를 접어 입력창을 키보드 바로 위에 */
-    html.ua-keyboard .tabbar {
+    /* 키보드가 열리면 탭바를 접어 입력창을 키보드 바로 위에.
+       대화를 읽는 중에도 접는다 — 본문을 넓히고, 화면 이동은 드로어가 맡는다 */
+    html.ua-keyboard .tabbar,
+    .chat-reading .tabbar {
       display: none;
     }
-    html.ua-keyboard .main {
+    html.ua-keyboard .main,
+    .chat-reading .main {
       padding-bottom: 0;
     }
   }
@@ -1944,6 +1958,7 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .confirm.closed .c-main,
   .confirm.closed .c-sec,
+  .confirm.closed .c-kv,
   .confirm.closed .c-meta {
     opacity: 0.5;
   }
@@ -3592,6 +3607,44 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .confirm .c-kv {
     padding: 14px 18px;
+    border-top: 1px solid var(--border);
+  }
+  /* 감시 카드 — 조건 줄 · 목표까지 거리 · 미리보기 */
+  .confirm .w-cond {
+    font-size: 13px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  .confirm .total .w-gap {
+    font-weight: 600;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+  .confirm .w-hint {
+    margin: 0;
+    font-size: 12.5px;
+    color: color-mix(in oklch, var(--warn) 70%, var(--fg));
+  }
+  .confirm .w-fires {
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: start;
+    gap: 4px 20px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12.5px;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+  .confirm .w-fires li {
+    display: contents;
+  }
+  .confirm .w-fires li > span:first-child {
+    color: var(--muted);
+  }
+  .confirm .w-fires li > span:last-child {
+    text-align: right;
   }
   .kv .kv-sec {
     grid-column: 1 / -1;

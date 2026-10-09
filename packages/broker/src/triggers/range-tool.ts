@@ -6,7 +6,7 @@ import { bStockStatus } from "../binance/bstocks.ts";
 import { fetchWatchBars } from "./bars.ts";
 import { validateCondition } from "./condition.ts";
 import { conditionText, VENUE_LABEL } from "./describe.ts";
-import { FEED_LABEL, isStock } from "./market-time.ts";
+import { barCloseAt, FEED_LABEL, isStock } from "./market-time.ts";
 import { cryptoAutoProblem, currencyOf, moneyText, planOrder, sizeText, unitOf, validateOrderRule } from "./rule.ts";
 import {
 	initialRangeState,
@@ -200,6 +200,7 @@ async function prepare(params: Params, conversationId: string | null, deps: Watc
 		limits: spec.limits,
 		lastClose: last?.close ?? null,
 		lastBarAt: last?.t ?? null,
+		lastCloseAt: last ? barCloseAt(condition, last.t) : null,
 		holdsNow: null,
 		preview: { days: 0, count: 0, recent: [] },
 		channels: deps.channels(),

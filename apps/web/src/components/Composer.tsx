@@ -8,11 +8,13 @@ interface Props {
 	onAbort: () => void;
 	streaming: boolean;
 	disabled: boolean;
+	/** 모바일에서 면책 문구를 숨긴다 (데스크톱은 항상 보인다) */
+	compactDisclaimer?: boolean;
 }
 
 const MAX_HEIGHT = 200;
 
-export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
+export function Composer({ onSend, onAbort, streaming, disabled, compactDisclaimer = false }: Props) {
 	const [text, setText] = useState("");
 	const [images, setImages] = useState<PreparedImage[]>([]);
 	const [busy, setBusy] = useState(false);
@@ -188,7 +190,7 @@ export function Composer({ onSend, onAbort, streaming, disabled }: Props) {
 					)}
 				</div>
 			</div>
-			<p className="disclaimer hide-on-keyboard">AI 분석은 참고용이며, 투자 판단과 그 책임은 본인에게 있습니다.</p>
+			<p className={`disclaimer hide-on-keyboard ${compactDisclaimer ? "desktop-only" : ""}`}>AI 분석은 참고용이며, 투자 판단과 그 책임은 본인에게 있습니다.</p>
 		</div>
 	);
 }

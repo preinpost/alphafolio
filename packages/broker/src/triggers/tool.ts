@@ -107,6 +107,10 @@ export interface WatchConfirmCard {
 	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
 	lastClose: number | null;
 	lastBarAt: number | null;
+	/** 마지막 봉이 닫힌 시각 — 화면 표기는 이쪽 (lastBarAt 은 봉 시작) */
+	lastCloseAt: number | null;
+	/** 조건이 "종가 vs 숫자" 하나뿐이면 그 가격 — 카드가 마지막 마감과의 거리를 보여준다 */
+	target?: number | null;
 	/** 지금 이미 참이면 켜도 바로 울리지 않는다 (on_enter) */
 	holdsNow: boolean | null;
 	preview: { days: number; count: number; recent: Array<{ at: number; close: number }> };
@@ -358,6 +362,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 			limits: spec.limits,
 			lastClose: last?.close ?? null,
 			lastBarAt: last?.t ?? null,
+			lastCloseAt: last ? barCloseAt(condition, last.t) : null,
 			holdsNow: holdsNow(once, bars),
 			preview: { days: Math.round(covered * 10) / 10, count: fires.length, recent: fires.slice(-5).map((i) => ({ at: closeAt(i), close: (bars[i] as WatchBar).close })) },
 			channels,
@@ -639,6 +644,8 @@ export function createWatchTools(deps: WatchToolDeps) {
 				limits: spec.limits,
 				lastClose: last?.close ?? null,
 				lastBarAt: last?.t ?? null,
+				lastCloseAt: last ? barCloseAt(condition, last.t) : null,
+				target: priceTarget(condition),
 				holdsNow: hold,
 				preview: { days: Math.round(covered * 10) / 10, count: fires.length, recent: fires.slice(-5).map((i) => ({ at: closeAt(i), close: (bars[i] as WatchBar).close })) },
 				channels,
@@ -651,12 +658,20 @@ export function createWatchTools(deps: WatchToolDeps) {
 				(orderWarnings.length ? `⚠ ${orderWarnings.join(" / ")}\n` : "") +
 				`마지막 마감 ${last ? `${num(last.close)} (${kstShort(barCloseAt(condition, last.t))})` : "없음"} · 지난 ${card.preview.days}일이었다면 ${fires.length}번 울렸다` +
 				`${hold ? " · ⚠ 지금 이미 참 (켜도 바로 울리지 않는다)" : ""}.\n` +
-				"**아직 켜지지 않았다.** 사용자가 화면의 카드에서 [켜기] 를 눌러야 감시가 시작된다 (10분 안에). \"화면에서 켜기를 눌러 주세요\" 라고 안내한다." +
+				"**아직 켜지지 않았다.** 사용자가 화면의 카드에서 [켜기] 를 눌러야 감시가 시작된다 (10분 안에). \"화면에서 켜기를 눌러 주세요\" 라고 안내한다. " +
+				"조건·마지막 마감·미리보기·받는 곳은 카드에 다 보이니 답변에서 되풀이하지 말고 한두 줄로 — 눈여겨볼 점(곧 닿을 거리, 울림이 몰림 등)만 말한다." +
 				(orderView ? " 켜면 조건이 맞을 때 **확인 없이 주문이 나간다** — 사용자에게 그 점을 분명히 말한다." : "");
 			return { content: [{ type: "text" as const, text }], details: card };
 		},
 	});
 	return [tool, ...createRangeTools(deps)];
+}
+
+/** 조건이 "종가 vs 숫자" 절 하나뿐이면 그 숫자 (지표·복합 조건은 null) */
+function priceTarget(c: Condition): number | null {
+	const node = c.all.length === 1 ? c.all[0] : undefined;
+	if (!node || !("op" in node) || typeof node.right !== "number") return null;
+	return node.left === "close" ? node.right : null;
 }
 
 export const WATCH_TOOL_NAMES = ["watch_alert", "range_trade"] as const;

@@ -279,6 +279,10 @@ export interface WatchConfirmCard {
 	limits: { maxFires: number | null; cooldownSec: number; expiresAt: string };
 	lastClose: number | null;
 	lastBarAt: number | null;
+	/** 마지막 봉이 닫힌 시각 — 화면 표기는 이쪽 (없으면 예전 카드: lastBarAt 은 봉 시작) */
+	lastCloseAt?: number | null;
+	/** 조건이 "종가 vs 숫자" 하나뿐이면 그 가격 — 마지막 마감과의 거리를 보여준다 */
+	target?: number | null;
 	holdsNow: boolean | null;
 	/** 지난 기간에 이 조건이었다면 울렸을 횟수·마지막 몇 번 (at = 봉 마감 시각) */
 	preview: { days: number; count: number; recent: Array<{ at: number; close: number }> };
