@@ -30,6 +30,9 @@ const usdt = (n: number): string => `${n.toLocaleString("en-US", { maximumFracti
 const approxWon = (n: number): string => (n > 0 ? `≈ ${won(n)}` : "");
 const approxShort = (n: number): string => (n > 0 ? `≈ ${compactWon(n)}` : "");
 const money = (n: number, currency: "KRW" | "USD"): string => (currency === "KRW" ? won(n) : usd(n));
+/** 모바일 한 칸 — 원화는 만원 단위로 줄이고 달러는 그대로 */
+const shortMoney = (n: number, currency: "KRW" | "USD"): string => (currency === "KRW" ? compactWon(n) : usd(n));
+const signedShort = (n: number, currency: "KRW" | "USD"): string => `${sign(n)}${shortMoney(Math.abs(n), currency)}`;
 /** 코인 단가 — 1달러 미만은 유효숫자 4자리 ($0.00001234) */
 const usdPrice = (n: number): string => (n >= 1 ? usd(n) : `$${Number(n.toPrecision(4))}`);
 const qty = (n: number): string => Number(n.toPrecision(8)).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -74,8 +77,12 @@ interface HoldRow {
 	price: string | null;
 	value: string;
 	valueSub: string;
+	/** 모바일 평가 — 원래 통화로 짧게 */
+	valueShort: string;
 	valueKrw: number;
 	pnl: string | null;
+	/** 모바일 손익 — 원래 통화로 짧게 */
+	pnlShort: string | null;
 	pnlPct: number | null;
 	pnlNote?: string;
 	pnlTitle?: string;
@@ -96,8 +103,10 @@ function stockRow(h: BrokerHolding, total: number): HoldRow {
 		price: money(h.price, h.currency),
 		value: money(h.value, h.currency),
 		valueSub: h.currency === "USD" ? approxShort(h.valueKrw) : pctOf(h.valueKrw, total),
+		valueShort: shortMoney(h.value, h.currency),
 		valueKrw: h.valueKrw,
 		pnl: known ? `${sign(h.profit)}${money(Math.abs(h.profit), h.currency)}` : null,
+		pnlShort: known ? signedShort(h.profit, h.currency) : null,
 		pnlPct: known ? h.profitPct : null,
 	};
 }
@@ -114,8 +123,10 @@ function groupedRow(g: GroupedHolding, total: number): HoldRow {
 		price: g.parts[0] ? money(g.parts[0].price, g.currency) : null,
 		value: money(g.value, g.currency),
 		valueSub: g.currency === "USD" ? approxShort(g.valueKrw) : pctOf(g.valueKrw, total),
+		valueShort: shortMoney(g.value, g.currency),
 		valueKrw: g.valueKrw,
 		pnl: g.profitPct !== null ? `${sign(profit)}${money(Math.abs(profit), g.currency)}` : null,
+		pnlShort: g.profitPct !== null ? signedShort(profit, g.currency) : null,
 		pnlPct: g.profitPct,
 	};
 }
@@ -134,8 +145,10 @@ function cryptoRow(c: CryptoHoldingDto): HoldRow {
 		price: c.priceUsd !== null ? usdPrice(c.priceUsd) : null,
 		value: c.valueUsd === null ? "시세 없음" : usdt(c.valueUsd),
 		valueSub: approxShort(c.valueKrw),
+		valueShort: c.valueUsd === null ? "시세 없음" : usdt(c.valueUsd),
 		valueKrw: c.valueKrw,
 		pnl: c.profitUsd !== null && c.profitPct !== null ? `${sign(c.profitUsd)}${usd(Math.abs(c.profitUsd))}` : null,
+		pnlShort: c.profitUsd !== null && c.profitPct !== null ? signedShort(c.profitUsd, "USD") : null,
 		pnlPct: c.profitPct,
 		...(partial ? { pnlNote: "일부" } : {}),
 		...(c.avgPriceUsd !== null
@@ -162,8 +175,10 @@ function manualRow(m: ManualAssetDto & { valueKrw: number }, total: number): Hol
 		price: null,
 		value: m.currency === "KRW" ? won(m.valueKrw) : usd(m.amount),
 		valueSub: m.currency === "USD" ? approxShort(m.valueKrw) : pctOf(m.valueKrw, total),
+		valueShort: m.currency === "KRW" ? compactWon(m.valueKrw) : usd(m.amount),
 		valueKrw: m.valueKrw,
 		pnl: null,
+		pnlShort: null,
 		pnlPct: null,
 		manual: m,
 	};
@@ -522,13 +537,14 @@ function HoldingRow({ r, onEdit }: { r: HoldRow; onEdit: (() => void) | undefine
 				</div>
 			</div>
 			<div>
-				<div className="v mobile-only">{r.valueKrw > 0 ? compactWon(r.valueKrw) : r.value}</div>
+				<div className="v mobile-only">{r.valueShort}</div>
 				{r.pnlPct === null ? (
 					<div className="s muted">{r.manual ? "직접 입력" : "손익 없음"}</div>
 				) : (
 					<>
 						<div className={`v desktop-only ${move(r.pnlPct)}`}>{r.pnl}</div>
 						<div className={`s ${move(r.pnlPct)}`} title={r.pnlTitle}>
+							{r.pnlShort && <span className="mobile-only">{r.pnlShort} · </span>}
 							{signedPct(r.pnlPct)}
 							{r.pnlNote ? ` ${r.pnlNote}` : ""}
 						</div>

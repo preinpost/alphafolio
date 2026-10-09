@@ -2831,6 +2831,7 @@ html.ua-keyboard .hide-on-keyboard {
     .portfolio .grid-main {
       display: flex;
       flex-direction: column;
+      align-items: stretch;
     }
     .portfolio .grid-main > .col {
       display: contents;
