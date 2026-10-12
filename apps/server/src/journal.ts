@@ -16,6 +16,7 @@ import {
 	conditionText,
 	execCurrency,
 	execRefs,
+	isCoinBroker,
 	JournalValidationError,
 	kstDate,
 	orderJournal,
@@ -270,16 +271,26 @@ export class JournalStore {
 	 */
 	async known(member: string, since: number): Promise<{ entries: KnownEntry[]; claimed: Set<string> }> {
 		const cfg = await this.cfg();
-		const r = await d1Query<Pick<Row, "id" | "source" | "status" | "quantity" | "price" | "fee" | "name"> & { ref: string | null }>(
+		const r = await d1Query<Pick<Row, "id" | "source" | "status" | "quantity" | "price" | "fee" | "name" | "context"> & { ref: string | null }>(
 			cfg,
-			`SELECT j.id, j.source, j.status, j.quantity, j.price, j.fee, j.name, r.ref
+			`SELECT j.id, j.source, j.status, j.quantity, j.price, j.fee, j.name, j.context, r.ref
 			 FROM trade_journal j LEFT JOIN trade_journal_refs r ON r.member = j.member AND r.entry_id = j.id
 			 WHERE j.member = ? AND (j.at >= ? OR j.status = 'pending')`,
 			[member, since - 7 * DAY],
 		);
 		const by = new Map<string, KnownEntry>();
 		for (const x of r.results) {
-			const e = by.get(x.id) ?? { id: x.id, source: x.source as KnownEntry["source"], status: x.status as KnownEntry["status"], quantity: x.quantity, price: x.price, fee: x.fee, name: x.name, refs: [] };
+			const e = by.get(x.id) ?? {
+				id: x.id,
+				source: x.source as KnownEntry["source"],
+				status: x.status as KnownEntry["status"],
+				quantity: x.quantity,
+				price: x.price,
+				fee: x.fee,
+				name: x.name,
+				context: parse<JournalContext | null>(x.context, null),
+				refs: [],
+			};
 			if (x.ref) e.refs.push(x.ref);
 			by.set(x.id, e);
 		}
@@ -298,6 +309,10 @@ export class JournalStore {
 				sets.push("name = ?");
 				params.push(u.patch.name);
 			}
+			if (u.patch.context) {
+				sets.push("context = ?");
+				params.push(JSON.stringify(u.patch.context));
+			}
 			await d1Query(cfg, `UPDATE trade_journal SET ${sets.join(", ")} WHERE id = ? AND member = ?`, [...params, u.id, member]);
 			for (const ref of u.addRefs) await d1Query(cfg, "INSERT OR IGNORE INTO trade_journal_refs (member, ref, entry_id) VALUES (?, ?, ?)", [member, ref, u.id]);
 			updated++;
@@ -307,7 +322,7 @@ export class JournalStore {
 		return { added, updated };
 	}
 
-	/** Binance 현물에서 훑을 마켓 — 일지에 있는 것 */
+	/** Binance 현물에서 훑을 마켓 — 일지에 있는 것 (선물은 broker 가 binance_futures 라 섞이지 않는다) */
 	async binanceSymbols(member: string, since: number): Promise<string[]> {
 		const r = await d1Query<{ symbol: string }>(await this.cfg(), "SELECT DISTINCT symbol FROM trade_journal WHERE member = ? AND broker = 'binance' AND at >= ?", [member, since]);
 		return r.results.map((x) => x.symbol);
@@ -371,7 +386,7 @@ export class JournalSync {
 		}
 		const { entries, claimed } = await this.d.store.known(user, from);
 		const plan = planSync(fills, entries, claimed);
-		const unnamed = [...new Set(plan.inserts.filter((i) => !i.input.name && i.input.broker !== "binance").map((i) => i.input.symbol))];
+		const unnamed = [...new Set(plan.inserts.filter((i) => !i.input.name && !isCoinBroker(i.input.broker)).map((i) => i.input.symbol))];
 		if (unnamed.length > 0 && this.d.names) {
 			const names = await this.d.names(user, unnamed).catch(() => new Map<string, string>());
 			for (const i of plan.inserts) if (!i.input.name) i.input.name = names.get(i.input.symbol) ?? null;
@@ -410,7 +425,7 @@ export class JournalRecorder {
 	}
 
 	private async nameOf(user: string, symbol: string, broker: string): Promise<string | null> {
-		if (!this.d.names || broker === "binance") return null;
+		if (!this.d.names || isCoinBroker(broker as JournalEntry["broker"])) return null;
 		const m = await this.d.names(user, [symbol]).catch(() => new Map<string, string>());
 		return m.get(symbol.toUpperCase()) ?? null;
 	}

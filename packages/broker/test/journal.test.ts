@@ -141,6 +141,21 @@ describe("ref — 주문 접수 · 자동 매매 · 가져오기가 같은 주�
 		assert.equal(s.input.price, 231.1);
 	});
 
+
+	it("Binance 선물 — 진입·청산만 한 줄 (현물과 ref 가 겹치지 않게), 롱·숏 방향을 맥락에. 익절손절 등록·취소·설정은 매매가 아니다", () => {
+		const base = { broker: "binance" as const, symbol: "BTCUSDT", base: "BTC", marginAsset: "USDT" };
+		const open = orderJournal(
+			{ kind: "binance-futures-open", ...base, side: "SELL", positionSide: "BOTH", type: "LIMIT", quantity: "0.002", price: "84000", leverage: 5, marginType: "ISOLATED", current: { leverage: 5, marginType: "ISOLATED" }, estimatedNotional: "168" },
+			"11",
+			NOW,
+		)!;
+		assert.equal(open.ref, "binance_futures:BTCUSDT:11");
+		assert.deepEqual([open.input.broker, open.input.side, open.input.quantity, open.input.price, open.input.currency, open.input.status], ["binance_futures", "SELL", 0.002, 84000, "USDT", "pending"]);
+		assert.deepEqual(open.input.context, { orderType: "LIMIT", ordered: 0.002, limitPrice: 84000, direction: "SHORT_OPEN" });
+		const close = orderJournal({ kind: "binance-futures-close", ...base, side: "SELL", positionSide: "LONG", type: "MARKET", quantity: "0.002", positionAmt: "0.002" }, "12", NOW)!;
+		assert.deepEqual(close.input.context, { orderType: "MARKET", ordered: 0.002, direction: "LONG_CLOSE", positionSide: "LONG" });
+		assert.equal(orderJournal({ kind: "binance-futures-tpsl", ...base, side: "SELL", positionSide: "BOTH", stopLossPrice: "80000" }, "9", NOW), null);
+	});
 	it("매매 한 건이 아닌 동작·주문번호 없는 응답은 남기지 않는다", () => {
 		assert.equal(orderJournal(place({}), undefined, NOW), null);
 		assert.equal(orderJournal({ kind: "conditional-cancel", broker: "toss", conditionalOrderId: "C-1" } as unknown as OrderAction, "C-1", NOW), null);
@@ -244,7 +259,7 @@ describe("체결 출처", () => {
 			throw new Error("키 없음");
 		};
 		const labels = (access: Parameters<typeof fillSources>[0]) => fillSources(access, { binanceSymbols: async () => [] }).map((s) => s.label);
-		assert.deepEqual(labels({ kis: kis("12345678"), toss: none, binance: () => ({ key: "k", secret: "s" }) }), ["한국투자 국장", "한국투자 미장", "Binance 현물", "Binance 미국 주식"]);
+		assert.deepEqual(labels({ kis: kis("12345678"), toss: none, binance: () => ({ key: "k", secret: "s" }) }), ["한국투자 국장", "한국투자 미장", "Binance 현물", "Binance 미국 주식", "Binance 선물"]);
 		assert.deepEqual(labels({ kis: kis(undefined) }), []);
 		assert.deepEqual(labels({ kis: kis("12345678", "paper") }), []);
 		assert.deepEqual(labels({ binance: () => ({ key: "k", secret: "s", testnet: true }) }), []);
@@ -331,6 +346,22 @@ describe("가져오기 계획", () => {
 		assert.deepEqual(planSync([fill({ ref: "kis:20261008:1" })], [auto]), { updates: [], inserts: [] });
 	});
 
+	it("체결 context(선물) — 새 줄에 싣고, 앱이 낸 주문은 기존 맥락에 합친다 (같으면 쓰지 않는다)", () => {
+		const fut = fill({ ref: "binance_futures:BTCUSDT:12", broker: "binance_futures", symbol: "BTCUSDT", filled: 0.002, price: 84_250, currency: "USDT", fee: 0.08, context: { direction: "LONG_CLOSE", realizedPnl: 2.5 } });
+		assert.deepEqual(planSync([fut], []).inserts[0]!.input.context, { direction: "LONG_CLOSE", realizedPnl: 2.5 });
+		const mine = known({ refs: ["binance_futures:BTCUSDT:12"], quantity: 0.002, price: null, context: { orderType: "MARKET", ordered: 0.002, direction: "LONG_CLOSE" } });
+		const p = planSync([fut], [mine]);
+		assert.deepEqual(p.updates[0]!.patch, {
+			status: "filled", quantity: 0.002, price: 84_250, fee: 0.08,
+			context: { orderType: "MARKET", ordered: 0.002, direction: "LONG_CLOSE", realizedPnl: 2.5 },
+		});
+		const done = known({ refs: ["binance_futures:BTCUSDT:12"], status: "filled", quantity: 0.002, price: 84_250, fee: 0.08, context: p.updates[0]!.patch.context });
+		assert.deepEqual(planSync([fut], [done]), { updates: [], inserts: [] }, "두 번 가져와도 그대로");
+		// 실현손익은 묶음 안에서 더한다
+		const two = planSync([fut, { ...fut, ref: "binance_futures:BTCUSDT:13", parentRef: fut.ref, context: { direction: "LONG_CLOSE", realizedPnl: 1 } }], []);
+		assert.equal(two.inserts[0]!.input.context?.realizedPnl, 3.5);
+	});
+
 	it("코인 소수 수량 — 덧셈 오차를 지운다", () => {
 		const p = planSync(
 			[fill({ ref: "binance:ETHUSDT:1", broker: "binance", filled: 0.1, price: 2700 }), fill({ ref: "binance:ETHUSDT:2", parentRef: "binance:ETHUSDT:1", broker: "binance", filled: 0.2, price: 2700 })],
@@ -384,6 +415,10 @@ describe("요약 · 도구", () => {
 		const line = entryLine(entry({ thesis: "20일선 지지", stopPrice: 68000, tags: ["눌림"], status: "pending" }));
 		assert.equal(line, "- [j1] 2026-10-08 삼성전자(005930) 매수 10주 @ 71,000원 (체결 확인 전) · 토스 · 챗 주문 | 근거: 20일선 지지 · 손절 68,000원 · #눌림");
 		assert.match(entryLine(entry({ broker: "binance", symbol: "ETHUSDT", name: null, quantity: 0.5, price: 2700, currency: "USDT" })), /ETHUSDT 매수 0\.5 @ 2,700 USDT/);
+		assert.match(
+			entryLine(entry({ broker: "binance_futures", symbol: "BTCUSDT", name: null, side: "SELL", quantity: 0.002, price: 84_250, currency: "USDT", source: "import", context: { direction: "LONG_CLOSE", realizedPnl: -1.25 } })),
+			/BTCUSDT 매도\(롱 청산 · 실현 -1\.25 USDT\) 0\.002 @ 84,250 USDT · Binance 선물 · 계좌 체결/,
+		);
 	});
 
 	it("기간 — KST 날짜 경계", () => {

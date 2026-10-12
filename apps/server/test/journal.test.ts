@@ -243,6 +243,41 @@ describe("앱이 낸 주문", () => {
 		assert.equal(await recorder.recordOrder("ms", cancel, { message: "", orderId: "T-1" }, { note: null, conversationId: null }), null);
 		assert.deepEqual(await items("ms"), []);
 	});
+
+	it("Binance 선물 — 진입은 pending → 가져오기가 체결·실현손익을 맥락에 합친다. 앱 밖 청산은 새 줄 (종목명을 찾지 않는다)", async () => {
+		const futFills: BrokerFill[] = [];
+		const asked: string[][] = [];
+		const futSync = new JournalSync({
+			store,
+			sources: () => [{ broker: "binance_futures", label: "Binance 선물", run: async () => ({ fills: futFills, warnings: [] }) }],
+			names: async (_u, symbols) => (asked.push(symbols), new Map()),
+			now: () => clock,
+		});
+		const open: OrderAction = {
+			kind: "binance-futures-open", broker: "binance", symbol: "BTCUSDT", base: "BTC", marginAsset: "USDT", side: "BUY", positionSide: "BOTH", type: "MARKET",
+			quantity: "0.002", leverage: 5, marginType: "ISOLATED", current: { leverage: 5, marginType: "ISOLATED" }, estimatedNotional: "166",
+		};
+		const e = (await recorder.recordOrder("ms", open, { message: "진입 주문이 접수되었습니다", orderId: "11" }, { note: "돌파 롱", conversationId: null }))!;
+		assert.deepEqual([e.broker, e.status, e.name, e.thesis], ["binance_futures", "pending", null, "돌파 롱"]);
+
+		const base = { parentRef: null, broker: "binance_futures" as const, symbol: "BTCUSDT", name: null, currency: "USDT", open: false };
+		futFills.push(
+			{ ...base, ref: "binance_futures:BTCUSDT:11", side: "BUY", ordered: 0.002, filled: 0.002, price: 83_000, fee: 0.083, at: T0 - 7_200_000, context: { direction: "LONG_OPEN", realizedPnl: 0 } },
+			{ ...base, ref: "binance_futures:BTCUSDT:12", side: "SELL", ordered: 0.002, filled: 0.002, price: 84_250, fee: 0.084, at: T0 - 3_600_000, context: { direction: "LONG_CLOSE", realizedPnl: 2.5 } },
+		);
+		const r = await futSync.run("ms", { force: true });
+		assert.deepEqual([r.added, r.updated], [1, 1]);
+		assert.deepEqual(asked, [], "코인은 종목명을 찾지 않는다");
+		const list = await items("ms");
+		const entry = list.find((x) => x.id === e.id)!;
+		assert.deepEqual([entry.status, entry.quantity, entry.price, entry.fee, entry.thesis], ["filled", 0.002, 83_000, 0.083, "돌파 롱"]);
+		assert.deepEqual(entry.context, { orderType: "MARKET", ordered: 0.002, direction: "LONG_OPEN", realizedPnl: 0 }, "주문 맥락을 지우지 않고 합친다");
+		const close = list.find((x) => x.id !== e.id)!;
+		assert.deepEqual([close.broker, close.source, close.side, close.context?.direction, close.context?.realizedPnl], ["binance_futures", "import", "SELL", "LONG_CLOSE", 2.5]);
+
+		const again = await futSync.run("ms", { force: true });
+		assert.deepEqual([again.added, again.updated], [0, 0], "두 번 가져와도 그대로");
+	});
 });
 
 describe("자동 매매", () => {

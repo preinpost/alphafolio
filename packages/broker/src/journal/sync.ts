@@ -7,8 +7,9 @@
  *      auto·manual  → 건드리지 않는다 (자동 매매는 체결기 보고가, 직접 기록은 사람이 맞다)
  * 3. 없으면 새 줄 (import) — 체결이 있고 더 체결될 여지가 없을 때만. 미체결·체결 0 은 넣지 않는다
  *    claimed(이미 쓴 ref 전부)에 있으면 넣지 않는다 — 사용자가 지운 기록이 다시 살아나지 않게 (지워도 ref 는 남긴다)
+ * 체결의 context(선물 진입·청산·실현손익)는 일지 context 에 덧붙인다 — 앱이 남긴 주문 맥락(지정가 등)은 그대로 둔다.
  */
-import type { BrokerFill, JournalInput, JournalSource, JournalStatus } from "./types.ts";
+import type { BrokerFill, JournalContext, JournalInput, JournalSource, JournalStatus } from "./types.ts";
 
 export interface KnownEntry {
 	id: string;
@@ -19,12 +20,15 @@ export interface KnownEntry {
 	fee: number | null;
 	name: string | null;
 	refs: string[];
+	/** 체결 context 를 합칠 때만 본다 */
+	context?: JournalContext | null;
 }
 
 export interface SyncUpdate {
 	id: string;
 	addRefs: string[];
-	patch: { status: JournalStatus; quantity: number; price: number | null; fee: number | null; name?: string };
+	/** context 가 있으면 합친 전체 (그대로 덮어쓴다) */
+	patch: { status: JournalStatus; quantity: number; price: number | null; fee: number | null; name?: string; context?: JournalContext };
 }
 
 export interface SyncInsert {
@@ -46,6 +50,7 @@ interface Aggregate {
 	first: BrokerFill;
 	at: number;
 	name: string | null;
+	context: JournalContext | null;
 }
 
 /** 소수 수량(코인)의 덧셈 오차를 지운다 */
@@ -100,8 +105,21 @@ function aggregate(group: readonly BrokerFill[]): Aggregate {
 		first: group.find((f) => !f.parentRef) ?? group[0]!,
 		at: withFills.length ? Math.min(...withFills.map((f) => f.at)) : Math.min(...group.map((f) => f.at)),
 		name: group.find((f) => f.name)?.name ?? null,
+		context: mergeContext(group),
 	};
 }
+
+/** 체결들의 context — 실현손익은 더하고 나머지는 앞의 것 */
+function mergeContext(group: readonly BrokerFill[]): JournalContext | null {
+	const withCtx = group.filter((f) => f.context);
+	if (withCtx.length === 0) return null;
+	const out: JournalContext = Object.assign({}, ...withCtx.map((f) => f.context).reverse());
+	const pnl = withCtx.filter((f) => f.context!.realizedPnl !== undefined);
+	if (pnl.length) out.realizedPnl = clean(pnl.reduce((s, f) => s + f.context!.realizedPnl!, 0));
+	return out;
+}
+
+const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const statusOf = (a: Aggregate): JournalStatus => (a.open ? "pending" : a.filled > 0 ? "filled" : "canceled");
 
@@ -141,7 +159,9 @@ export function planSync(fills: readonly BrokerFill[], known: readonly KnownEntr
 			fee: a.fee ?? entry.fee,
 			...(!entry.name && a.name ? { name: a.name } : {}),
 		};
-		const same = patch.status === entry.status && patch.quantity === entry.quantity && patch.price === entry.price && patch.fee === entry.fee && !patch.name;
+		const context = a.context ? { ...(entry.context ?? {}), ...a.context } : null;
+		if (context && !sameJson(context, entry.context)) patch.context = context;
+		const same = patch.status === entry.status && patch.quantity === entry.quantity && patch.price === entry.price && patch.fee === entry.fee && !patch.name && !patch.context;
 		if (!same || addRefs.length) plan.updates.push({ id: entry.id, addRefs, patch });
 	}
 
@@ -169,7 +189,7 @@ export function planSync(fills: readonly BrokerFill[], known: readonly KnownEntr
 				tags: [],
 				emotion: null,
 				review: null,
-				context: null,
+				context: a.context,
 				conversationId: null,
 			},
 		});

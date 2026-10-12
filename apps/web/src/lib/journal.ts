@@ -12,6 +12,7 @@ export const BROKER_LABEL: Record<JournalEntryDto["broker"], string> = {
 	toss: "토스",
 	binance: "Binance",
 	binance_stock: "Binance 주식",
+	binance_futures: "Binance 선물",
 	other: "기타",
 };
 
@@ -59,8 +60,26 @@ export function money(v: number, currency: string): string {
 
 export const qty = (n: number): string => Number(n.toPrecision(10)).toLocaleString("en-US", { maximumFractionDigits: 8 });
 
-/** 수량 단위 — 코인은 단위 없이, 나머지는 주 */
-export const unitOf = (e: Pick<JournalEntryDto, "broker">): string => (e.broker === "binance" ? "" : "주");
+/** 수량 단위 — 코인(현물·선물)은 단위 없이, 나머지는 주 */
+export const unitOf = (e: Pick<JournalEntryDto, "broker">): string => (e.broker === "binance" || e.broker === "binance_futures" ? "" : "주");
+
+export const DIRECTION_LABEL: Record<NonNullable<NonNullable<JournalEntryDto["context"]>["direction"]>, string> = {
+	LONG_OPEN: "롱 진입",
+	LONG_CLOSE: "롱 청산",
+	SHORT_OPEN: "숏 진입",
+	SHORT_CLOSE: "숏 청산",
+};
+
+/** 매수·매도 표시 — 선물은 롱·숏 진입·청산 */
+export const sideLabel = (e: Pick<JournalEntryDto, "side" | "context">): string =>
+	e.context?.direction ? DIRECTION_LABEL[e.context.direction] : e.side === "BUY" ? "매수" : "매도";
+
+/** 선물 실현손익 "+1.57 USDT" — 없거나 0 이면 null */
+export function pnlText(e: Pick<JournalEntryDto, "context" | "currency">): string | null {
+	const v = e.context?.realizedPnl;
+	if (v === undefined || v === 0) return null;
+	return `${v > 0 ? "+" : "−"}${money(Math.abs(v), e.currency)}`;
+}
 
 /** "10주 @ 71,000원" · 금액 주문 pending 은 "금액 주문" */
 export function tradeText(e: Pick<JournalEntryDto, "broker" | "quantity" | "price" | "currency" | "context">): string {

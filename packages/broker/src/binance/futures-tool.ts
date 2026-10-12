@@ -2,6 +2,7 @@
  * binance_futures — Binance **USDⓈ-M 선물** 계좌 조회 + 주문 **준비**. 실행은 확인 카드에서 사람이.
  *
  *   account   잔고·증거금·열린 포지션·미체결(익절·손절 포함)·계정 모드 (조회만)
+ *   history   기간 손익(실현·수수료·펀딩비)·체결 내역 (조회만) — futures-history.ts
  *   open      진입 (롱 BUY · 숏 SELL) + 레버리지·증거금 방식 + 익절·손절 — futures-prepare.ts
  *   close     청산 (reduceOnly) · tpsl 열린 포지션에 익절·손절 · cancel · cancel_all · settings
  *
@@ -11,7 +12,8 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { OrderAction } from "../actions.ts";
 import type { BrokerAccess } from "../portfolio.ts";
-import { accountText, type BinanceFuturesAccountDetails, type BinanceFuturesCard } from "./futures-card.ts";
+import { accountText, historyDetails, historyText, type BinanceFuturesAccountDetails, type BinanceFuturesCard, type BinanceFuturesHistoryDetails } from "./futures-card.ts";
+import { DAY, futuresHistory, MAX_HISTORY_DAYS } from "./futures-history.ts";
 import { prepareCancel, prepareClose, prepareOpen, prepareSettings, prepareTpsl, type FuturesParams, type PrepareDeps } from "./futures-prepare.ts";
 import { futuresAccount, futuresHedgeMode, futuresMultiAssets, futuresOpenOrders, futuresPositions } from "./futures.ts";
 import type { BinanceCreds } from "./trade.ts";
@@ -47,13 +49,26 @@ async function account(c: BinanceCreds, symbol: string | undefined): Promise<Bin
 	return { kind: "binance-futures-account", account: acc, positions, orders, hedge, multiAssets, warnings };
 }
 
-export function createBinanceFuturesTool(deps: { brokers: BrokerAccess; prepareOrder?: (a: OrderAction) => { token: string; expiresAt: number } }) {
+/** 내역 기본 기간 (일) */
+const HISTORY_DEFAULT_DAYS = 7;
+
+async function history(c: BinanceCreds, symbol: string | undefined, days: number, now: number): Promise<BinanceFuturesHistoryDetails> {
+	try {
+		return historyDetails(await futuresHistory(c, now - days * DAY, now, symbol), days, symbol ?? null);
+	} catch (err) {
+		const hint = /permissions|-2015/i.test(why(err)) ? " — 키에 선물 권한(Enable Futures)이 없거나 허용 IP 밖일 수 있습니다" : "";
+		throw new Error(`선물 내역 조회 실패: ${why(err)}${hint}`);
+	}
+}
+
+export function createBinanceFuturesTool(deps: { brokers: BrokerAccess; prepareOrder?: (a: OrderAction) => { token: string; expiresAt: number }; now?: () => number }) {
 	return defineTool({
 		name: "binance_futures",
 		label: "Binance 선물",
 		description:
 			"Binance **USDⓈ-M 선물**(무기한 BTCUSDT 등 · 주식·원자재 기반 TradFi 무기한 KORUUSDT·TSLAUSDT·XAUUSDT 등) 조회와 주문 **준비** (주문은 실행하지 않는다 — 확인 카드에서 사용자가 [확인] 해야 나간다). " +
 			"action: account(잔고·증거금·포지션·미체결·모드 — 조회만, symbol 선택) / " +
+			"history(지난 거래 — 기간 손익(실현손익·수수료·펀딩비·순손익)과 체결 내역(롱·숏 진입·청산, 주문 단위) · 조회만 · days 기본 7 최대 90 · symbol 선택, 비우면 매매한 전 종목) / " +
 			"open(진입: side BUY=롱·SELL=숏, type, 크기는 quantity(코인 수량)·notional(포지션 크기 USDT)·margin(넣을 증거금 USDT) 중 하나, LIMIT 은 price, " +
 			"leverage·marginType(ISOLATED 격리·CROSSED 교차, 비우면 지금 설정), takeProfitPrice·stopLossPrice 를 함께 걸 수 있다) / " +
 			"close(청산: type 기본 MARKET, quantity 비우면 전량) / tpsl(열린 포지션에 익절·손절 — 포지션 전체를 시장가로 닫는 조건) / " +
@@ -62,10 +77,11 @@ export function createBinanceFuturesTool(deps: { brokers: BrokerAccess; prepareO
 			"레버리지·크기를 사용자가 정하지 않았으면 추측하지 말고 묻는다. 사용자가 명시적으로 요청했을 때만 open·close 등을 준비한다.",
 		parameters: Type.Object({
 			action: Type.Union([
-				Type.Literal("account"), Type.Literal("open"), Type.Literal("close"), Type.Literal("tpsl"),
+				Type.Literal("account"), Type.Literal("history"), Type.Literal("open"), Type.Literal("close"), Type.Literal("tpsl"),
 				Type.Literal("cancel"), Type.Literal("cancel_all"), Type.Literal("settings"),
 			]),
-			symbol: Type.Optional(Type.String({ description: "선물 심볼 — 예: BTCUSDT (account 외에는 필수)" })),
+			symbol: Type.Optional(Type.String({ description: "선물 심볼 — 예: BTCUSDT (account·history 외에는 필수)" })),
+			days: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_HISTORY_DAYS, description: `history — 최근 며칠 (기본 ${HISTORY_DEFAULT_DAYS}, 최대 ${MAX_HISTORY_DAYS} — Binance 가 3개월까지만 준다)` })),
 			side: Type.Optional(Type.Union([Type.Literal("BUY"), Type.Literal("SELL")], { description: "open — BUY=롱, SELL=숏" })),
 			type: Type.Optional(Type.Union([Type.Literal("LIMIT"), Type.Literal("MARKET")])),
 			quantity: Type.Optional(Type.String({ description: "코인 수량 (문자열, 예 '0.002')" })),
@@ -80,7 +96,7 @@ export function createBinanceFuturesTool(deps: { brokers: BrokerAccess; prepareO
 			orderId: Type.Optional(Type.Number({ description: "cancel — 일반 주문 번호" })),
 			algoId: Type.Optional(Type.Number({ description: "cancel — 조건부(익절·손절) 주문 번호" })),
 		}),
-		execute: async (_id, params): Promise<{ content: Array<{ type: "text"; text: string }>; details: BinanceFuturesAccountDetails | BinanceFuturesCard }> => {
+		execute: async (_id, params): Promise<{ content: Array<{ type: "text"; text: string }>; details: BinanceFuturesAccountDetails | BinanceFuturesHistoryDetails | BinanceFuturesCard }> => {
 			const creds = connected(deps.brokers.binance) as BinanceCreds | null;
 			if (!creds) throw new Error("Binance 선물에는 키가 필요합니다 — 설정 → 코인 (Binance) (선물 권한 켜고, 출금 권한 없이).");
 			const symbol = params.symbol ? normSymbol(params.symbol) : undefined;
@@ -88,6 +104,11 @@ export function createBinanceFuturesTool(deps: { brokers: BrokerAccess; prepareO
 			if (params.action === "account") {
 				const details = await account(creds, symbol);
 				return { content: [{ type: "text" as const, text: accountText(details) }], details };
+			}
+			if (params.action === "history") {
+				const days = Math.min(Math.max(Math.floor(params.days ?? HISTORY_DEFAULT_DAYS), 1), MAX_HISTORY_DAYS);
+				const details = await history(creds, symbol, days, deps.now?.() ?? Date.now());
+				return { content: [{ type: "text" as const, text: historyText(details) }], details };
 			}
 
 			if (!deps.prepareOrder) throw new Error("주문 기능이 비활성 상태입니다.");

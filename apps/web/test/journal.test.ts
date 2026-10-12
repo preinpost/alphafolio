@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { JournalEntryDto } from "@alphafolio/protocol";
-import { filterEntries, kstToday, money, parseNumber, parseTags, periodFrom, summarize, tradeText } from "../src/lib/journal.ts";
+import { filterEntries, kstToday, money, parseNumber, parseTags, periodFrom, pnlText, sideLabel, summarize, tradeText } from "../src/lib/journal.ts";
 
 const e = (over: Partial<JournalEntryDto>): JournalEntryDto => ({
 	id: "j1",
@@ -53,6 +53,12 @@ describe("매매일지 화면", () => {
 		assert.equal(tradeText(e({})), "10주 @ 71,000원");
 		assert.equal(tradeText(e({ broker: "binance", quantity: 0.25, price: 2700, currency: "USDT" })), "0.25 @ 2,700 USDT");
 		assert.equal(tradeText(e({ broker: "binance", quantity: 0, price: null, currency: "USDT", context: { orderAmount: 100 } })), "100 USDT어치");
+		const fut = e({ broker: "binance_futures", side: "SELL", quantity: 0.002, price: 84_250, currency: "USDT", context: { direction: "LONG_CLOSE", realizedPnl: -1.25 } });
+		assert.equal(tradeText(fut), "0.002 @ 84,250 USDT", "선물도 코인 수량 — 주를 붙이지 않는다");
+		assert.equal(sideLabel(fut), "롱 청산");
+		assert.equal(sideLabel(e({ side: "SELL" })), "매도");
+		assert.equal(pnlText(fut), "−1.25 USDT");
+		assert.equal(pnlText(e({ context: { direction: "LONG_OPEN", realizedPnl: 0 } })), null);
 	});
 
 	it("걸러 보기 — 근거 없음(취소 제외) · 매수 · 확인 전 · 태그 · 검색어(종목명·근거)", () => {

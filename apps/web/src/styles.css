@@ -3031,6 +3031,8 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .jr-row .side-tag {
     margin-top: 1px;
+    flex-shrink: 0;
+    white-space: nowrap; /* 선물 "롱 진입" */
   }
   /* 좁은 화면 — 말줄임 대신 "수량 @ 가격 ·" / "증권사 출처" 단위로 줄바꿈 */
   .jr-row .meta {

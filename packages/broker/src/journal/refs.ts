@@ -6,6 +6,7 @@
  *                   날짜는 체결 내역의 ord_dt 와 같게: 국장 KST · 미장 뉴욕 현지 (자동 매매 체결기 kis.ts 와 같은 규칙)
  *   Binance 현물    binance:<SYMBOL>:<orderId>          — orderId 는 마켓마다 따로 센다
  *   Binance 주식    binance_stock:<orderId>
+ *   Binance 선물    binance_futures:<SYMBOL>:<orderId>  — 현물과 주문번호가 따로다
  *
  * 주문 접수(확인 카드)·자동 매매·체결 가져오기가 같은 함수로 ref 를 만들어야 같은 주문이 두 줄이 되지 않는다.
  */
@@ -23,13 +24,14 @@ export const tossRef = (orderId: string): string => `toss:${orderId.trim()}`;
 export const kisRef = (day: string, orderNo: string): string => `kis:${day.replaceAll("-", "")}:${odno(orderNo)}`;
 export const binanceRef = (symbol: string, orderId: string | number): string => `binance:${symbol.toUpperCase()}:${String(orderId).trim()}`;
 export const binanceStockRef = (orderId: string): string => `binance_stock:${orderId.trim()}`;
+export const binanceFuturesRef = (symbol: string, orderId: string | number): string => `binance_futures:${symbol.toUpperCase()}:${String(orderId).trim()}`;
 
 /** 한국투자 주문일 — 국장은 KST, 미장은 뉴욕 날짜 */
 export function kisOrderDay(market: "KR" | "US", at: number): string {
 	return localDate(at, market === "KR" ? "Asia/Seoul" : "America/New_York").ymd.replaceAll("-", "");
 }
 
-/** 일지에 남길 주문 — 신규 주문만. 정정·취소·조건주문·OCO·선물·지갑 이동은 매매 한 건이 아니다 */
+/** 일지에 남길 주문 — 신규 주문·선물 진입·청산만. 정정·취소·조건주문·OCO·익절손절 등록·지갑 이동은 매매 한 건이 아니다 */
 export interface OrderJournal {
 	ref: string;
 	input: Omit<JournalInput, "thesis" | "targetPrice" | "stopPrice" | "tags" | "emotion" | "review" | "conversationId" | "name">;
@@ -67,6 +69,22 @@ export function orderJournal(action: OrderAction, orderId: string | undefined, n
 		return {
 			ref: binanceStockRef(orderId),
 			input: { ...base, broker: "binance_stock", symbol: action.symbol, side: action.side, quantity: qty > 0 ? qty : 0, price: limit ?? null, currency: "USD", context: ctx },
+		};
+	}
+	if (action.kind === "binance-futures-open" || action.kind === "binance-futures-close") {
+		const qty = Number(action.quantity);
+		const limit = action.price !== undefined ? Number(action.price) : undefined;
+		const long = action.kind === "binance-futures-open" ? action.side === "BUY" : action.side === "SELL";
+		const ctx: JournalContext = {
+			orderType: action.type,
+			ordered: qty,
+			...(limit ? { limitPrice: limit } : {}),
+			direction: `${long ? "LONG" : "SHORT"}_${action.kind === "binance-futures-open" ? "OPEN" : "CLOSE"}`,
+			...(action.positionSide !== "BOTH" ? { positionSide: action.positionSide } : {}),
+		};
+		return {
+			ref: binanceFuturesRef(action.symbol, orderId),
+			input: { ...base, broker: "binance_futures", symbol: action.symbol, side: action.side, quantity: qty, price: limit ?? null, currency: action.marginAsset, context: ctx },
 		};
 	}
 	return null;

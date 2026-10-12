@@ -8,7 +8,7 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { journalStats } from "./stats.ts";
-import { JOURNAL_EMOTIONS, type JournalEntry, type JournalFilter, type JournalNotes, type JournalSyncResult, type JournalTrade } from "./types.ts";
+import { isCoinBroker, JOURNAL_EMOTIONS, type JournalEntry, type JournalFilter, type JournalNotes, type JournalSyncResult, type JournalTrade } from "./types.ts";
 import { kstDate, parseJournalNotes, parseJournalTrade } from "./validate.ts";
 
 export interface JournalToolDeps {
@@ -32,15 +32,20 @@ export function journalMoney(v: number, currency: string): string {
 }
 
 const qtyText = (q: number): string => Number(q.toPrecision(10)).toLocaleString("en-US", { maximumFractionDigits: 8 });
-const BROKER = { kis: "한국투자", toss: "토스", binance: "Binance", binance_stock: "Binance 주식", other: "기타" } as const;
+const BROKER = { kis: "한국투자", toss: "토스", binance: "Binance", binance_stock: "Binance 주식", binance_futures: "Binance 선물", other: "기타" } as const;
+const DIRECTION = { LONG_OPEN: "롱 진입", LONG_CLOSE: "롱 청산", SHORT_OPEN: "숏 진입", SHORT_CLOSE: "숏 청산" } as const;
 const SOURCE = { manual: "직접 기록", order: "챗 주문", auto: "자동 매매", import: "계좌 체결" } as const;
 const STATUS = { pending: " (체결 확인 전)", filled: "", canceled: " (체결 없이 끝남)" } as const;
 
 /** 목록 한 줄 — 모델이 id 로 고칠 수 있게 id 를 앞에 */
 export function entryLine(e: JournalEntry): string {
 	const what = e.name ? `${e.name}(${e.symbol})` : e.symbol;
-	const qty = e.quantity > 0 ? `${qtyText(e.quantity)}${e.broker === "binance" ? "" : "주"}` : "금액 주문";
+	const qty = e.quantity > 0 ? `${qtyText(e.quantity)}${isCoinBroker(e.broker) ? "" : "주"}` : "금액 주문";
 	const price = e.price !== null ? ` @ ${journalMoney(e.price, e.currency)}` : "";
+	const fut = [
+		e.context?.direction ? DIRECTION[e.context.direction] : "",
+		e.context?.realizedPnl !== undefined && e.context.realizedPnl !== 0 ? `실현 ${e.context.realizedPnl > 0 ? "+" : ""}${journalMoney(e.context.realizedPnl, e.currency)}` : "",
+	].filter(Boolean);
 	const notes = [
 		e.thesis ? `근거: ${e.thesis}` : "근거 없음",
 		e.targetPrice !== null ? `목표 ${journalMoney(e.targetPrice, e.currency)}` : "",
@@ -50,7 +55,7 @@ export function entryLine(e: JournalEntry): string {
 		e.review ? `회고: ${e.review}` : "",
 		e.context?.trigger ? `감시 "${e.context.trigger}"` : "",
 	].filter(Boolean);
-	return `- [${e.id}] ${e.date} ${what} ${e.side === "BUY" ? "매수" : "매도"} ${qty}${price}${STATUS[e.status]} · ${BROKER[e.broker]} · ${SOURCE[e.source]} | ${notes.join(" · ")}`;
+	return `- [${e.id}] ${e.date} ${what} ${e.side === "BUY" ? "매수" : "매도"}${fut.length ? `(${fut.join(" · ")})` : ""} ${qty}${price}${STATUS[e.status]} · ${BROKER[e.broker]} · ${SOURCE[e.source]} | ${notes.join(" · ")}`;
 }
 
 const PERIODS = ["today", "last_7d", "last_30d", "last_90d", "this_month", "this_year", "all"] as const;
@@ -93,7 +98,7 @@ export function createJournalTools(deps: JournalToolDeps) {
 		label: "매매일지 기록",
 		description:
 			"앱 밖에서 한 매매(다른 증권사·거래소·MTS)를 매매일지에 직접 기록한다. " +
-			"앱에서 낸 주문·자동 매매는 자동으로 일지에 남고, 연결된 계좌(토스·한국투자·Binance)의 체결은 journal_list refresh 로 가져온다 — 그런 매매를 이 툴로 또 기록하지 않는다. " +
+			"앱에서 낸 주문·자동 매매는 자동으로 일지에 남고, 연결된 계좌(토스·한국투자·Binance 현물·미국 주식·선물)의 체결은 journal_list refresh 로 가져온다 — 그런 매매를 이 툴로 또 기록하지 않는다. " +
 			"날짜는 daysAgo(오늘=0, 어제=1), 절대 날짜를 말했을 때만 date. 근거·목표가·손절가·태그·감정은 사용자가 말한 것만 넣는다.",
 		parameters: Type.Object({
 			symbol: Type.String({ description: "종목코드·티커 (005930, AAPL, BTCUSDT)" }),
@@ -103,8 +108,8 @@ export function createJournalTools(deps: JournalToolDeps) {
 			price: Type.Optional(Type.Number({ minimum: 0, description: "평균 체결가 (모르면 비운다)" })),
 			currency: Type.Optional(Type.String({ description: "KRW·USD·USDT — 비우면 종목으로 정한다" })),
 			broker: Type.Optional(
-				Type.Union([Type.Literal("kis"), Type.Literal("toss"), Type.Literal("binance"), Type.Literal("binance_stock"), Type.Literal("other")], {
-					description: "어디서 매매했나 (모르면 other)",
+				Type.Union([Type.Literal("kis"), Type.Literal("toss"), Type.Literal("binance"), Type.Literal("binance_stock"), Type.Literal("binance_futures"), Type.Literal("other")], {
+					description: "어디서 매매했나 (모르면 other) — binance 현물 · binance_futures 선물",
 				}),
 			),
 			fee: Type.Optional(Type.Number({ minimum: 0, description: "수수료+세금 (매매 통화)" })),
@@ -164,8 +169,9 @@ export function createJournalTools(deps: JournalToolDeps) {
 		description:
 			"매매일지를 기간별로 보고 요약한다 (매수·매도 수, 근거·회고를 쓴 비율, 손절가를 정한 매수, 자주 쓴 태그·감정). " +
 			"'이번 달 매매 돌아봐 줘', '근거 안 쓴 매매 있어?', '삼성전자 매매 기록' 같은 질문에 쓴다. " +
-			"refresh=true 면 연결된 계좌(토스·한국투자·Binance)의 체결 내역을 먼저 가져온다 — 최근 매매가 안 보이거나 '체결 확인 전' 이면 켠다. " +
-			"⚠️ 날짜를 계산하지 말고 period 를 쓴다 (기본 last_30d). 손익은 이 툴이 계산하지 않는다 — 평가손익은 portfolio_holdings.",
+			"refresh=true 면 연결된 계좌(토스·한국투자·Binance 현물·미국 주식·선물)의 체결 내역을 먼저 가져온다 — 최근 매매가 안 보이거나 '체결 확인 전' 이면 켠다. " +
+			"⚠️ 날짜를 계산하지 말고 period 를 쓴다 (기본 last_30d). 손익은 이 툴이 계산하지 않는다 — 평가손익은 portfolio_holdings. " +
+			"Binance 선물 줄에는 Binance 가 계산한 실현손익(수수료·펀딩비 제외)이 붙는다 — 기간 손익 합계·펀딩비는 binance_futures history.",
 		parameters: Type.Object({
 			period: Type.Optional(
 				Type.Union(

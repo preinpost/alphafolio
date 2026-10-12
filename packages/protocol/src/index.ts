@@ -85,7 +85,7 @@ export interface JournalEntryDto {
 	at: number;
 	/** KST YYYY-MM-DD */
 	date: string;
-	broker: "kis" | "toss" | "binance" | "binance_stock" | "other";
+	broker: "kis" | "toss" | "binance" | "binance_stock" | "binance_futures" | "other";
 	symbol: string;
 	name: string | null;
 	side: "BUY" | "SELL";
@@ -113,6 +113,11 @@ export interface JournalEntryDto {
 		leg?: "normal" | "stop" | "take";
 		arrivalPrice?: number | null;
 		slippageBps?: number | null;
+		/** 선물 — 롱·숏 진입·청산 */
+		direction?: "LONG_OPEN" | "LONG_CLOSE" | "SHORT_OPEN" | "SHORT_CLOSE";
+		positionSide?: "LONG" | "SHORT";
+		/** 선물 — Binance 가 계산한 실현손익 (증거금 자산, 수수료·펀딩비 제외) */
+		realizedPnl?: number;
 	} | null;
 	conversationId: string | null;
 	createdAt: string;

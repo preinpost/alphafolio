@@ -24,6 +24,8 @@ import {
 	parseTags,
 	periodFrom,
 	PERIODS,
+	pnlText,
+	sideLabel,
 	SOURCE_LABEL,
 	summarize,
 	tradeText,
@@ -295,9 +297,10 @@ function EntryList({ list, total, onOpen }: { list: JournalEntryDto[]; total: nu
 			);
 		}
 		const amount = amountOf(e);
+		const pnl = pnlText(e);
 		out.push(
 			<button key={e.id} className={`row row-btn tx jr-row ${e.status === "canceled" ? "jr-dim" : ""}`} role="listitem" onClick={() => onOpen(e)}>
-				<span className={`side-tag ${e.side === "BUY" ? "buy" : "sell"}`}>{e.side === "BUY" ? "매수" : "매도"}</span>
+				<span className={`side-tag ${e.side === "BUY" ? "buy" : "sell"}`}>{sideLabel(e)}</span>
 				<span className="grow">
 					<span className="name">
 						{e.name ?? e.symbol}
@@ -318,6 +321,7 @@ function EntryList({ list, total, onOpen }: { list: JournalEntryDto[]; total: nu
 				</span>
 				<span className="amt">
 					{amount !== null && <b>{money(amount, e.currency)}</b>}
+					{pnl && <small className={pnl.startsWith("+") ? "up" : "down"}>실현 {pnl}</small>}
 					{e.emotion && <small className="muted">{e.emotion}</small>}
 				</span>
 			</button>,
@@ -461,7 +465,7 @@ function EntryDialog({
 		>
 			<form onSubmit={submit} noValidate>
 				<div className="sheet-h">
-					<h2 id="jr-dlg-title">{editing ? `${editing.name ?? editing.symbol} ${editing.side === "BUY" ? "매수" : "매도"}` : "매매 직접 기록"}</h2>
+					<h2 id="jr-dlg-title">{editing ? `${editing.name ?? editing.symbol} ${sideLabel(editing)}` : "매매 직접 기록"}</h2>
 					<button type="button" className="icon-btn" onClick={onClose} aria-label="닫기">
 						<XIcon />
 					</button>
@@ -478,6 +482,7 @@ function EntryDialog({
 							<Fact k="계좌">
 								{BROKER_LABEL[editing.broker]} · {SOURCE_LABEL[editing.source]}
 							</Fact>
+							{pnlText(editing) && <Fact k="실현손익">{pnlText(editing)} (Binance 계산 · 수수료·펀딩비 제외)</Fact>}
 							{editing.fee !== null && <Fact k="수수료·세금">{money(editing.fee, editing.currency)}</Fact>}
 							{ctx?.orderType && (
 								<Fact k="주문">

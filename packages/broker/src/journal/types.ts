@@ -10,13 +10,17 @@
  * 증권사 주문과는 ref 로 잇는다 (refs.ts). 같은 ref 는 두 번 들어오지 않는다.
  */
 
-export type JournalBroker = "kis" | "toss" | "binance" | "binance_stock" | "other";
+/** binance = 현물 · binance_stock = 미국 주식 · binance_futures = USDⓈ-M 선물 */
+export type JournalBroker = "kis" | "toss" | "binance" | "binance_stock" | "binance_futures" | "other";
 export type JournalSource = "manual" | "order" | "auto" | "import";
 /** pending = 접수됐지만 체결을 아직 확인하지 못했다 · canceled = 하나도 체결되지 않고 끝났다 */
 export type JournalStatus = "pending" | "filled" | "canceled";
 export type JournalSide = "BUY" | "SELL";
 
-export const JOURNAL_BROKERS: readonly JournalBroker[] = ["kis", "toss", "binance", "binance_stock", "other"];
+export const JOURNAL_BROKERS: readonly JournalBroker[] = ["kis", "toss", "binance", "binance_stock", "binance_futures", "other"];
+
+/** 코인(현물·선물) — 수량에 "주" 를 붙이지 않고, 종목명을 찾지 않는다 */
+export const isCoinBroker = (b: JournalBroker): boolean => b === "binance" || b === "binance_futures";
 
 /**
  * 감정 — 자유 입력이면 통계가 흩어진다 ("불안"·"불안함"·"걱정"). 고른 것만 받는다.
@@ -41,6 +45,12 @@ export interface JournalContext {
 	/** 자동 매매 — 신호 때 중간가 · 불리한 쪽 슬리피지(bp) */
 	arrivalPrice?: number | null;
 	slippageBps?: number | null;
+	/** 선물 — 롱·숏 진입·청산 (단방향 모드는 실현손익으로 추정) */
+	direction?: "LONG_OPEN" | "LONG_CLOSE" | "SHORT_OPEN" | "SHORT_CLOSE";
+	/** 선물 — 양방향(Hedge) 모드의 포지션 */
+	positionSide?: "LONG" | "SHORT";
+	/** 선물 — Binance 가 계산한 이 주문의 실현손익 (증거금 자산, 수수료·펀딩비 제외) */
+	realizedPnl?: number;
 }
 
 export interface JournalEntry {
@@ -157,6 +167,8 @@ export interface BrokerFill {
 	fee: number | null;
 	at: number;
 	open: boolean;
+	/** 증권사가 알려 준 맥락 (선물의 진입·청산·실현손익) — 일지의 context 에 합친다 */
+	context?: JournalContext;
 }
 
 export interface JournalSyncResult {

@@ -7,6 +7,7 @@
  *   Binance 현물  GET /api/v3/allOrders — **마켓을 지정해야 한다.** 전 종목 조회가 없어 호출부가 마켓 목록을 준다
  *                 (일지에 있는 마켓 + 지금 현물 지갑의 코인). 다 팔고 일지에도 없는 코인은 못 찾는다.
  *   Binance 주식  GET /sapi/v1/equity/order/history (전 종목)
+ *   Binance 선물  GET /fapi/v1/income → 매매한 종목 → GET /fapi/v1/userTrades (binance/futures-history.ts) — 실현손익이 함께 온다
  *
  * 조회만 한다. 파서는 순수 함수로 따로 둔다 (테스트).
  */
@@ -14,6 +15,7 @@ import type { BrokerAccess } from "../portfolio.ts";
 import { signed } from "../binance/trade.ts";
 import type { BinanceCreds } from "../binance/trade.ts";
 import { EQUITY_OPEN, equityOrderHistory, type EquityOrder } from "../binance/stocks.ts";
+import { binanceFuturesFills } from "../binance/futures-history.ts";
 import { accountParams, type KisContext, type KisResponse } from "../kis/client.ts";
 import { callKisApi } from "../kis/gateway.ts";
 import { defaultAccountSeq } from "../toss/api.ts";
@@ -380,6 +382,7 @@ export function fillSources(access: BrokerAccess, opts: { binanceSymbols: () => 
 	if (binance && !binance.testnet) {
 		out.push({ broker: "binance", label: "Binance 현물", run: async (from) => binanceSpotFills(binance, await binanceMarkets(binance, await opts.binanceSymbols()), from) });
 		out.push({ broker: "binance_stock", label: "Binance 미국 주식", run: (from) => binanceStockFills(binance, from, now()) });
+		out.push({ broker: "binance_futures", label: "Binance 선물", run: (from, to) => binanceFuturesFills(binance, from, to) });
 	}
 	return out;
 }

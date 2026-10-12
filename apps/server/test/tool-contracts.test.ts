@@ -49,7 +49,7 @@ const examples: Record<string, Array<Record<string, unknown>>> = {
 	binance_stock_order: [{ action: "place", symbol: "AAPL", side: "BUY", type: "MARKET", notional: "5" }, { action: "cancel", symbol: "AAPL" }],
 	binance_stock_account: [{}], binance_wallet: [{ action: "balances" }, { action: "transfer", from: "EARN", to: "SPOT", asset: "USDT", all: true }, { action: "transfer", from: "SPOT", to: "FUTURES", asset: "USDT", amount: "50" }],
 	binance_futures: [
-		{ action: "account" },
+		{ action: "account" }, { action: "history" }, { action: "history", symbol: "BTCUSDT", days: 90 },
 		{ action: "open", symbol: "BTCUSDT", side: "BUY", type: "MARKET", margin: "20", leverage: 5, marginType: "ISOLATED", stopLossPrice: "80000" },
 		{ action: "close", symbol: "BTCUSDT" }, { action: "tpsl", symbol: "BTCUSDT", stopLossPrice: "80000" },
 		{ action: "cancel", symbol: "BTCUSDT", algoId: 1 }, { action: "settings", symbol: "BTCUSDT", leverage: 3 },
@@ -113,6 +113,7 @@ describe("사용자별 도구 등록 계약", () => {
 			["binance_futures", { action: "withdraw" }],
 			["binance_futures", { action: "open", symbol: "BTCUSDT", leverage: 2.5 }],
 			["binance_futures", { action: "open", symbol: "BTCUSDT", quantity: 0.001 }],
+			["binance_futures", { action: "history", days: 91 }], ["binance_futures", { action: "history", days: 0 }],
 			["binance_order", { action: "place", symbol: "BTCUSDT", quantity: 0.001 }],
 			["journal_add", { symbol: "005930", side: "buy", quantity: 1 }],
 			["journal_add", { symbol: "005930", side: "BUY", quantity: 1, emotion: "행복" }],
