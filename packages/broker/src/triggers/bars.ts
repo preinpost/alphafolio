@@ -1,7 +1,7 @@
 /**
  * 감시용 봉 조회 (PLAN §40) — 시장별로 나눠 부른다. **닫힌 봉만** 돌려준다 (봉 마감 판정의 전제).
  *
- *   binance  공개 klines (키 없음). 10분봉은 Binance 에 없어 5분봉 두 개를 묶는다
+ *   binance  공개 klines (키 없음). 10분봉은 Binance 에 없어 5분봉 두 개를 묶는다. market.contract = "futures" 면 USDⓈ-M 선물 봉
  *   krx · us 트리거 주인의 증권 키로 — 일봉 → 일봉·주봉 (stock-bars.ts), 분봉 → 장 기준 분·시간봉 (stock-intraday.ts)
  */
 import type { BrokerAccess } from "../portfolio.ts";
@@ -10,12 +10,23 @@ import { fetchStockBars } from "./stock-bars.ts";
 import type { Condition, Interval, WatchBar } from "./types.ts";
 
 const BINANCE = "https://api.binance.com";
+/** USDⓈ-M 선물 — 공개 klines 는 키가 없어도 된다 (지표 툴 · 선물 감시) */
+const BINANCE_FUTURES = "https://fapi.binance.com";
 const TIMEOUT_MS = 10_000;
 /** Binance 한 번에 1,000개 — 그 이상은 endTime 으로 과거로 이어 받는다 (rvol 5분봉 10일 = 2,880봉) */
 const BINANCE_PAGE = 1000;
 export const MAX_BARS = 5000;
 
-export class BarsError extends Error {}
+export class BarsError extends Error {
+	/** unknownSymbol — 거래소가 심볼을 모른다 (-1121). 현물에 없으면 선물로 다시 찾는 데 쓴다 */
+	readonly unknownSymbol: boolean;
+	constructor(message: string, unknownSymbol = false) {
+		super(message);
+		this.unknownSymbol = unknownSymbol;
+	}
+}
+
+export type BinanceVenue = "spot" | "futures";
 
 type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
 
@@ -40,16 +51,17 @@ export function aggregate(bars: WatchBar[], interval: Interval): WatchBar[] {
 
 /**
  * klines 한 페이지 (오래된 순, 진행 중인 봉 포함). interval 은 Binance 표기 그대로 — 감시 간격 밖의 1M(월봉)도 받는다.
- * 지표 툴(crypto-chart.ts)도 같은 경로로 부른다.
+ * 지표 툴(crypto-chart.ts)도 같은 경로로 부른다 — venue: "futures" 는 USDⓈ-M 선물 (응답 모양이 같다).
  */
 export async function fetchKlines(
 	symbol: string,
 	interval: string,
 	limit: number,
-	opts: { fetch?: FetchLike; endTime?: number } = {},
+	opts: { fetch?: FetchLike; endTime?: number; venue?: BinanceVenue } = {},
 ): Promise<WatchBar[]> {
 	const f = opts.fetch ?? (fetch as FetchLike);
-	const url = `${BINANCE}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}${opts.endTime !== undefined ? `&endTime=${opts.endTime}` : ""}`;
+	const futures = opts.venue === "futures";
+	const url = `${futures ? `${BINANCE_FUTURES}/fapi/v1` : `${BINANCE}/api/v3`}/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}${opts.endTime !== undefined ? `&endTime=${opts.endTime}` : ""}`;
 	let res: Response;
 	try {
 		res = await f(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -59,7 +71,8 @@ export async function fetchKlines(
 	const body = (await res.json().catch(() => null)) as unknown;
 	if (!res.ok || !Array.isArray(body)) {
 		const msg = (body as { msg?: string } | null)?.msg;
-		throw new BarsError(res.status === 400 && msg?.includes("symbol") ? `Binance 에 없는 종목입니다: ${symbol}` : `Binance 봉 조회 실패 (HTTP ${res.status})${msg ? `: ${msg}` : ""}`);
+		if (res.status === 400 && msg?.includes("symbol")) throw new BarsError(`${futures ? "Binance 선물에" : "Binance 에"} 없는 종목입니다: ${symbol}`, true);
+		throw new BarsError(`Binance${futures ? " 선물" : ""} 봉 조회 실패 (HTTP ${res.status})${msg ? `: ${msg}` : ""}`);
 	}
 	// [openTime, open, high, low, close, volume, closeTime, ...] — 가격은 문자열
 	return (body as unknown[][])
@@ -67,7 +80,12 @@ export async function fetchKlines(
 		.filter((b) => Number.isFinite(b.t) && Number.isFinite(b.close));
 }
 
-export async function fetchBinanceBars(symbol: string, interval: Interval, limit: number, opts: { fetch?: FetchLike; now?: number } = {}): Promise<WatchBar[]> {
+export async function fetchBinanceBars(
+	symbol: string,
+	interval: Interval,
+	limit: number,
+	opts: { fetch?: FetchLike; now?: number; venue?: BinanceVenue } = {},
+): Promise<WatchBar[]> {
 	const src = BINANCE_SOURCE[interval];
 	const apiInterval = src?.from ?? interval;
 	// 묶을 때는 원본을 n 배 + 경계 한 봉 더. 진행 중인 봉 한 개를 빼므로 하나 더
@@ -77,7 +95,11 @@ export async function fetchBinanceBars(symbol: string, interval: Interval, limit
 	while (bars.length < want) {
 		const n = Math.min(BINANCE_PAGE, want - bars.length);
 		const page = (
-			await fetchKlines(symbol, apiInterval, n, { ...(opts.fetch ? { fetch: opts.fetch } : {}), ...(endTime !== undefined ? { endTime } : {}) })
+			await fetchKlines(symbol, apiInterval, n, {
+				...(opts.fetch ? { fetch: opts.fetch } : {}),
+				...(endTime !== undefined ? { endTime } : {}),
+				...(opts.venue ? { venue: opts.venue } : {}),
+			})
 		).filter((b) => bars.length === 0 || b.t < (bars[0] as WatchBar).t);
 		if (page.length === 0) break;
 		bars = [...page, ...bars];
@@ -105,7 +127,10 @@ export interface WatchBarsOptions {
 /** 조건의 시장·간격에 맞는 닫힌 봉 (오래된 순, 최근 limit 개) */
 export async function fetchWatchBars(c: Condition, limit: number, opts: WatchBarsOptions = {}): Promise<WatchBar[]> {
 	const now = opts.now ?? Date.now();
-	if (!isStock(c.market.venue)) return fetchBinanceBars(c.market.symbol, c.interval, limit, { now, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+	if (!isStock(c.market.venue)) {
+		const venue = c.market.contract === "futures" ? ("futures" as const) : undefined;
+		return fetchBinanceBars(c.market.symbol, c.interval, limit, { now, ...(venue ? { venue } : {}), ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+	}
 	if (!opts.access) throw new BarsError("주식 감시에는 증권 키가 필요합니다 (설정 → 연결 → 증권)");
 	try {
 		return (await fetchStockBars(opts.access, c, limit, now)).filter((b) => settledAt(c, b.t) <= now);

@@ -6,7 +6,8 @@
  */
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { coinPrice, fetchCryptoChart, normalizeCryptoSymbol, quoteAsset } from "../src/crypto-chart.ts";
+import { clearFuturesCache } from "../src/binance/futures.ts";
+import { coinPrice, cutAtRebase, fetchCryptoChart, normalizeCryptoSymbol, parseCryptoSymbol, quoteAsset } from "../src/crypto-chart.ts";
 import { createBrokerTools } from "../src/tools.ts";
 
 const DAY = 86_400_000;
@@ -73,8 +74,72 @@ describe("봉 조회", () => {
 		assert.equal(after.lastOpen, false);
 	});
 
-	it("없는 심볼은 Binance 오류를 그대로", async () => {
-		await assert.rejects(fetchCryptoChart("ETH", "W", { fetch: fakeFetch(rows) }), /Binance 에 없는 종목입니다: ETH/);
+	it("현물·선물 둘 다 없으면 그렇다고 알린다", async () => {
+		const urls: string[] = [];
+		await assert.rejects(fetchCryptoChart("ETH", "W", { fetch: fakeFetch(rows, urls) }), /Binance 현물·선물 어디에도 없는 종목입니다: ETH/);
+		assert.equal(urls.length, 2);
+	});
+});
+
+/** 선물에만 있는 심볼 — 실측 사고: KORUUSDT(TradFi 무기한)를 현물에서만 찾고 "바이낸스에 없는 심볼"이라 답했다 */
+function venueFetch(rows: unknown[][], urls: string[] = []) {
+	return async (url: string): Promise<Response> => {
+		urls.push(url);
+		const ok = url.startsWith("https://fapi.binance.com/fapi/v1/klines?symbol=KORUUSDT") || url.startsWith("https://api.binance.com/api/v3/klines?symbol=ETHUSDT");
+		return ok ? new Response(JSON.stringify(rows)) : new Response(JSON.stringify({ code: -1121, msg: "Invalid symbol." }), { status: 400 });
+	};
+}
+
+describe("선물 봉", () => {
+	const rows = Array.from({ length: 30 }, (_, i) => kline(MON + i * W, 17 + i * 0.1, 1));
+
+	it("현물에 없으면 선물에서 다시 찾는다", async () => {
+		const urls: string[] = [];
+		const c = await fetchCryptoChart("KORUUSDT", "W", { fetch: venueFetch(rows, urls), now: MON + 30 * W });
+		assert.equal(c.venue, "futures");
+		assert.equal(c.bars.length, 30);
+		assert.match(urls[0] as string, /^https:\/\/api\.binance\.com\/api\/v3\/klines/);
+		assert.match(urls[1] as string, /^https:\/\/fapi\.binance\.com\/fapi\/v1\/klines\?symbol=KORUUSDT/);
+	});
+
+	it("둘 다 있는 심볼은 현물 — 선물을 부르지 않는다", async () => {
+		const urls: string[] = [];
+		const c = await fetchCryptoChart("ETHUSDT", "W", { fetch: venueFetch(rows, urls) });
+		assert.equal(c.venue, "spot");
+		assert.equal(urls.length, 1);
+	});
+
+	it("무기한 표기(.P · P · PERP)는 떼고 바로 선물로", async () => {
+		assert.deepEqual(parseCryptoSymbol("koruusdtp"), { symbol: "KORUUSDT", perp: true });
+		assert.deepEqual(parseCryptoSymbol("KORUUSDT.P"), { symbol: "KORUUSDT", perp: true });
+		assert.deepEqual(parseCryptoSymbol("BTCUSDT-PERP"), { symbol: "BTCUSDT", perp: true });
+		assert.deepEqual(parseCryptoSymbol("ETHUSDT"), { symbol: "ETHUSDT", perp: false });
+		assert.deepEqual(parseCryptoSymbol("ETHBTC"), { symbol: "ETHBTC", perp: false });
+		const urls: string[] = [];
+		const c = await fetchCryptoChart("KORUUSDT.P", "D", { fetch: venueFetch(rows, urls) });
+		assert.equal(c.symbol, "KORUUSDT");
+		assert.equal(c.venue, "futures");
+		assert.equal(urls.length, 1);
+	});
+
+	it("venue 를 정하면 그곳만 본다", async () => {
+		const urls: string[] = [];
+		await assert.rejects(fetchCryptoChart("KORUUSDT", "D", { fetch: venueFetch(rows, urls), venue: "spot" }), /Binance 에 없는 종목입니다: KORUUSDT/);
+		assert.equal(urls.length, 1);
+		await assert.rejects(fetchCryptoChart("ETHUSDT", "D", { fetch: venueFetch(rows), venue: "futures" }), /Binance 선물에 없는 종목입니다: ETHUSDT/);
+	});
+});
+
+describe("가격 단위 변경", () => {
+	const bar = (date: string, close: number) => ({ date, open: close, high: close, low: close, close, volume: 1 });
+	it("마지막 단위 변경 봉까지 버린다", () => {
+		const r = cutAtRebase([bar("1", 500), bar("2", 497), bar("3", 21), bar("4", 22), bar("5", 20)]);
+		assert.equal(r.date, "3");
+		assert.deepEqual(r.bars.map((b) => b.date), ["4", "5"]);
+	});
+	it("큰 변동이어도 5배 안쪽이면 그대로", () => {
+		const bars = [bar("1", 100), bar("2", 30), bar("3", 120)];
+		assert.deepEqual(cutAtRebase(bars), { bars, date: null });
 	});
 });
 
@@ -114,6 +179,53 @@ describe("market_technical — binance", () => {
 		assert.match(text, /^ETHUSDT 주봉 80개/);
 		assert.match(text, /ATR\(14\) 100 USDT/);
 		assert.match(text, /Binance 현물 기준/);
+	});
+
+	it("선물 종목은 계약 종류·표시가격·펀딩비를 함께 알린다", async () => {
+		clearFuturesCache();
+		const rows = Array.from({ length: 80 }, (_, i) => kline(Date.UTC(2025, 0, 6) + i * DAY, 17 + i * 0.01, 1));
+		const klines = venueFetch(rows);
+		globalThis.fetch = (async (url: string) => {
+			if (url.startsWith("https://fapi.binance.com/fapi/v1/exchangeInfo"))
+				return new Response(JSON.stringify({ symbols: [{ symbol: "KORUUSDT", contractType: "TRADIFI_PERPETUAL", underlyingType: "EQUITY", baseAsset: "KORU", quoteAsset: "USDT", filters: [] }] }));
+			if (url.startsWith("https://fapi.binance.com/fapi/v1/premiumIndex"))
+				return new Response(JSON.stringify({ symbol: "KORUUSDT", markPrice: "16.66684611", lastFundingRate: "0.00012987", nextFundingTime: Date.UTC(2026, 9, 12, 8) }));
+			return klines(url);
+		}) as typeof fetch;
+		const res = await run({ symbol: "KORUUSDT", market: "binance" });
+		const text = res.content[0]?.text ?? "";
+		assert.equal(res.details.currency, "USDT");
+		assert.match(text, /Binance USDⓈ-M 선물 기준 \(TradFi 무기한 — 미국 주식 기반 \(실물이 아니라 가격을 따라가는 계약\)\)/);
+		assert.match(text, /표시가격 16\.67 USDT · 펀딩비 \+0\.0130% \(다음 17:00 KST\)/);
+		assert.doesNotMatch(text, /현물 기준/);
+	});
+
+	it("TradFi 는 가격 단위가 바뀐 봉 뒤만 쓴다 — 지난 봉을 Binance 가 고치지 않는다", async () => {
+		clearFuturesCache();
+		// 실측 모양: 497 → (그날 497 에 열려 21 에 닫힘) → 21 근처
+		const rows = Array.from({ length: 80 }, (_, i) => kline(Date.UTC(2025, 0, 6) + i * DAY, i < 40 ? 497 : 21 + i * 0.01, 1));
+		const klines = venueFetch(rows);
+		globalThis.fetch = (async (url: string) => {
+			if (url.startsWith("https://fapi.binance.com/fapi/v1/exchangeInfo"))
+				return new Response(JSON.stringify({ symbols: [{ symbol: "KORUUSDT", contractType: "TRADIFI_PERPETUAL", underlyingType: "EQUITY", filters: [] }] }));
+			if (url.startsWith("https://fapi.binance.com/fapi/v1/premiumIndex")) return new Response("{}", { status: 400 });
+			return klines(url);
+		}) as typeof fetch;
+		const res = await run({ symbol: "KORUUSDT", market: "binance" });
+		const text = res.content[0]?.text ?? "";
+		assert.match(text, /^KORUUSDT 일봉 39개/);
+		assert.match(text, /20250215 봉에서 가격 단위가 바뀌어\(분할·계약 변경 추정, Binance 는 지난 봉을 고치지 않는다\) 그 뒤 39봉만 썼다/);
+		assert.doesNotMatch(text, /497/);
+	});
+
+	it("선물 부가 정보가 실패해도 지표는 낸다", async () => {
+		clearFuturesCache();
+		const rows = Array.from({ length: 80 }, (_, i) => kline(Date.UTC(2025, 0, 6) + i * DAY, 17 + i * 0.01, 1));
+		globalThis.fetch = venueFetch(rows) as typeof fetch;
+		const res = await run({ symbol: "KORUUSDT", venue: "futures" });
+		const text = res.content[0]?.text ?? "";
+		assert.match(text, /^KORUUSDT 일봉 80개/);
+		assert.match(text, /Binance USDⓈ-M 선물 기준 · 봉 경계/);
 	});
 
 	it("코인 이름만 넘기면 심볼을 고치라고 알린다", async () => {

@@ -64,7 +64,8 @@ export interface TimingDetails {
 	kind: "timing-card";
 	symbol: string;
 	name: string;
-	currency: "KRW" | "USD";
+	/** KRW · USD · 코인은 호가 자산 (USDT 등) */
+	currency: string;
 	/** 먼저 보여줄 판정 */
 	result: TimingCardResult;
 	/** 기간을 정하지 않아 두 모드를 다 돌렸을 때 나머지 하나 */

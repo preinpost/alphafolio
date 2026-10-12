@@ -13,6 +13,8 @@ import {
 	futuresOpenOrders,
 	futuresPositions,
 	futuresRules,
+	contractText,
+	isPerpetual,
 	futuresSymbolConfig,
 	leverageBrackets,
 	type FuturesPosition,
@@ -62,14 +64,15 @@ const marginText = (m: FuturesMarginType): string => (m === "ISOLATED" ? "격리
 /** 종목 규칙 — 없거나 무기한이 아니면 사용자에게 바로 알린다 */
 export async function symbolRulesOrThrow(symbol: string, c: BinanceCreds): Promise<FuturesRules> {
 	const rules = await futuresRules(symbol, c);
-	if (!rules) throw new Error(`Binance USDⓈ-M 선물에 없는 종목입니다: ${symbol} (예: BTCUSDT · ETHUSDT)`);
+	if (!rules) throw new Error(`Binance USDⓈ-M 선물에 없는 종목입니다: ${symbol} (예: BTCUSDT · ETHUSDT · TradFi 무기한 TSLAUSDT)`);
 	return rules;
 }
 
 function fill(card: BinanceFuturesCard, rules: FuturesRules): void {
 	card.base = rules.base;
 	card.marginAsset = rules.marginAsset;
-	if (rules.contractType && rules.contractType !== "PERPETUAL") card.warnings.push(`${rules.symbol} 은(는) 만기가 있는 계약입니다 (${rules.contractType}).`);
+	if (rules.contractType === "TRADIFI_PERPETUAL") card.warnings.push(`${rules.symbol} 은(는) ${contractText(rules)}입니다.`);
+	else if (rules.contractType && !isPerpetual(rules)) card.warnings.push(`${rules.symbol} 은(는) 만기가 있는 계약입니다 (${rules.contractType}).`);
 }
 
 /** 카드를 마무리한다 — 오류가 있으면 토큰 없이, 없으면 토큰을 붙인다 */

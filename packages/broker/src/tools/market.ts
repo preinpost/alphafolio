@@ -5,7 +5,8 @@ import { fetchMovers, type MoverType } from "../movers.ts";
 import { NaverCredentialsMissingError, searchNews } from "../news.ts";
 import { collectOverseasNews } from "../overseas-news.ts";
 import { overseasNews } from "../kis/api.ts";
-import { coinPrice, fetchCryptoChart, normalizeCryptoSymbol, quoteAsset, type CryptoPeriod } from "../crypto-chart.ts";
+import { coinPrice, fetchCryptoAnalysisChart, type CryptoPeriod } from "../crypto-chart.ts";
+import type { BinanceVenue } from "../triggers/bars.ts";
 import { analyze } from "../indicators.ts";
 import { marketOf } from "../orders.ts";
 import { fetchQuote, fetchChart, stockBarOpen } from "../quote.ts";
@@ -13,12 +14,8 @@ import type { BrokerToolDeps, QuoteDetails, TechnicalDetails, MoversDetails, New
 import { money, signed, usd, volumeLine } from "./format.ts";
 
 /** market_technical 의 코인 경로 — fetchChart 와 같은 모양(symbol·name·bars·note)에 호가 자산을 더한다 */
-async function cryptoTechnicalChart(symbol: string, period: CryptoPeriod) {
-	const chart = await fetchCryptoChart(symbol, period).catch((err: unknown) => {
-		// "ETH" 처럼 코인 이름만 온 경우 — 모델이 심볼을 고쳐 다시 부르게 한다
-		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(quoteAsset(normalizeCryptoSymbol(symbol)) ? msg : `${msg} — Binance 심볼은 호가 자산까지 붙인다 (ETHUSDT)`);
-	});
+async function cryptoTechnicalChart(symbol: string, period: CryptoPeriod, venue?: BinanceVenue) {
+	const chart = await fetchCryptoAnalysisChart(symbol, period, venue);
 	const openBar = chart.lastOpen ? chart.bars.at(-1) : undefined;
 	return {
 		symbol: chart.symbol,
@@ -27,7 +24,8 @@ async function cryptoTechnicalChart(symbol: string, period: CryptoPeriod) {
 		bars: chart.bars,
 		lastOpen: chart.lastOpen,
 		note:
-			"Binance 현물 기준 · 봉 경계 UTC 0시(한국 09:00)" +
+			chart.notes.join(" · ") +
+			" · 봉 경계 UTC 0시(한국 09:00)" +
 			(openBar ? ` · 마지막 봉(${openBar.date}~)은 진행 중이라 현재가·지표가 마감 전까지 바뀐다` : ""),
 	};
 }
@@ -78,14 +76,23 @@ export function createMarketTools(deps: BrokerToolDeps) {
 			"거래량(20봉 평균 대비)·지지/저항·추세·신호 라벨. '차트 분석', '추세 어때?', 'RSI 얼마야?' 같은 **지표 확인** 요청에 쓴다. " +
 				"매수·매도 판단이나 손절가가 필요하면 이 툴이 아니라 market_timing 을 쓴다. " +
 			"코인은 market='binance' + Binance 심볼(ETHUSDT 처럼 호가 자산까지) — 키 없이 된다. " +
+			"Binance 선물도 같은 market='binance' 다 — 현물에 없는 심볼은 USDⓈ-M 선물에서 자동으로 찾는다. " +
+			"주식·원자재 기반 TradFi 무기한(KORUUSDT·TSLAUSDT·XAUUSDT 등)은 선물에만 있다. " +
+			"사용자가 심볼에 USDT 를 붙였거나 'KORUUSDT.P'·'선물'이라고 했으면 주식 티커로 바꾸지 말고 market='binance' 로 부른다 (선물이면 venue='futures'). " +
+			"현물에 없다는 이유로 'Binance 에 없는 심볼'이라고 답하지 않는다 — 이 툴이 현물·선물 둘 다 본다. " +
 			"'ETH' 처럼 코인 이름만 주식 티커로 넘기면 같은 이름의 미국 상장 상품이 걸린다. " +
 			"⚠️ 지표는 이 툴이 계산한다. 직접 계산하거나 추정하지 말고 반환된 숫자만 인용한다. " +
 			"봉 데이터는 반환하지 않으므로 개별 봉 값을 나열하려 하지 않는다.",
 		parameters: Type.Object({
-			symbol: Type.String({ description: "6자리 국내 종목코드 · 해외 티커 · Binance 심볼(ETHUSDT)" }),
+			symbol: Type.String({ description: "6자리 국내 종목코드 · 해외 티커 · Binance 심볼(현물 ETHUSDT · 선물 KORUUSDT)" }),
 			market: Type.Optional(
 				Type.Union([Type.Literal("krx"), Type.Literal("us"), Type.Literal("binance")], {
 					description: "코인은 binance (필수). 주식은 생략해도 종목코드로 알아서 찾는다",
+				}),
+			),
+			venue: Type.Optional(
+				Type.Union([Type.Literal("spot"), Type.Literal("futures")], {
+					description: "binance 만 — spot=현물, futures=USDⓈ-M 선물. 생략하면 현물에서 찾고 없으면 선물 (둘 다 있는 ETHUSDT 는 현물)",
 				}),
 			),
 			period: Type.Optional(
@@ -96,7 +103,10 @@ export function createMarketTools(deps: BrokerToolDeps) {
 		}),
 		execute: async (_id, params) => {
 			const period = (params.period as "D" | "W" | "M" | undefined) ?? "D";
-			const chart = params.market === "binance" ? await cryptoTechnicalChart(params.symbol, period) : await fetchChart(deps.brokers, params.symbol, period);
+			const chart =
+				params.market === "binance" || params.venue
+					? await cryptoTechnicalChart(params.symbol, period, params.venue as BinanceVenue | undefined)
+					: await fetchChart(deps.brokers, params.symbol, period);
 			const currency = "quote" in chart ? chart.quote : marketOf(chart.symbol) === "KR" ? "KRW" : "USD";
 			const fmt = (v: number): string => ("quote" in chart ? coinPrice(v, chart.quote) : money(v, currency as "KRW" | "USD"));
 			const snapshot = analyze(chart.bars);

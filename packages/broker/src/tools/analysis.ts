@@ -7,7 +7,11 @@ import { analyze } from "../indicators.ts";
 import type { KisContext } from "../kis/client.ts";
 import { KisCredentialsMissingError } from "../kis/types.ts";
 import { resolveName } from "../names.ts";
-import { evaluateTiming, type Horizon, type TimingInput, type TimingResult } from "../timing.ts";
+import { evaluateTiming, fallbackTick, tickGrid, type Horizon, type TimingInput, type TimingResult } from "../timing.ts";
+import { coinPrice, fetchCryptoAnalysisChart } from "../crypto-chart.ts";
+import { futuresPositions } from "../binance/futures.ts";
+import { symbolRules, type BinanceCreds } from "../binance/trade.ts";
+import type { BinanceVenue } from "../triggers/bars.ts";
 import { position52w, sectionNote, settle, skipped } from "../research.ts";
 import { marketOf } from "../orders.ts";
 import { fetchChart, fetchQuote, stockBarOpen } from "../quote.ts";
@@ -46,7 +50,7 @@ function timingCardResult(result: TimingResult): TimingCardResult {
  * 판정 하나를 텍스트로. 두 모드를 이어 쓸 때는 두 번째 블록에서 추세·밸류층을 뺀다
  * (봉·재무가 같아 두 모드에서 똑같다 — 토큰만 든다).
  */
-function timingLines(result: TimingResult, m: (v: number | null) => string, opts: { skipShared: boolean }): string[] {
+function timingLines(result: TimingResult, m: (v: number | null) => string, opts: { skipShared: boolean; unit: string }): string[] {
 	return [
 		`[${HORIZON_LABEL[result.horizon]}] 결론: ${result.verdict} — ${result.summary}`,
 		opts.skipShared ? "(추세·밸류층은 위와 같음)" : "",
@@ -59,7 +63,7 @@ function timingLines(result: TimingResult, m: (v: number | null) => string, opts
 		`손절 ${m(result.stopLoss)} · 목표1 ${m(result.target1)} · 목표2 ${m(result.target2)}` +
 			(result.riskReward !== null ? ` · 손익비 1:${result.riskReward}` : ""),
 		result.sizing
-			? `권장 수량 ${result.sizing.quantity}주 — 손절 시 손실이 총자산의 ${result.sizing.riskPct}%(${m(result.sizing.riskBudgetKrw)}) 이내`
+			? `권장 수량 ${result.sizing.quantity}${opts.unit} — 손절 시 손실이 총자산의 ${result.sizing.riskPct}%(${m(result.sizing.riskBudgetKrw)}) 이내`
 			: "",
 		"시나리오 (조건부 대응 — 예측 아님):",
 		...result.scenarios.map(
@@ -95,9 +99,14 @@ async function loadFinancials(
 export function renderTiming(opts: {
 	symbol: string;
 	name: string;
-	currency: "KRW" | "USD";
+	/** KRW · USD · 코인은 호가 자산 (fmt 를 함께 준다) */
+	currency: string;
 	results: TimingResult[];
 	notes: string[];
+	/** 가격 표기 — 없으면 money(KRW·USD) */
+	fmt?: (v: number) => string;
+	/** 수량 단위 — 기본 "주", 코인은 " ETH" 처럼 */
+	unit?: string;
 }): { text: string; details: TimingDetails } {
 	const { symbol, name, currency, notes } = opts;
 	const swing = opts.results.find((r) => r.horizon === "swing");
@@ -117,7 +126,8 @@ export function renderTiming(opts: {
 		notes,
 	};
 
-	const m = (v: number | null): string => (v === null ? "—" : money(v, currency));
+	const m = (v: number | null): string => (v === null ? "—" : opts.fmt ? opts.fmt(v) : money(v, currency as "KRW" | "USD"));
+	const unit = opts.unit ?? "주";
 	const { snapshot } = result;
 	// 두 모드의 지지·20일선·돌파가는 같은 봉에서 나오므로 한 번만 쓴다
 	const dip = ordered.find((r) => r.dipPlan !== null)?.dipPlan ?? null;
@@ -131,18 +141,118 @@ export function renderTiming(opts: {
 			]
 		: [];
 	const lines = [
-		`${name} (${symbol}) 타점 판정 ${alt ? "[스윙·단기 둘 다]" : `[${HORIZON_LABEL[result.horizon]}]`} — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
-		...ordered.flatMap((r, i) => [...(i > 0 ? [""] : []), ...timingLines(r, m, { skipShared: i > 0 })]),
+		`${name.startsWith(symbol) ? name : `${name} (${symbol})`} 타점 판정 ${alt ? "[스윙·단기 둘 다]" : `[${HORIZON_LABEL[result.horizon]}]`} — 일봉 ${snapshot.bars}개 · 기준 ${snapshot.lastDate} · 현재가 ${m(result.price)}`,
+		...ordered.flatMap((r, i) => [...(i > 0 ? [""] : []), ...timingLines(r, m, { skipShared: i > 0, unit })]),
 		...dipLines,
 		"",
 		result.holding
-			? `보유 ${result.holding.quantity}주 · 평단 ${m(result.holding.avgPrice)} (${result.holding.pnlPct >= 0 ? "+" : ""}${result.holding.pnlPct}%) · 손익분기 ${m(result.breakeven)}`
+			? `보유 ${result.holding.quantity}${unit} · 평단 ${m(result.holding.avgPrice)} (${result.holding.pnlPct >= 0 ? "+" : ""}${result.holding.pnlPct}%) · 손익분기 ${m(result.breakeven)}`
 			: `손익분기(진입 시) ${m(result.breakeven)}`,
 		`  ※ 왕복 비용 ${result.roundTripCostPct}% 가정 (실제 수수료·세금과 다를 수 있음)`,
 		...notes.map((n) => `⚠️ ${n}`),
 		"※ 규칙 기반 판정이며 매매 권유가 아닙니다. 실적·공시·거시 이벤트는 반영되지 않았습니다.",
 	];
 	return { text: lines.join("\n"), details };
+}
+
+/**
+ * 왕복 비용 가정치 % — 현물 수수료 0.1% × 2 · 선물 테이커 0.05% × 2 (펀딩비 별도).
+ * 실제 요율(VIP·BNB 할인)을 조회하지 않으므로 가정이라고 표시한다.
+ */
+const CRYPTO_COST_PCT = { spot: 0.2, futures: 0.1 } as const;
+
+/** 레버리지별 손절 시 증거금 손실 — 손절 폭 × 배수. 이 배수 이상이면 손절가 전에 강제청산된다 (유지증거금·수수료 무시한 상한) */
+export function leverageLine(r: TimingResult): string | null {
+	if (r.stopLoss === null || !(r.entry.price > r.stopLoss)) return null;
+	const stop = (r.entry.price - r.stopLoss) / r.entry.price;
+	const at = [2, 3, 5]
+		.filter((l) => l * stop < 1)
+		.map((l) => `${l}배 −${Math.round(l * stop * 1000) / 10}%`);
+	const liq = Math.ceil(1 / stop - 1e-9);
+	return (
+		`손절 폭 ${Math.round(stop * 1000) / 10}% — 손절 시 증거금 손실 ${at.length > 0 ? at.join(" · ") : "2배부터 100% 이상"}. ` +
+		`${liq}배 이상이면 손절가에 닿기 전에 강제청산된다 (유지증거금·수수료 때문에 그보다 낮은 배수에서도 청산될 수 있다 — 실제 청산가는 binance_futures 준비 카드에서 확인)`
+	);
+}
+
+const connected = <T,>(get: (() => T) | undefined): T | null => {
+	if (!get) return null;
+	try {
+		return get();
+	} catch {
+		return null;
+	}
+};
+
+/**
+ * 코인·선물 타점 — 같은 판정 규칙(evaluateTiming)에 거래소 tickSize·코인 표기·코인 비용을 넣는다.
+ * 보유: 선물은 롱 포지션(진입가 = 평단), 현물은 체결로 추정한 평단. 숏 포지션은 규칙이 롱 기준이라 반영하지 않는다.
+ */
+async function cryptoTiming(deps: BrokerToolDeps, rawSymbol: string, horizons: Horizon[], venue?: BinanceVenue) {
+	const chart = await fetchCryptoAnalysisChart(rawSymbol, "D", venue);
+	const { symbol, quote } = chart;
+	const futures = chart.venue === "futures";
+	const base = chart.futures?.rules?.base || (quote ? symbol.slice(0, -quote.length) : symbol);
+	const notes: string[] = [chart.notes.join(" · ")];
+	if (chart.lastOpen) notes.push("오늘 봉(UTC 0시~)은 진행 중이라 거래량이 덜 쌓였다 — 거래량 배수를 거래량 부족으로 해석하지 않는다");
+	notes.push(
+		futures
+			? "판정 규칙은 롱(매수) 기준이고 주식 일봉 백테스트로 정했다 — 선물·코인에서는 검증되지 않았다. 숏 진입 판정은 하지 않는다"
+			: "판정 규칙은 주식 일봉 백테스트로 정했다 — 코인에서는 검증되지 않았다",
+	);
+
+	const last = chart.bars.at(-1);
+	const tick = futures ? chart.futures?.rules?.tickSize : (await symbolRules(symbol).catch(() => null))?.tickSize;
+	const tickOk = tick !== undefined && Number(tick) > 0;
+	if (!tickOk) notes.push("거래소 호가단위를 받지 못해 가격을 근사 단위로 맞췄다");
+	const grid = tickGrid(tickOk ? tick : fallbackTick(last?.close ?? 1), {
+		fmt: (v) => coinPrice(v, quote),
+		costPct: futures ? CRYPTO_COST_PCT.futures : CRYPTO_COST_PCT.spot,
+	});
+
+	// 보유 — 없어도 판정은 한다
+	let holding: TimingInput["holding"] = null;
+	const creds = connected(deps.brokers.binance) as BinanceCreds | null;
+	if (creds && futures) {
+		const pos = await futuresPositions(creds, symbol).catch((err: unknown) => {
+			notes.push(`선물 포지션 조회 실패 — 보유 반영 생략 (${err instanceof Error ? err.message.slice(0, 60) : err})`);
+			return [];
+		});
+		const long = pos.find((p) => Number(p.amt) > 0);
+		const short = pos.find((p) => Number(p.amt) < 0);
+		if (long) holding = { quantity: Number(long.amt), avgPrice: Number(long.entryPrice) };
+		if (short) notes.push(`숏 포지션 ${short.amt.replace("-", "")} ${base} 보유 중 (진입가 ${grid.fmt(Number(short.entryPrice))}) — 판정 규칙이 롱 기준이라 보유로 반영하지 않았다`);
+	} else if (creds) {
+		const p = await fetchPortfolio(deps.brokers, { sources: ["binance"] }).catch(() => null);
+		const h = p?.crypto.find((c) => c.asset === base && c.quantity > 0);
+		if (h && h.avgPriceUsd !== null && h.avgPriceUsd > 0) {
+			holding = { quantity: h.quantity, avgPrice: h.avgPriceUsd };
+			notes.push("현물 평단은 체결 내역으로 추정한 값이다 (입금·보상분은 원가를 모른다)");
+		} else if (h) notes.push(`${base} ${h.quantity} 보유 중이지만 평단을 몰라 보유로 반영하지 않았다`);
+	}
+
+	const results = horizons
+		.map((h) =>
+			evaluateTiming({
+				bars: chart.bars,
+				market: "US",
+				grid,
+				valueNote: futures ? "선물 — 재무 해당 없음" : "코인 — 재무 해당 없음",
+				holding,
+				totalAssetsKrw: null,
+				horizon: h,
+			}),
+		)
+		.filter((r): r is TimingResult => r !== null);
+	if (results.length === 0) throw new Error(`${symbol} 시세 데이터가 없어 판정할 수 없습니다.`);
+	if (futures) {
+		for (const r of results) {
+			const line = leverageLine(r);
+			if (line) notes.push(`[${r.horizon === "swing" ? "스윙" : "단기"} 레버리지] ${line}`);
+		}
+	}
+	const { text, details } = renderTiming({ symbol, name: futures ? `${symbol} 선물` : symbol, currency: quote, results, notes, fmt: grid.fmt, unit: ` ${base}` });
+	return { content: [{ type: "text" as const, text }], details };
 }
 
 export function createAnalysisTools(deps: BrokerToolDeps) {
@@ -228,9 +338,17 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 			"단순히 지표·추세만 물으면 market_technical 을 쓴다. " +
 			"⚠️ 판정·가격은 이 툴이 계산한다 — 직접 계산하거나 바꾸지 말고 그대로 인용한다. " +
 			"실적·공시·거시 이벤트 리스크는 이 툴이 보지 않으므로 필요하면 market_news 로 확인해 덧붙인다. " +
-			"결과는 매매 권유가 아니라 규칙 기반 판정임을 밝힌다.",
+			"결과는 매매 권유가 아니라 규칙 기반 판정임을 밝힌다. " +
+			"코인·Binance 선물은 market='binance' + Binance 심볼(ETHUSDT · 선물 KORUUSDT) — 현물에 없으면 선물로 자동, venue 로 고를 수 있다. " +
+			"코인·선물 판정은 **롱(매수) 기준**이다 (숏 진입 판정은 하지 않는다). 선물이면 손절 폭에 따른 레버리지별 증거금 손실·강제청산 한도를 툴이 계산한다 — 그 숫자를 인용한다.",
 		parameters: Type.Object({
-			symbol: Type.String({ description: "6자리 국내 종목코드 또는 해외 티커" }),
+			symbol: Type.String({ description: "6자리 국내 종목코드 · 해외 티커 · Binance 심볼(현물 ETHUSDT · 선물 KORUUSDT)" }),
+			market: Type.Optional(Type.Literal("binance", { description: "코인·Binance 선물이면 binance (필수). 주식은 비운다" })),
+			venue: Type.Optional(
+				Type.Union([Type.Literal("spot"), Type.Literal("futures")], {
+					description: "binance 만 — spot=현물, futures=USDⓈ-M 선물. 생략하면 현물에서 찾고 없으면 선물",
+				}),
+			),
 			horizon: Type.Optional(
 				Type.Union([Type.Literal("swing"), Type.Literal("short")], {
 					description:
@@ -239,6 +357,10 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 			),
 		}),
 		execute: async (_id, params) => {
+			if (params.market === "binance" || params.venue) {
+				const venue = params.venue as BinanceVenue | undefined;
+				return cryptoTiming(deps, params.symbol, params.horizon ? [params.horizon] : ["swing", "short"], venue);
+			}
 			const notes: string[] = [];
 			const chart = await fetchChart(deps.brokers, params.symbol, "D");
 			const symbol = chart.symbol;

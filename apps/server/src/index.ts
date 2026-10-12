@@ -204,6 +204,7 @@ async function main(): Promise<void> {
 		const off = autoTradeOff();
 		if (off) return off;
 		const venue = spec.condition.market.venue;
+		if (spec.condition.market.contract === "futures") return "선물 감시는 알림만 됩니다 — 선물 주문은 binance_futures 로 준비해 주세요";
 		if (venue === "binance") {
 			const bad = cryptoAutoProblem(spec.condition.market.symbol);
 			if (bad) return bad;

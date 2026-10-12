@@ -84,7 +84,8 @@ export interface StockFeed {
 }
 
 export interface Condition {
-	market: { venue: Venue; symbol: string; feed?: StockFeed };
+	/** contract — binance 만: "futures" = USDⓈ-M 선물 봉 (알림 전용 — 주문 동작을 붙이지 않는다). 없으면 현물 */
+	market: { venue: Venue; symbol: string; feed?: StockFeed; contract?: "futures" };
 	interval: Interval;
 	/**
 	 * 주식 분·시간봉만 — extended = 미장 프리·애프터(뉴욕 04:00–20:00) · 국장 NXT 포함(08:00–20:00, 통합 기준만).

@@ -64,6 +64,10 @@ export interface TimingInput {
 	usdKrw?: number | null;
 	/** 기본 swing (툴은 기간을 말하지 않으면 둘 다 돌린다) */
 	horizon?: Horizon;
+	/** 호가단위·표기·비용 — 없으면 market(KR·US) 규칙. 코인·선물은 tickGrid (거래소 tickSize) */
+	grid?: PriceGrid;
+	/** 재무가 없을 때 밸류층 문장 — 없으면 시장 기준 ("해외 종목 — 재무 미조회") */
+	valueNote?: string;
 }
 
 /**
@@ -184,18 +188,67 @@ function fmt(v: number, market: Market): string {
 		: `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** 틱 위로 올림 — 돌파 트리거는 저항 "위"여야 한다 */
-function tickAbove(market: Market, price: number): number {
-	const t = tickSize(market, price);
-	const up = roundToTick(market, price) + t;
-	return market === "US" ? Math.round(up * 100) / 100 : up;
+/** 가격 격자 — 호가단위·표기·왕복 비용. 판정 규칙은 시장과 무관하고, 가격을 다루는 방법만 다르다 */
+export interface PriceGrid {
+	tick(price: number): number;
+	/** 호가단위로 내림 */
+	floor(price: number): number;
+	/** 덧셈·뺄셈 뒤 부동소수점 잡음 제거 (미장은 센트, 코인은 tick 자릿수) */
+	clean(v: number): number;
+	/** 손익분기 — 국장은 원 단위 올림 */
+	breakeven(v: number): number;
+	fmt(v: number): string;
+	/** 왕복 비용 가정치 % */
+	costPct: number;
 }
 
-function tickBelow(market: Market, price: number): number {
-	const t = tickSize(market, price);
-	const floored = roundToTick(market, price);
-	const down = floored === price ? floored - t : floored;
-	return market === "US" ? Math.round(down * 100) / 100 : down;
+export function marketGrid(market: Market): PriceGrid {
+	const cents = (v: number): number => Math.round(v * 100) / 100;
+	return {
+		tick: (p) => tickSize(market, p),
+		floor: (p) => roundToTick(market, p),
+		clean: (v) => (market === "US" ? cents(v) : v),
+		breakeven: (v) => (market === "US" ? cents(v) : Math.ceil(v)),
+		fmt: (v) => fmt(v, market),
+		costPct: ROUND_TRIP_COST_PCT[market],
+	};
+}
+
+/**
+ * 코인·선물 — 거래소 tickSize(문자열 10진수) 하나로. 나눗셈은 소수 6자리에서 반올림한 뒤 내림한다
+ * (4.35 / 0.01 = 434.99999… 가 434 로 깎이지 않게 — roundToTick 의 미장 처리와 같은 이유).
+ */
+export function tickGrid(tickSize: string, opts: { fmt: (v: number) => string; costPct: number }): PriceGrid {
+	const t = Number(tickSize);
+	if (!(t > 0)) throw new Error(`tickSize 가 이상합니다: ${tickSize}`);
+	const dec = (tickSize.split(".")[1] ?? "").replace(/0+$/, "").length;
+	const clean = (v: number): number => Number(v.toFixed(dec));
+	const steps = (v: number): number => Number((v / t).toFixed(6));
+	return {
+		tick: () => t,
+		floor: (p) => clean(Math.floor(steps(p)) * t),
+		clean,
+		breakeven: (v) => clean(Math.ceil(steps(v)) * t),
+		fmt: opts.fmt,
+		costPct: opts.costPct,
+	};
+}
+
+/** 거래소 규칙을 못 받았을 때 — 가격의 유효숫자 5자리 정도 (BTC 0.1 · 17달러 0.001 · 0.5달러 0.0001) */
+export function fallbackTick(price: number): string {
+	const e = Math.floor(Math.log10(Math.max(price, 1e-12))) - 4;
+	return e >= 0 ? "1" : (10 ** e).toFixed(-e);
+}
+
+/** 틱 위로 올림 — 돌파 트리거는 저항 "위"여야 한다 */
+function tickAbove(g: PriceGrid, price: number): number {
+	return g.clean(g.floor(price) + g.tick(price));
+}
+
+function tickBelow(g: PriceGrid, price: number): number {
+	const t = g.tick(price);
+	const floored = g.floor(price);
+	return g.clean(floored === price ? floored - t : floored);
 }
 
 export function evaluateTiming(input: TimingInput): TimingResult | null {
@@ -203,10 +256,11 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	if (!snap) return null;
 
 	const { market } = input;
+	const g = input.grid ?? marketGrid(market);
 	const horizon: Horizon = input.horizon ?? "swing";
 	const R = RULES[horizon];
 	const price = snap.price;
-	const f = (v: number): string => fmt(v, market);
+	const f = (v: number): string => g.fmt(v);
 
 	// ── 추세층 ──────────────────────────────────────────────
 	const trendReasons: string[] = [];
@@ -294,7 +348,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	const valueReasons: string[] = [];
 	const fund = input.fundamentals;
 	if (!fund) {
-		valueReasons.push(market === "KR" ? "재무 데이터 없음 — 판단 보류" : "해외 종목 — 재무 미조회");
+		valueReasons.push(input.valueNote ?? (market === "KR" ? "재무 데이터 없음 — 판단 보류" : "해외 종목 — 재무 미조회"));
 	} else {
 		let good = 0;
 		let bad = 0;
@@ -325,7 +379,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		snap.resistance > price &&
 		snap.resistance - price < atr
 	) {
-		entry = { price: tickAbove(market, snap.resistance), type: "breakout" };
+		entry = { price: tickAbove(g, snap.resistance), type: "breakout" };
 	}
 	const base = entry.price;
 
@@ -333,8 +387,8 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	if (atr !== null) {
 		const atrStop = base - atr * R.stopAtr;
 		const support = snap.support;
-		const raw = support !== null && support < base && support >= atrStop ? tickBelow(market, support) : atrStop;
-		stopLoss = raw > 0 ? roundToTick(market, raw) : null;
+		const raw = support !== null && support < base && support >= atrStop ? tickBelow(g, support) : atrStop;
+		stopLoss = raw > 0 ? g.floor(raw) : null;
 	}
 
 	// 목표가는 호가단위로 **내림**하는데, 저항선이 현재가 바로 위면 내림 결과가 현재가와
@@ -346,15 +400,15 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		// 저항까지 ATR 이상 여유가 있으면 저항, 아니면(돌파 진입·이미 돌파) 진입가 + ATR×targetAtr
 		target1 =
 			snap.resistance !== null && snap.resistance - base >= atr
-				? aboveOr(roundToTick(market, snap.resistance))
-				: aboveOr(roundToTick(market, base + atr * R.targetAtr));
+				? aboveOr(g.floor(snap.resistance))
+				: aboveOr(g.floor(base + atr * R.targetAtr));
 	} else if (snap.resistance !== null && snap.resistance > base) {
-		target1 = aboveOr(roundToTick(market, snap.resistance));
+		target1 = aboveOr(g.floor(snap.resistance));
 	}
 	if (atr !== null && target1 !== null) {
 		// 목표1 이 ATR×targetAtr 이면 목표2 는 그보다 ATR 하나 더 — 둘이 같은 가격이 되지 않게
-		const cand = roundToTick(market, Math.max(snap.bollingerUpper ?? 0, base + atr * (R.targetAtr + 1)));
-		target2 = cand > target1 ? cand : roundToTick(market, target1 + atr);
+		const cand = g.floor(Math.max(snap.bollingerUpper ?? 0, base + atr * (R.targetAtr + 1)));
+		target2 = cand > target1 ? cand : g.floor(target1 + atr);
 	}
 
 	const riskReward =
@@ -437,14 +491,14 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	// ── 시나리오 (조건부 대응, 상호배타) ────────────────────
 	const support = snap.support;
 	const resistance = snap.resistance;
-	const breakout = resistance !== null ? tickAbove(market, resistance) : null;
-	const breakdown = support !== null ? tickBelow(market, support) : null;
+	const breakout = resistance !== null ? tickAbove(g, resistance) : null;
+	const breakdown = support !== null ? tickBelow(g, support) : null;
 	// 되돌림 매수 지점: 현재가 아래의 20일선, 없으면 지지선
 	const pullback =
 		snap.ma20 !== null && snap.ma20 < price
-			? roundToTick(market, snap.ma20)
+			? g.floor(snap.ma20)
 			: support !== null && support < price
-				? roundToTick(market, support)
+				? g.floor(support)
 				: null;
 
 	let scenarios: Scenario[];
@@ -452,7 +506,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	if (horizon === "short" && buyScenarios) {
 		// 단기: 진입(지금 또는 돌파) → 눌림 추가 → 손절·시간 손절. 과열 주의면 비중 절반
 		const half = caution.length > 0 ? 0.5 : 1;
-		const dip = snap.ma5 !== null && snap.ma5 < base ? roundToTick(market, snap.ma5) : pullback;
+		const dip = snap.ma5 !== null && snap.ma5 < base ? g.floor(snap.ma5) : pullback;
 		scenarios = [
 			entry.type === "breakout"
 				? {
@@ -467,7 +521,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 						id: "S1",
 						title: "현재가 진입",
 						trigger: `현재가 ${f(price)} 부근`,
-						triggerPrice: roundToTick(market, price),
+						triggerPrice: g.floor(price),
 						action: "1차 진입",
 						weightPct: 60 * half,
 					},
@@ -507,7 +561,7 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 						id: "S1",
 						title: "현재가 분할 진입",
 						trigger: `현재가 ${f(price)} 부근`,
-						triggerPrice: roundToTick(market, price),
+						triggerPrice: g.floor(price),
 						action: "1차 분할 진입",
 						weightPct: 50 * half,
 					},
@@ -624,16 +678,16 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 		if (reasons.length > 0) {
 			const steps: DipPlan["steps"] = [];
 			// 지지를 호가단위로 올린다 — 내리면 손절(지지 한 틱 아래)과 같은 가격이 될 수 있다
-			const floored = roundToTick(market, support);
-			const up = floored >= support ? floored : floored + tickSize(market, support);
-			const supportTick = market === "US" ? Math.round(up * 100) / 100 : up;
+			const floored = g.floor(support);
+			const up = floored >= support ? floored : floored + g.tick(support);
+			const supportTick = g.clean(up);
 			steps.push({
 				step: 1,
 				trigger: `지지 ${f(supportTick)} 위에서 종가 ${DIP_HOLD_BARS}봉 이상 유지 (현재가 대비 ${(((supportTick - price) / price) * 100).toFixed(1)}%)`,
 				triggerPrice: supportTick,
 				weightPct: DIP_FIRST_WEIGHT,
 			});
-			const ma20Tick = snap.ma20 !== null ? roundToTick(market, snap.ma20) : null;
+			const ma20Tick = snap.ma20 !== null ? g.floor(snap.ma20) : null;
 			if (ma20Tick !== null && ma20Tick > price && (breakout === null || ma20Tick < breakout)) {
 				steps.push({
 					step: 2,
@@ -661,10 +715,9 @@ export function evaluateTiming(input: TimingInput): TimingResult | null {
 	}
 
 	// ── 손익분기·포지션 크기 ────────────────────────────────
-	const costPct = ROUND_TRIP_COST_PCT[market];
+	const costPct = g.costPct;
 	const basis = held ? held.avgPrice : price;
-	const breakevenRaw = basis * (1 + costPct / 100);
-	const breakeven = market === "US" ? Math.round(breakevenRaw * 100) / 100 : Math.ceil(breakevenRaw);
+	const breakeven = g.breakeven(basis * (1 + costPct / 100));
 
 	let sizing: TimingResult["sizing"] = null;
 	if (verdict === "매수" && input.totalAssetsKrw && input.totalAssetsKrw > 0 && stopLoss !== null && base > stopLoss) {

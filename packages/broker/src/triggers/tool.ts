@@ -6,6 +6,7 @@
  *
  * 시장: Binance 코인 · 국장 · 미장 — 모두 1분봉~주봉 (주식 분·시간봉은 장 기준). 봉 마감 판정.
  * 동작: 알림, 또는 자동 매매(order — 자체 체결기. 주식 PLAN §40 2단계 · 코인 4단계 — Binance 현물 USDT 마켓, 24시간).
+ * Binance 선물(contract: futures — TradFi 무기한 KORUUSDT 등)은 **알림만** — 선물 주문은 binance_futures 확인 카드로만 나간다.
  */
 import { Type } from "typebox";
 import { createRangeTools } from "./range-tool.ts";
@@ -14,7 +15,8 @@ export { chooseFeed, guessVenue, summaryLine } from "./tool-helpers.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { binanceSymbolHint, bStockGate, bStockOf, bStockStatus, bStockWarnings, type BStock } from "../binance/bstocks.ts";
 import { symbolRules } from "../binance/trade.ts";
-import { fetchWatchBars } from "./bars.ts";
+import { parseCryptoSymbol } from "../crypto-chart.ts";
+import { BarsError, fetchWatchBars } from "./bars.ts";
 import { barsPerDay, fireIndices, holdsNow, maxBarsFor, validateCondition, warmupFor } from "./condition.ts";
 import { presetCatalog, resolvePreset } from "./presets.ts";
 import { conditionText, kstShort, num, VENUE_LABEL } from "./describe.ts";
@@ -184,6 +186,7 @@ const ProtectT = Type.Object(
 interface ProtectParams {
 	symbol?: string;
 	market?: Venue;
+	contract?: "spot" | "futures";
 	protect?: Parameters<typeof toProtect>[0];
 	broker?: OrderTarget["broker"];
 	shares?: number;
@@ -219,6 +222,7 @@ export const BINANCE_STOCK_WARNINGS = [
 	"보유 수량 API 가 없어 매도 가능 수량은 Binance 체결 내역으로 추정합니다 (앱에서 bStock 으로 바꾼 주식은 빠지지 않습니다 — 넘치면 Binance 가 거절합니다).",
 	"Binance 앱에서 미국 주식 약관에 동의해 둬야 주문이 됩니다. 산 주식은 토큰(bStock)으로 바꾸지 않습니다 (tokenize=false).",
 ];
+const FUTURES_NOTIFY_ONLY = "선물 감시는 알림만 됩니다 — 선물 주문·익절·손절은 binance_futures 로 준비합니다 (order 를 빼고 다시)";
 const NO_TARGET = (venue: Venue): string =>
 	venue === "binance" ? "주문할 Binance 계정이 없습니다 — 설정 → 코인 (Binance) 에서 API 키를 넣어 주세요 (현물 거래 권한)" : "주문할 증권 계좌가 없습니다 — 설정 → 연결 → 증권 (한국투자는 계좌번호까지)";
 
@@ -270,6 +274,8 @@ export function createWatchTools(deps: WatchToolDeps) {
 	 */
 	const prepareProtect = async (params: ProtectParams, ctx: ToolCtx) => {
 		const raw = (params.symbol ?? "").trim().toUpperCase();
+		if (params.contract === "futures" || (params.market !== "us" && params.market !== "krx" && parseCryptoSymbol(raw).perp))
+			throw new Error("선물 포지션의 손절·익절은 binance_futures (action: tpsl) 로 겁니다 — 감시 보호는 현물·주식만");
 		const venue = params.market ?? guessVenue(raw.replace(/[^A-Z0-9]/g, ""));
 		const symbol = venue === "us" ? raw.replace(/[^A-Z0-9.-]/g, "") : raw.replace(/[^A-Z0-9]/g, "");
 		if (!symbol) throw new Error("symbol 이 필요합니다");
@@ -400,6 +406,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 			"연계주문: 매수 order 에 protect({ stopPct·stopPrice, takePct·takePrice, interval })를 넣으면 체결 뒤 체결 수량·평단으로 손절·익절을 자동으로 건다 (한 트리거 — 하나가 팔면 끝, OCO). " +
 			"action=protect: 이미 가진 종목에 손절·익절 (symbol · protect · broker · shares — 비우면 매도 가능 수량 전부, 평단은 증권사 값). " +
 			"시장: binance(코인) · krx(국장) · us(미장) — 모두 1분봉~주봉. 주식은 사용자의 증권 키로 조회한다. " +
+			"Binance 선물(contract: 'futures' · 'KORUUSDT.P' 표기 · 현물에 없는 TradFi 무기한 KORUUSDT·TSLAUSDT 등은 자동)은 선물 봉으로 **알림만** — order·protect 를 붙이지 않는다 (선물 주문·익절·손절은 binance_futures). " +
 			"주식 분·시간봉은 장 기준으로 자른다 (국장 09:00, 미장 09:30 시작 — 1시간봉 마지막 봉은 마감에서 잘린다). session: 'extended' = 미장 프리·애프터 · 국장 NXT(통합 기준). " +
 			"action=prepare: 조건을 준비하고 확인 카드를 띄운다 — **켜는 건 사용자가 카드에서** [켜기] 를 눌러야 한다. 지난 기간(코인 분봉 30일 · 주식 분봉 5거래일 · 일봉 약 6개월)에 몇 번 울렸을지 미리보기가 함께 나온다. " +
 			"action=list: 내 감시 목록. action=pause: 일시정지 (다시 켜기·삭제는 사용자가 앱·텔레그램에서). " +
@@ -415,6 +422,11 @@ export function createWatchTools(deps: WatchToolDeps) {
 			market: Type.Optional(Type.Union(VENUES.map((v) => Type.Literal(v)), { description: "binance=코인 · krx=국장 · us=미장. 비우면 심볼로 추정 (6자리=국장)" })),
 			symbol: Type.Optional(Type.String({ description: "코인 ETHUSDT · 국장 005930 · 미장 AAPL (Binance 미국 주식도 AAPL + market us)" })),
 			bStock: Type.Optional(Type.Boolean({ description: "사용자가 bStock(토큰화 주식, AAPLBUSDT)을 원한다고 **직접** 말했을 때만 true. 그냥 '주식' 이면 쓰지 않는다" })),
+			contract: Type.Optional(
+				Type.Union([Type.Literal("spot"), Type.Literal("futures")], {
+					description: "binance 만 — futures = USDⓈ-M 선물 봉으로 감시 (알림만, order 불가). 비우면 현물, 현물에 없는 심볼(KORUUSDT 등 TradFi 무기한)은 선물로 자동",
+				}),
+			),
 			interval: Type.Optional(Type.Union(INTERVALS.map((i) => Type.Literal(i)), { description: "봉 간격 — 사용자가 말하지 않으면 되묻는다" })),
 			session: Type.Optional(
 				Type.Union([Type.Literal("regular"), Type.Literal("extended")], {
@@ -475,12 +487,16 @@ export function createWatchTools(deps: WatchToolDeps) {
 
 			// ── prepare ──
 			const raw = (params.symbol ?? "").trim().toUpperCase();
-			const venue = (params.market as Venue | undefined) ?? guessVenue(raw.replace(/[^A-Z0-9]/g, ""));
+			// 무기한 표기(KORUUSDT.P)면 Binance 선물 — 떼고 나서 시장을 추정한다 (KORUUSDTP 는 미장 티커처럼 보인다)
+			const perp = params.market !== "us" && params.market !== "krx" && params.contract !== "spot" ? parseCryptoSymbol(raw) : null;
+			const venue = (params.market as Venue | undefined) ?? (perp?.perp || params.contract === "futures" ? "binance" : guessVenue(raw.replace(/[^A-Z0-9]/g, "")));
 			// 미장 티커는 점·하이픈이 있을 수 있다 (BRK.B), 코인·국장은 영숫자만
-			const symbol = venue === "us" ? raw.replace(/[^A-Z0-9.-]/g, "") : raw.replace(/[^A-Z0-9]/g, "");
+			const symbol = perp?.perp ? perp.symbol : venue === "us" ? raw.replace(/[^A-Z0-9.-]/g, "") : raw.replace(/[^A-Z0-9]/g, "");
 			if (!params.interval) throw new Error("interval(봉 간격)이 필요합니다 — 사용자에게 몇 분봉·시간봉·일봉·주봉 기준인지 물어보세요.");
-			// Binance — 쌍 전체여야 한다. bStock(토큰화 주식)이면 배지·경고
-			const bs = venue === "binance" ? await binanceSymbol(symbol) : null;
+			if (params.contract && venue !== "binance") throw new Error("contract(현물·선물)는 Binance(market: binance)만 고릅니다");
+			let futures = params.contract === "futures" || !!perp?.perp;
+			// Binance — 쌍 전체여야 한다. bStock(토큰화 주식)이면 배지·경고 (선물은 bStock 이 없다)
+			const bs = venue === "binance" && !futures ? await binanceSymbol(symbol) : null;
 			// 프리셋이면 펼친다 — 저장되는 건 펼친 조건 (평가기는 프리셋을 모른다)
 			let presetName: string | null = null;
 			let presetMeta: Condition["preset"];
@@ -501,7 +517,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 			const feed = isStock(venue) ? chooseFeed(venue, deps.feeds?.() ?? { kis: true, toss: true }, basis) : undefined;
 			if (params.basis && venue !== "krx") throw new Error("basis 는 국장만 고릅니다");
 			const condition: Condition = {
-				market: { venue, symbol, ...(feed ? { feed } : {}) },
+				market: { venue, symbol, ...(feed ? { feed } : {}), ...(futures ? { contract: "futures" as const } : {}) },
 				...(params.session ? { session: params.session } : {}),
 				interval: params.interval as Interval,
 				when: "bar_close",
@@ -515,14 +531,28 @@ export function createWatchTools(deps: WatchToolDeps) {
 			if (!Number.isInteger(days) || days < 1 || days > MAX_EXPIRES_DAYS) errors.push(`만료는 1~${MAX_EXPIRES_DAYS}일입니다`);
 			if (params.maxFires != null && (!Number.isInteger(params.maxFires) || params.maxFires < 1)) errors.push("maxFires 는 1 이상입니다");
 			if (params.cooldownMinutes != null && (params.cooldownMinutes < 0 || params.cooldownMinutes > 7 * 24 * 60)) errors.push("쿨다운은 0분~7일입니다");
-			const name = (params.name ?? "").trim() || (presetName ? `${symbol} ${presetName}` : conditionText(condition).slice(0, 40));
-			if ([...name].length > 60) errors.push("이름은 60자까지입니다");
+			if ([...(params.name ?? "").trim()].length > 60) errors.push("이름은 60자까지입니다");
 			if (errors.length) throw new Error(`준비하지 못했습니다:\n- ${errors.join("\n- ")}`);
+			if (params.order && futures) throw new Error(FUTURES_NOTIFY_ONLY);
 
 			// 미리보기 — 지난 기간(봉이 모자라면 받은 만큼)에 이 조건이 몇 번 울렸을지. 지표 예열 구간은 세지 않는다
 			const warm = warmupFor(condition);
 			const span = previewBars(condition);
-			const bars = await fetchBars(condition, Math.min(maxBarsFor(condition), span + warm), now());
+			const want = Math.min(maxBarsFor(condition), span + warm);
+			let bars: WatchBar[];
+			try {
+				bars = await fetchBars(condition, want, now());
+			} catch (err) {
+				// 현물에 없는 심볼 — 선물(TradFi 무기한 KORUUSDT 등)에 있으면 선물 봉으로 (사용자가 현물이라고 정했으면 그대로 실패)
+				if (venue !== "binance" || futures || params.contract === "spot" || !(err instanceof BarsError && err.unknownSymbol)) throw err;
+				futures = true;
+				condition.market = { ...condition.market, contract: "futures" };
+				bars = await fetchBars(condition, want, now()).catch((e: unknown) => {
+					throw e instanceof BarsError && e.unknownSymbol ? new Error(`Binance 현물·선물 어디에도 없는 종목입니다: ${symbol}`) : e;
+				});
+				if (params.order) throw new Error(`${symbol} 은(는) Binance 선물에만 있습니다. ${FUTURES_NOTIFY_ONLY}`);
+			}
+			const name = (params.name ?? "").trim() || (presetName ? `${symbol}${futures ? " 선물" : ""} ${presetName}` : conditionText(condition).slice(0, 40));
 			const from = Math.max(warm, bars.length - span);
 			const fires = fireIndices(condition, bars).filter((i) => i >= from);
 			const closeAt = (i: number) => barCloseAt(condition, (bars[i] as WatchBar).t);
@@ -630,6 +660,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 				...(bars.length < warm + 10 ? ["봉이 적어 미리보기를 믿기 어렵습니다 (상장 초기 종목?)"] : []),
 				...orderWarnings,
 				...(bs ? bStockWarnings(bs, true) : []),
+				...(futures ? ["Binance 선물 봉(마지막 체결가)으로 판정합니다 — 알림만 가고 주문은 나가지 않습니다. 선물 익절·손절 주문은 표시가격 기준이라 조금 다를 수 있습니다."] : []),
 			];
 			const card: WatchConfirmCard = {
 				kind: "watch-confirm-card",
@@ -639,7 +670,7 @@ export function createWatchTools(deps: WatchToolDeps) {
 				text: conditionText(condition),
 				preset: presetName,
 				feed: feed && isStock(venue) ? FEED_LABEL(venue, feed) : null,
-				venue: venueLabel(condition.market.venue, bs),
+				venue: futures ? "Binance 선물" : venueLabel(condition.market.venue, bs),
 				interval: condition.interval,
 				limits: spec.limits,
 				lastClose: last?.close ?? null,

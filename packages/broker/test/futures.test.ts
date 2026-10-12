@@ -15,7 +15,9 @@ import {
 	cancelRequest,
 	clearFuturesCache,
 	closeOrderParams,
+	contractText,
 	isolatedLiqPrice,
+	isPerpetual,
 	maxNotionalAt,
 	openOrderParams,
 	parseFuturesSymbol,
@@ -63,6 +65,16 @@ describe("거래소 규칙·구간 (순수)", () => {
 		assert.equal(RULES.minNotional, "50");
 		assert.equal(RULES.multiplierUp, "1.0500");
 		assert.equal(RULES.marginAsset, "USDT");
+	});
+
+	it("TradFi 무기한은 만기 계약이 아니다 — 기초자산을 밝힌다", () => {
+		const koru = parseFuturesSymbol({ ...BTC_INFO, symbol: "KORUUSDT", contractType: "TRADIFI_PERPETUAL", underlyingType: "EQUITY" });
+		assert.equal(isPerpetual(RULES), true);
+		assert.equal(isPerpetual(koru), true);
+		assert.equal(isPerpetual(parseFuturesSymbol({ ...BTC_INFO, contractType: "CURRENT_QUARTER" })), false);
+		assert.equal(contractText(RULES), "무기한");
+		assert.equal(contractText(koru), "TradFi 무기한 — 미국 주식 기반 (실물이 아니라 가격을 따라가는 계약)");
+		assert.equal(contractText({ ...koru, underlyingType: "COMMODITY" }), "TradFi 무기한 — 원자재 기반 (실물이 아니라 가격을 따라가는 계약)");
 	});
 
 	it("금액 ÷ 가격 → 단위로 내림 (부동소수점 없이)", () => {

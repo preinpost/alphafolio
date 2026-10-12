@@ -52,7 +52,7 @@ export function createBinanceFuturesTool(deps: { brokers: BrokerAccess; prepareO
 		name: "binance_futures",
 		label: "Binance 선물",
 		description:
-			"Binance **USDⓈ-M 선물**(무기한 BTCUSDT 등) 조회와 주문 **준비** (주문은 실행하지 않는다 — 확인 카드에서 사용자가 [확인] 해야 나간다). " +
+			"Binance **USDⓈ-M 선물**(무기한 BTCUSDT 등 · 주식·원자재 기반 TradFi 무기한 KORUUSDT·TSLAUSDT·XAUUSDT 등) 조회와 주문 **준비** (주문은 실행하지 않는다 — 확인 카드에서 사용자가 [확인] 해야 나간다). " +
 			"action: account(잔고·증거금·포지션·미체결·모드 — 조회만, symbol 선택) / " +
 			"open(진입: side BUY=롱·SELL=숏, type, 크기는 quantity(코인 수량)·notional(포지션 크기 USDT)·margin(넣을 증거금 USDT) 중 하나, LIMIT 은 price, " +
 			"leverage·marginType(ISOLATED 격리·CROSSED 교차, 비우면 지금 설정), takeProfitPrice·stopLossPrice 를 함께 걸 수 있다) / " +

@@ -40,8 +40,10 @@ const str = (v: unknown, d = "0"): string => (v === undefined || v === null || v
 export interface FuturesRules {
 	symbol: string;
 	status: string;
-	/** PERPETUAL(무기한) · CURRENT_QUARTER 등 */
+	/** PERPETUAL(무기한) · TRADIFI_PERPETUAL(주식·원자재 등 기반 무기한) · CURRENT_QUARTER 등 */
 	contractType: string;
+	/** 기초자산 종류 — COIN · EQUITY(미국 주식) · KR_EQUITY · COMMODITY 등. 없으면 "" */
+	underlyingType: string;
 	base: string;
 	quote: string;
 	marginAsset: string;
@@ -74,6 +76,7 @@ export function parseFuturesSymbol(s: Record<string, unknown>): FuturesRules {
 		symbol: str(s.symbol, ""),
 		status: str(s.status, ""),
 		contractType: str(s.contractType, ""),
+		underlyingType: str(s.underlyingType, ""),
 		base: str(s.baseAsset, ""),
 		quote: str(s.quoteAsset, ""),
 		marginAsset: str(s.marginAsset, str(s.quoteAsset, "")),
@@ -103,6 +106,27 @@ export async function futuresRules(symbol: string, c?: BinanceCreds): Promise<Fu
 		infoCache = { at: Date.now(), host, rules: new Map((info.symbols ?? []).map((s) => [String(s.symbol), parseFuturesSymbol(s)])) };
 	}
 	return infoCache.rules.get(symbol) ?? null;
+}
+
+/** 만기 없는 계약 — TradFi(주식·원자재 등 기반) 무기한도 만기가 없다 */
+export const isPerpetual = (r: FuturesRules): boolean => r.contractType === "PERPETUAL" || r.contractType === "TRADIFI_PERPETUAL";
+
+const UNDERLYING_TEXT: Record<string, string> = {
+	EQUITY: "미국 주식",
+	KR_EQUITY: "한국 주식",
+	HK_EQUITY: "홍콩 주식",
+	CN_EQUITY: "중국 주식",
+	COMMODITY: "원자재",
+	FX: "외환",
+	PREMARKET: "상장 전 종목",
+};
+
+/** "무기한" · "TradFi 무기한 — 미국 주식 기반 (실물이 아니라 가격을 따라가는 계약)" · "CURRENT_QUARTER" */
+export function contractText(r: FuturesRules): string {
+	if (r.contractType === "PERPETUAL") return "무기한";
+	if (r.contractType !== "TRADIFI_PERPETUAL") return r.contractType || "계약 종류 모름";
+	const u = UNDERLYING_TEXT[r.underlyingType] ?? (r.underlyingType || "전통자산");
+	return `TradFi 무기한 — ${u} 기반 (실물이 아니라 가격을 따라가는 계약)`;
 }
 
 /** 테스트 */

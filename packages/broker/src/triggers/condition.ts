@@ -380,6 +380,10 @@ export function validateCondition(c: Condition): string[] {
 		else if (!isIntraday(c.interval)) errors.push("일봉·주봉은 정규장 기준입니다 — 프리·애프터는 분봉·시간봉에서만");
 		else if (venue === "krx" && c.market.feed?.basis !== "integrated") errors.push("국장 확장 세션(NXT 08:00–20:00)은 KRX+NXT 통합 기준(basis: integrated)에서만 됩니다");
 	}
+	if (c.market.contract !== undefined) {
+		if (c.market.contract !== "futures") errors.push("contract 는 futures 만 됩니다 (현물이면 비운다)");
+		else if (venue !== "binance") errors.push("선물 봉(contract: futures)은 Binance 만 됩니다");
+	}
 	if (c.market.feed) {
 		if (!isStock(venue)) errors.push("코인은 시세 출처를 고르지 않습니다 (Binance 공개 시세)");
 		else errors.push(...feedErrors(venue, c.market.feed));

@@ -112,7 +112,8 @@ export class Watcher {
 				}
 				const c = t.source.condition;
 				// 코인은 공개 시세라 모두 한 번에, 주식은 각자의 증권 키로 조회하므로 사용자별로 묶는다
-				const key = `${c.market.venue}:${c.market.symbol}:${c.interval}:${c.session ?? "regular"}${isStock(c.market.venue) ? `:${t.member}` : ""}`;
+				// 현물·선물은 같은 심볼이라도 봉이 다르다 (ETHUSDT)
+				const key = `${c.market.venue}${c.market.contract === "futures" ? "-futures" : ""}:${c.market.symbol}:${c.interval}:${c.session ?? "regular"}${isStock(c.market.venue) ? `:${t.member}` : ""}`;
 				groups.set(key, [...(groups.get(key) ?? []), t]);
 			}
 			for (const [key, list] of groups) {
