@@ -498,6 +498,7 @@ html.ua-keyboard .hide-on-keyboard {
   .convs {
     flex: 1;
     min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     margin: 0 -4px;
     padding: 0 4px;
@@ -700,9 +701,15 @@ html.ua-keyboard .hide-on-keyboard {
   .spacer {
     flex: 1;
   }
+  /*
+   * 세로로만 스크롤한다. overflow-y 만 auto 로 두면 overflow-x 도 auto 로 계산돼서,
+   * 화면보다 몇 px 넓은 요소가 하나라도 있으면 모바일에서 화면 전체가 좌우로 밀린다.
+   * 가로 스크롤이 필요한 곳(.hscroll · .md-table · .set-tabs …)은 자기 안에서 스크롤한다.
+   */
   .page {
     flex: 1;
     min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior-y: contain;
   }
@@ -2285,6 +2292,7 @@ html.ua-keyboard .hide-on-keyboard {
     grid-template-columns: minmax(440px, 5fr) minmax(0, 7fr);
     flex: 1;
     min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     background: var(--bg);
     word-break: keep-all;
