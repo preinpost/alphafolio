@@ -945,17 +945,17 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: center;
     justify-content: center;
     gap: 7px;
-    height: 36px;
-    padding: 0 14px;
+    height: 40px;
+    padding: 0 16px;
     border: 1px solid transparent;
     border-radius: var(--r-sm);
-    font-size: 13.5px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
     white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, transform 0.06s;
+    transition: background 0.2s, border-color 0.2s, transform 0.18s var(--spring);
   }
   .btn:active:not(:disabled) {
-    transform: translateY(1px);
+    transform: scale(0.96);
   }
   .btn:disabled {
     opacity: 0.45;
@@ -968,15 +968,14 @@ html.ua-keyboard .hide-on-keyboard {
   .btn-primary:hover:not(:disabled) {
     background: var(--btn-hover);
   }
+  /* 보조 버튼 — 시안 B .btn.line: 바탕 없이 얇은 선 */
   .btn-secondary {
     background: var(--surface);
     color: var(--fg);
-    border-color: var(--border);
-    box-shadow: var(--af-shadow-sm);
+    border-color: color-mix(in srgb, var(--fg) 12%, transparent);
   }
   .btn-secondary:hover:not(:disabled) {
     background: var(--sunken);
-    border-color: color-mix(in oklch, var(--fg) 18%, var(--border));
   }
   .btn-ghost {
     color: var(--fg);
@@ -985,22 +984,23 @@ html.ua-keyboard .hide-on-keyboard {
     background: var(--hover);
   }
   .btn-danger {
-    background: var(--surface);
+    background: var(--up-soft);
     color: var(--danger);
-    border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
   }
   .btn-danger:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--danger) 8%, var(--surface));
+    background: color-mix(in srgb, var(--danger) 20%, var(--surface));
   }
   .btn-sm {
-    height: 30px;
-    padding: 0 10px;
-    font-size: 12.5px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 10px;
+    font-size: 13px;
   }
   .btn-lg {
-    height: 44px;
-    padding: 0 18px;
-    font-size: 14.5px;
+    height: 52px;
+    padding: 0 20px;
+    border-radius: var(--r);
+    font-size: 16px;
   }
   .btn-block {
     width: 100%;
@@ -1056,19 +1056,19 @@ html.ua-keyboard .hide-on-keyboard {
   .seg {
     display: inline-flex;
     gap: 2px;
-    padding: 3px;
+    padding: 4px;
     background: var(--sunken);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 14px;
   }
   .seg button {
-    height: 28px;
+    height: 32px;
     padding: 0 12px;
-    border-radius: 7px;
-    font-size: 12.5px;
-    font-weight: 500;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
     color: var(--muted);
     white-space: nowrap;
+    transition: background 0.2s var(--ease), color 0.2s var(--ease);
   }
   .seg button:hover {
     background: var(--hover);
@@ -1077,8 +1077,10 @@ html.ua-keyboard .hide-on-keyboard {
   .seg button[aria-pressed="true"] {
     background: var(--surface);
     color: var(--fg);
-    font-weight: 600;
-    box-shadow: var(--af-shadow-sm), 0 0 0 1px var(--border);
+    box-shadow: var(--af-shadow-sm);
+  }
+  .seg button[aria-pressed="true"]:hover {
+    background: var(--surface);
   }
   .seg.block {
     display: flex;
@@ -1096,31 +1098,33 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .field > span,
   .field > label {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    color: var(--muted);
+    color: var(--fg-2);
   }
+  /* 입력 — 시안 B: 테두리 없이 오목한 바탕, 포커스면 흰 바탕 + 브랜드 선 */
   .input {
     width: 100%;
-    height: 38px;
-    padding: 0 12px;
-    border: 1px solid var(--border);
+    height: 42px;
+    padding: 0 14px;
+    border: 1px solid transparent;
     border-radius: var(--r-sm);
-    background: var(--surface);
+    background: var(--sunken);
     color: var(--fg);
     font-size: 14px;
     outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   }
   .input::placeholder {
-    color: color-mix(in oklch, var(--muted) 80%, var(--surface));
+    color: var(--faint);
   }
-  .input:hover:not(:disabled) {
-    border-color: color-mix(in oklch, var(--fg) 20%, var(--border));
+  .input:hover:not(:disabled):not(:focus) {
+    border-color: color-mix(in srgb, var(--fg) 8%, transparent);
   }
   .input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 18%, transparent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
   }
   .input:disabled {
     opacity: 0.6;
@@ -1134,8 +1138,9 @@ html.ua-keyboard .hide-on-keyboard {
   }
   textarea.input {
     height: auto;
-    min-height: 76px;
-    padding: 9px 12px;
+    min-height: 84px;
+    padding: 12px 14px;
+    line-height: 1.5;
     resize: vertical;
   }
   select.input {
@@ -1144,20 +1149,23 @@ html.ua-keyboard .hide-on-keyboard {
     background-image:
       linear-gradient(45deg, transparent 50%, var(--muted) 50%),
       linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-    background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+    background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
     background-size: 5px 5px;
     background-repeat: no-repeat;
   }
   .input-sm {
-    height: 32px;
+    height: 34px;
+    border-radius: 10px;
     font-size: 13px;
   }
   @media (max-width: 767px) {
     .input {
-      height: 44px;
+      height: 48px;
+      border-radius: 14px;
     }
     .input-sm {
-      height: 38px;
+      height: 40px;
+      border-radius: 12px;
     }
   }
   .field-err {
@@ -1174,25 +1182,28 @@ html.ua-keyboard .hide-on-keyboard {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    height: 30px;
-    padding: 0 11px;
+    height: 32px;
+    padding: 0 12px;
     flex-shrink: 0;
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: 999px;
-    background: var(--surface);
-    font-size: 12.5px;
-    font-weight: 500;
-    color: var(--muted);
+    background: var(--sunken);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-2);
     white-space: nowrap;
+    transition: background 0.2s var(--ease), color 0.2s var(--ease), transform 0.2s var(--spring);
   }
   .chip:hover {
     color: var(--fg);
-    border-color: color-mix(in oklch, var(--fg) 20%, var(--border));
+    background: color-mix(in srgb, var(--fg) 9%, var(--sunken));
+  }
+  .chip:active {
+    transform: scale(0.95);
   }
   .chip[aria-pressed="true"] {
     background: var(--fg);
     color: var(--surface);
-    border-color: var(--fg);
   }
   .badge {
     display: inline-flex;
@@ -1201,33 +1212,29 @@ html.ua-keyboard .hide-on-keyboard {
     height: 20px;
     padding: 0 7px;
     flex-shrink: 0;
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: 6px;
     background: var(--sunken);
-    color: var(--muted);
+    color: var(--fg-2);
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     white-space: nowrap;
   }
   .badge.ok {
     color: var(--ok);
-    background: color-mix(in oklch, var(--ok) 10%, var(--surface));
-    border-color: color-mix(in oklch, var(--ok) 25%, var(--border));
+    background: var(--ok-soft);
   }
   .badge.warn {
-    color: color-mix(in oklch, var(--warn) 70%, var(--fg));
-    background: color-mix(in oklch, var(--warn) 12%, var(--surface));
-    border-color: color-mix(in oklch, var(--warn) 30%, var(--border));
+    color: color-mix(in srgb, var(--warn) 70%, var(--fg));
+    background: var(--warn-soft);
   }
   .badge.bad {
     color: var(--danger);
-    background: color-mix(in oklch, var(--danger) 8%, var(--surface));
-    border-color: color-mix(in oklch, var(--danger) 25%, var(--border));
+    background: var(--up-soft);
   }
   .badge.accent {
     color: var(--accent);
     background: var(--accent-soft);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
   }
   .badge.solid {
     background: var(--fg);
@@ -1242,8 +1249,8 @@ html.ua-keyboard .hide-on-keyboard {
     height: 24px;
     flex-shrink: 0;
     border-radius: 999px;
-    background: color-mix(in oklch, var(--fg) 18%, var(--surface));
-    transition: background 0.15s;
+    background: color-mix(in srgb, var(--fg) 16%, var(--surface));
+    transition: background 0.2s;
   }
   .switch::after {
     content: "";
@@ -1253,7 +1260,7 @@ html.ua-keyboard .hide-on-keyboard {
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: var(--surface);
+    background: #fff;
     box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
     transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
@@ -1261,7 +1268,7 @@ html.ua-keyboard .hide-on-keyboard {
     background: color-mix(in oklch, var(--fg) 28%, var(--surface));
   }
   .switch[aria-checked="true"] {
-    background: var(--fg);
+    background: var(--accent);
   }
   .switch[aria-checked="true"]:hover {
     background: var(--btn-hover);
@@ -1328,10 +1335,10 @@ html.ua-keyboard .hide-on-keyboard {
   }
 
   /* 카드는 섹션 단위로만 — 카드 안에 카드를 넣지 않고 헤어라인 행으로 나눈다 */
+  /* 카드 — 시안 B: 테두리 없이 그림자만, 큰 모서리 */
   .card {
     min-width: 0;
     background: var(--surface);
-    border: 1px solid var(--border);
     border-radius: var(--r-lg);
     box-shadow: var(--af-shadow-sm);
   }
@@ -1339,13 +1346,13 @@ html.ua-keyboard .hide-on-keyboard {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 52px;
-    padding: 16px 20px 12px;
+    min-height: 56px;
+    padding: 20px 20px 12px;
   }
   .card-h h2 {
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.02em;
   }
   .card-h .count {
     margin-left: 4px;
@@ -1357,12 +1364,12 @@ html.ua-keyboard .hide-on-keyboard {
     padding: 0 20px 20px;
   }
   .rows > * + * {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .section-gap {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
   }
 
   .row {
@@ -1429,9 +1436,11 @@ html.ua-keyboard .hide-on-keyboard {
     gap: 6px;
     width: 100%;
     padding: 12px 20px;
-    border-top: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--muted);
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 var(--r-lg) var(--r-lg);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-2);
     transition: background 0.15s, color 0.15s;
   }
   .row-add:hover {
@@ -1441,16 +1450,16 @@ html.ua-keyboard .hide-on-keyboard {
 
   /* 화면당 큰 숫자 하나 — 총자산 · 이달 지출 */
   .big-num {
-    font-size: clamp(30px, 4.2vw, 42px);
-    font-weight: 700;
+    font-size: clamp(32px, 4.2vw, 40px);
+    font-weight: 800;
     letter-spacing: -0.035em;
     line-height: 1.08;
     font-variant-numeric: tabular-nums;
   }
   .big-num .unit {
     margin-left: 3px;
-    font-size: 0.52em;
-    font-weight: 600;
+    font-size: 0.6em;
+    font-weight: 700;
     letter-spacing: 0;
   }
   .kv {
@@ -1489,11 +1498,12 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: flex-start;
     gap: 10px;
     padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    border: 0;
+    border-radius: 14px;
     background: var(--sunken);
     color: var(--fg);
     font-size: 13px;
+    line-height: 1.5;
   }
   .notice > svg {
     margin-top: 2px;
@@ -1501,22 +1511,19 @@ html.ua-keyboard .hide-on-keyboard {
     color: var(--muted);
   }
   .notice.warn {
-    background: color-mix(in oklch, var(--warn) 10%, var(--surface));
-    border-color: color-mix(in oklch, var(--warn) 30%, var(--border));
+    background: var(--warn-soft);
   }
   .notice.warn > svg {
-    color: color-mix(in oklch, var(--warn) 75%, var(--fg));
+    color: color-mix(in srgb, var(--warn) 75%, var(--fg));
   }
   .notice.bad {
-    background: color-mix(in oklch, var(--danger) 7%, var(--surface));
-    border-color: color-mix(in oklch, var(--danger) 28%, var(--border));
+    background: var(--up-soft);
   }
   .notice.bad > svg {
     color: var(--danger);
   }
   .notice.ok {
-    background: color-mix(in oklch, var(--ok) 8%, var(--surface));
-    border-color: color-mix(in oklch, var(--ok) 25%, var(--border));
+    background: var(--ok-soft);
   }
   .notice.ok > svg {
     color: var(--ok);
@@ -1551,7 +1558,7 @@ html.ua-keyboard .hide-on-keyboard {
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: var(--fg);
+    background: var(--accent);
     transition: width 0.3s;
   }
   .meter.over > i {
@@ -1581,11 +1588,12 @@ html.ua-keyboard .hide-on-keyboard {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 12px 12px 16px;
-    border-radius: var(--r);
+    padding: 12px 12px 12px 18px;
+    border-radius: 14px;
     background: var(--fg);
     color: var(--surface);
-    font-size: 13.5px;
+    font-size: 14px;
+    font-weight: 600;
     box-shadow: var(--af-shadow-md);
     animation: rise 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
     pointer-events: auto;
@@ -1636,57 +1644,93 @@ html.ua-keyboard .hide-on-keyboard {
   }
 
   /* 다이얼로그 — 데스크톱은 가운데, 모바일은 바텀시트 */
+  /* 다이얼로그 — 시안 B: 데스크톱은 가운데 큰 모서리, 모바일은 손잡이 달린 바텀시트 */
   dialog.sheet {
-    width: min(460px, calc(100% - 32px));
-    max-height: calc(100dvh - 48px);
+    width: min(520px, calc(100% - 32px));
+    max-height: min(86vh, calc(100dvh - 48px));
     margin: auto;
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
+    border: 0;
+    border-radius: var(--r-xl);
     background: var(--surface);
     color: var(--fg);
     box-shadow: var(--af-shadow-md);
   }
   dialog.sheet::backdrop {
-    background: oklch(0.15 0.02 260 / 0.42);
+    background: rgba(0, 0, 0, 0.32);
   }
   dialog.sheet[open] {
-    animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    animation: sheet-in 0.3s var(--ease);
   }
   .sheet-h {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 18px 20px 6px;
+    gap: 10px;
+    padding: 22px 24px 4px;
   }
   .sheet-h h2 {
     flex: 1;
-    font-size: 17px;
+    font-size: 21px;
     font-weight: 700;
+    letter-spacing: -0.02em;
   }
   .sheet-b {
     display: flex;
     flex-direction: column;
     gap: 14px;
-    padding: 12px 20px;
+    padding: 14px 24px;
   }
   .sheet-f {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding: 8px 20px 20px;
+    padding: 10px 24px 24px;
+  }
+  .sheet-f .btn {
+    height: 48px;
+    min-width: 96px;
+    border-radius: 14px;
+    font-size: 15px;
   }
   @media (max-width: 767px) {
     dialog.sheet {
       width: 100%;
       max-width: 100%;
+      max-height: 92dvh;
       margin: auto 0 0;
       padding-bottom: var(--safe-b);
-      border-bottom: 0;
-      border-radius: 20px 20px 0 0;
+      border-radius: var(--r-xl) var(--r-xl) 0 0;
+    }
+    dialog.sheet::backdrop {
+      background: rgba(0, 0, 0, 0.4);
+    }
+    dialog.sheet[open] {
+      animation: sheet-up 0.42s var(--ease);
+    }
+    /* 손잡이 — 시안 B .grab */
+    dialog.sheet::before {
+      content: "";
+      display: block;
+      width: 40px;
+      height: 5px;
+      margin: 10px auto 0;
+      border-radius: 3px;
+      background: color-mix(in srgb, var(--fg) 14%, transparent);
+    }
+    .sheet-h {
+      padding: 12px 20px 4px;
+    }
+    .sheet-b {
+      padding: 12px 20px;
+    }
+    .sheet-f {
+      padding: 10px 20px 20px;
     }
     .sheet-f .btn {
       flex: 1;
+      height: 52px;
+      border-radius: var(--r);
+      font-size: 16px;
     }
   }
 
@@ -1694,13 +1738,13 @@ html.ua-keyboard .hide-on-keyboard {
   .grid-main {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 340px;
-    gap: 20px;
+    gap: 16px;
     align-items: start;
   }
   .grid-main > .col {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
     min-width: 0;
   }
   @media (max-width: 1100px) {
@@ -3554,6 +3598,17 @@ html.ua-keyboard .hide-on-keyboard {
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+}
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(105%);
   }
 }
 @keyframes pulse {
