@@ -39,7 +39,7 @@ export function installUpdateWatch(): void {
 	// 오래 열어 둔 탭도 배포를 알아채게 — 다시 볼 때마다 서비스워커 갱신을 확인한다
 	document.addEventListener("visibilitychange", () => {
 		if (document.visibilityState !== "visible") return;
-		void navigator.serviceWorker.getRegistration().then((r) => r?.update().catch(() => undefined));
+		void navigator.serviceWorker.getRegistration().then((r) => r?.update().catch((e) => console.warn("서비스워커 갱신 확인 실패", e)));
 	});
 }
 
@@ -98,7 +98,7 @@ export async function applyUpdate(): Promise<void> {
 		if (swTookOver || !("serviceWorker" in navigator)) return;
 		const reg = await navigator.serviceWorker.getRegistration();
 		if (!reg) return;
-		await reg.update().catch(() => undefined);
+		await reg.update().catch((e) => console.warn("서비스워커 갱신 실패", e));
 		const next = reg.installing ?? reg.waiting;
 		if (next && (await untilActivated(next, 15_000))) return;
 		await reg.unregister();

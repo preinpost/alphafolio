@@ -114,7 +114,7 @@ export function useConfirm<D = never>(
 	/** 닫기 — 서버에도 남긴다 (다시 열어도 닫은 카드로) */
 	const dismiss = () => {
 		setPhase("dismissed");
-		if (token) void api.dismissCard(token).catch(() => {});
+		if (token) void api.dismissCard(token).catch((e) => console.warn("카드 닫기 동기화 실패", e));
 	};
 	return { phase, message, detail, remain, total, confirm, retry, dismiss };
 }
