@@ -4,7 +4,8 @@
  * 에이전트 툴(ledger_*)과 **같은 repo**를 호출한다. 비즈니스 로직이 한 곳에만 있도록
  * 여기서는 HTTP ↔ repo 변환만 한다.
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage } from "node:http";
+import { Type } from "typebox";
 import {
 	addTransaction,
 	budgetStatus,
@@ -34,14 +35,9 @@ import {
 	type D1Config,
 	type TxType,
 } from "@alphafolio/ledger";
+import { HttpError, readBody, readJson } from "./http.ts";
 
-export class HttpError extends Error {
-	readonly status: number;
-	constructor(status: number, message: string) {
-		super(message);
-		this.status = status;
-	}
-}
+export { HttpError, readJson };
 
 function num(v: string | null, field: string): number {
 	const n = Number(v);
@@ -54,22 +50,40 @@ function required(v: string | null | undefined, field: string): string {
 	return v;
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-	const chunks: Buffer[] = [];
-	let size = 0;
-	for await (const chunk of req) {
-		const buf = chunk as Buffer;
-		size += buf.length;
-		if (size > 1_000_000) throw new HttpError(413, "요청 본문이 너무 큽니다");
-		chunks.push(buf);
-	}
-	if (chunks.length === 0) return {};
-	try {
-		return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
-	} catch {
-		throw new HttpError(400, "JSON 파싱 실패");
-	}
-}
+
+// ── 본문 스키마 ─────────────────────────────────────────────────
+// 형식만 본다 (문자열인가·숫자인가). 날짜·월·유형 같은 값 규칙은 도메인(LedgerValidationError)에 있다.
+// 금액은 앱이 문자열로 보내던 경우가 있어 숫자 문자열도 받는다 (Number() 로 바꿔 도메인이 검사).
+const Amount = Type.Union([Type.Number(), Type.String()]);
+const OptStr = Type.Optional(Type.String());
+const TxCreateBody = Type.Object({
+	date: Type.String(),
+	amount: Amount,
+	type: OptStr,
+	category: OptStr,
+	merchant: OptStr,
+	memo: OptStr,
+	account: OptStr,
+});
+const TxPatchBody = Type.Object({
+	date: OptStr,
+	amount: Type.Optional(Amount),
+	type: OptStr,
+	category: OptStr,
+	merchant: OptStr,
+	memo: OptStr,
+	account: OptStr,
+});
+const BudgetBody = Type.Object({
+	month: Type.String(),
+	category: Type.String(),
+	limit_amt: Type.Optional(Amount),
+	limit: Type.Optional(Amount),
+});
+const NameBody = Type.Object({ name: Type.String() });
+const DeleteLedgerBody = Type.Object({ confirmName: Type.String() });
+const OwnerBody = Type.Object({ to: Type.String() });
+const InviteBody = Type.Object({ invitee: Type.String() });
 
 /**
  * D1 설정 공급자 — 서버 기동 시 주입한다.
@@ -139,16 +153,16 @@ async function handleLedgerRequest(req: IncomingMessage, url: URL, rest: string,
 
 	// POST /api/ledger/transactions
 	if (rest === "/transactions" && method === "POST") {
-		const body = await readJson(req);
+		const body = await readBody(req, TxCreateBody);
 		const c = await cfg();
 		return addTransaction(c, await ledger(c), {
-			date: required(body.date as string, "date"),
+			date: required(body.date, "date"),
 			amount: Number(body.amount),
 			type: body.type === undefined ? "expense" : (body.type as TxType),
-			category: body.category as string | undefined,
-			merchant: body.merchant as string | undefined,
-			memo: body.memo as string | undefined,
-			account: body.account as string | undefined,
+			category: body.category,
+			merchant: body.merchant,
+			memo: body.memo,
+			account: body.account,
 			member,
 			source: "manual",
 		});
@@ -160,16 +174,16 @@ async function handleLedgerRequest(req: IncomingMessage, url: URL, rest: string,
 		if (!id) throw new HttpError(400, "id가 필요합니다");
 
 		if (method === "PATCH") {
-			const body = await readJson(req);
+			const body = await readBody(req, TxPatchBody);
 			const c = await cfg();
 			return updateTransaction(c, await ledgerOf(c, id), id, {
-				date: body.date as string | undefined,
+				date: body.date,
 				amount: body.amount === undefined ? undefined : Number(body.amount),
 				type: body.type as TxType | undefined,
-				category: body.category as string | undefined,
-				merchant: body.merchant as string | undefined,
-				memo: body.memo as string | undefined,
-				account: body.account as string | undefined,
+				category: body.category,
+				merchant: body.merchant,
+				memo: body.memo,
+				account: body.account,
 			});
 		}
 		if (method === "DELETE") {
@@ -195,11 +209,11 @@ async function handleLedgerRequest(req: IncomingMessage, url: URL, rest: string,
 		return budgetStatus(c, await ledger(c), required(q.get("month"), "month"));
 	}
 	if (rest === "/budgets" && method === "PUT") {
-		const body = await readJson(req);
+		const body = await readBody(req, BudgetBody);
 		const c = await cfg();
 		return setBudget(c, await ledger(c), {
-			month: required(body.month as string, "month"),
-			category: required(body.category as string, "category"),
+			month: required(body.month, "month"),
+			category: required(body.category, "category"),
 			limit_amt: Number(body.limit_amt ?? body.limit),
 		});
 	}
@@ -238,19 +252,19 @@ export async function handleLedgerAdmin(
 		}
 		// POST /api/ledgers { name }
 		if (!id && method === "POST") {
-			const body = await readJson(req);
-			return createLedger(await cfg(), user, String(body.name ?? ""));
+			const body = await readBody(req, NameBody);
+			return createLedger(await cfg(), user, body.name);
 		}
 		if (!id) return undefined;
 
 		// PATCH /api/ledgers/:id { name }   DELETE /api/ledgers/:id { confirmName }
 		if (!sub && method === "PATCH") {
-			const body = await readJson(req);
-			return renameLedger(await cfg(), user, id, String(body.name ?? ""));
+			const body = await readBody(req, NameBody);
+			return renameLedger(await cfg(), user, id, body.name);
 		}
 		if (!sub && method === "DELETE") {
-			const body = await readJson(req);
-			await deleteLedger(await cfg(), user, id, String(body.confirmName ?? ""));
+			const body = await readBody(req, DeleteLedgerBody);
+			await deleteLedger(await cfg(), user, id, body.confirmName);
 			return { deleted: true };
 		}
 		// POST /api/ledgers/:id/default
@@ -260,8 +274,8 @@ export async function handleLedgerAdmin(
 		}
 		// POST /api/ledgers/:id/owner { to }
 		if (sub === "owner" && method === "POST") {
-			const body = await readJson(req);
-			await transferOwnership(await cfg(), user, id, String(body.to ?? ""));
+			const body = await readBody(req, OwnerBody);
+			await transferOwnership(await cfg(), user, id, body.to);
 			return { ok: true };
 		}
 		// GET /api/ledgers/:id/members   DELETE /api/ledgers/:id/members/:name (내보내기 / 본인이면 나가기)
@@ -276,8 +290,8 @@ export async function handleLedgerAdmin(
 		}
 		// POST /api/ledgers/:id/invites { invitee }
 		if (sub === "invites" && method === "POST") {
-			const body = await readJson(req);
-			return inviteMember(await cfg(), user, id, String(body.invitee ?? ""), userExists);
+			const body = await readBody(req, InviteBody);
+			return inviteMember(await cfg(), user, id, body.invitee, userExists);
 		}
 		return undefined;
 	}
@@ -296,5 +310,3 @@ export async function handleLedgerAdmin(
 	}
 	return undefined;
 }
-
-export { readJson };

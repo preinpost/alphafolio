@@ -20,7 +20,7 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
 - 사용자가 지출·수입을 말하면 \`ledger_add\`로 기록한다.
 - 금액 합계·추이를 물으면 \`ledger_summary\`를 쓴다. 개별 거래를 찾아야 할 때만 \`ledger_list\`를 쓴다.
   (내역 전체를 읽어오면 토큰이 낭비되고 사용자의 소비 기록이 불필요하게 노출된다)
-- \`ledger_delete\`는 사용자가 명시적으로 삭제를 요청했을 때만 호출한다.
+- \`ledger_delete\`는 사용자가 명시적으로 삭제를 요청했을 때만 호출한다. 먼저 confirm 없이 불러 대상을 보여 주고, 사용자가 확인하면 confirm:true 로 다시 호출한다.
 - 카테고리는 한국어로 일관되게 쓴다: 식비, 교통, 주거, 통신, 의료, 문화, 쇼핑, 경조사, 급여, 이자/배당.
 
 ### 가계부 공유

@@ -358,6 +358,37 @@ CREATE TABLE IF NOT EXISTS trade_journal_refs (
 CREATE INDEX IF NOT EXISTS idx_journal_refs_entry ON trade_journal_refs(entry_id);
 `.trim(),
 	},
+	{
+		// dedupe_key 를 가계부별로 — 0001 의 전역 UNIQUE 는 다른 가계부의 같은 임포트 키와 부딪친다.
+		// SQLite 는 컬럼 제약을 못 지워서 테이블을 다시 만든다 (NULL 은 UNIQUE 에서 서로 다르다).
+		id: "0014_tx_dedupe_per_ledger",
+		sql: `
+CREATE TABLE transactions_new (
+  id          TEXT PRIMARY KEY,
+  date        TEXT NOT NULL,
+  amount      INTEGER NOT NULL,
+  currency    TEXT NOT NULL DEFAULT 'KRW',
+  category    TEXT,
+  merchant    TEXT,
+  memo        TEXT,
+  account     TEXT,
+  source      TEXT NOT NULL DEFAULT 'manual',
+  dedupe_key  TEXT,
+  created_at  TEXT NOT NULL,
+  member      TEXT,
+  ledger_id   TEXT
+);
+INSERT INTO transactions_new (id, date, amount, currency, category, merchant, memo, account, source, dedupe_key, created_at, member, ledger_id)
+  SELECT id, date, amount, currency, category, merchant, memo, account, source, dedupe_key, created_at, member, ledger_id FROM transactions;
+DROP TABLE transactions;
+ALTER TABLE transactions_new RENAME TO transactions;
+CREATE INDEX IF NOT EXISTS idx_tx_date ON transactions(date);
+CREATE INDEX IF NOT EXISTS idx_tx_category ON transactions(category, date);
+CREATE INDEX IF NOT EXISTS idx_tx_member ON transactions(member, date);
+CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, date);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tx_ledger_dedupe ON transactions(ledger_id, dedupe_key);
+`.trim(),
+	},
 ];
 
 const MIGRATION_TABLE = `

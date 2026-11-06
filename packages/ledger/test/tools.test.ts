@@ -89,24 +89,37 @@ describe("가계부 툴 공용 입력 검증", () => {
 	});
 });
 
-describe("ledger_delete 기존 정책·권한", () => {
-	it("현재의 즉시 삭제 계약을 유지하고 내 가계부 거래만 삭제한다", async () => {
+describe("ledger_delete 확인 정책·권한", () => {
+	const delTool = (user = "ms") => createLedgerTools(() => d1.cfg, user).find((t) => t.name === "ledger_delete")!;
+
+	it("confirm 없이 부르면 지우지 않고 삭제 대상을 미리 보여 준다", async () => {
 		const tx = await run(addTool());
-		const tool = createLedgerTools(() => d1.cfg, "ms").find((t) => t.name === "ledger_delete")!;
-		const r = await tool.execute("test", { id: tx.id } as never, undefined, undefined, undefined as never);
+		const r = await delTool().execute("test", { id: tx.id } as never, undefined, undefined, undefined as never);
+		const details = r.details as LedgerDeleteDetails;
+		assert.equal(details.deleted, false);
+		assert.equal(details.preview?.id, tx.id);
+		assert.match(r.content[0]!.text, /confirm:true/);
+		assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM transactions WHERE id = ?").get(tx.id)?.n, 1);
+	});
+
+	it("confirm:true 면 내 가계부 거래를 삭제한다", async () => {
+		const tx = await run(addTool());
+		const r = await delTool().execute("test", { id: tx.id, confirm: true } as never, undefined, undefined, undefined as never);
 		assert.deepEqual(r.details as LedgerDeleteDetails, { kind: "ledger-delete", id: tx.id, deleted: true });
 		assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM transactions WHERE id = ?").get(tx.id)?.n, 0);
 	});
 
-	it("남의 가계부 거래 id를 알아도 삭제하지 않고 존재 여부를 드러내지 않는다", async () => {
+	it("남의 가계부 거래 id를 알아도 삭제·미리보기하지 않고 존재 여부를 드러내지 않는다", async () => {
 		const otherAdd = createLedgerTools(() => d1.cfg, "sj").find((t) => t.name === "ledger_add")!;
 		const added = await otherAdd.execute("test", { date: "2026-09-30", amount: 8000, type: "expense" } as never, undefined, undefined, undefined as never);
 		const tx = (added.details as LedgerTxDetails).tx;
 		const before = d1.db.prepare("SELECT * FROM transactions WHERE id = ?").get(tx.id);
-		const tool = createLedgerTools(() => d1.cfg, "ms").find((t) => t.name === "ledger_delete")!;
-		const r = await tool.execute("test", { id: tx.id } as never, undefined, undefined, undefined as never);
-		assert.equal((r.details as LedgerDeleteDetails).deleted, false);
-		assert.match(r.content[0]!.text, /해당 id가 없습니다/);
+		for (const params of [{ id: tx.id }, { id: tx.id, confirm: true }]) {
+			const r = await delTool().execute("test", params as never, undefined, undefined, undefined as never);
+			assert.equal((r.details as LedgerDeleteDetails).deleted, false);
+			assert.equal((r.details as LedgerDeleteDetails).preview ?? null, null);
+			assert.match(r.content[0]!.text, /해당 id가 없습니다/);
+		}
 		assert.deepEqual(d1.db.prepare("SELECT * FROM transactions WHERE id = ?").get(tx.id), before);
 	});
 });

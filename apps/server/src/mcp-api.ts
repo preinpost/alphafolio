@@ -25,10 +25,24 @@ import {
 } from "@alphafolio/mcp";
 import { explainMcpError, type McpWriteRequest } from "@alphafolio/mcp/tools";
 import type { CardOutcomeStore } from "./card-outcomes.ts";
-import { HttpError, readJson } from "./ledger-api.ts";
+import { Type } from "typebox";
+import { HttpError, readBody } from "./http.ts";
+
+const TokenBody = Type.Object({ token: Type.String() });
+// 형식만 — 인증 방식·헤더 값 검사는 아래·McpStore 가 한다
+const AddServerBody = Type.Object({
+	preset: Type.Optional(Type.String()),
+	name: Type.Optional(Type.String()),
+	url: Type.Optional(Type.String()),
+	auth: Type.Optional(Type.String()),
+	token: Type.Optional(Type.String()),
+	headers: Type.Optional(Type.Unknown()),
+});
+const OAuthStartBody = Type.Object({ client: Type.Optional(Type.String()) });
 import { createOrderToken, ORDER_TOKEN_TTL_MS, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
 import type { McpAuthManager, OAuthClientKind } from "./mcp-auth.ts";
 import { McpConfigError, normalizeHeaders, type McpServerRecord, type McpStore } from "./mcp-store.ts";
+import { fallbackOn } from "./log.ts";
 
 export interface McpApiDeps {
 	store: McpStore;
@@ -254,15 +268,14 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 
 	// ⚠️ 확인 카드의 [확인] 버튼만 부른다. 에이전트는 사용자 인증 토큰이 없어 여기에 올 수 없다
 	if (path === "/api/mcp/execute" && req.method === "POST") {
-		const body = await readJson(req);
-		const token = String(body.token ?? "");
+		const { token } = await readBody(req, TokenBody);
 		const run = () => executeMcpWrite(deps, user, token);
 		if (!deps.outcomes) return run();
 		return deps.outcomes.run(user, token, run, (r) => ({ state: r.ok ? "done" : "failed", message: r.message, detail: r }));
 	}
 
 	if (path === "/api/mcp/servers" && req.method === "POST") {
-		const body = await readJson(req);
+		const body = await readBody(req, AddServerBody);
 		try {
 			const presetId = typeof body.preset === "string" ? body.preset : undefined;
 			if (presetId) {
@@ -302,7 +315,7 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 
 	if (action === "" && req.method === "DELETE") {
 		// 폐기 실패해도 지운다 — 사용자는 이 서버를 더 이상 쓰지 않겠다고 했다
-		await deps.auth.disconnect(user, id).catch(() => undefined);
+		await deps.auth.disconnect(user, id).catch(fallbackOn("mcp", `토큰 폐기 실패 user=${user} id=${id}`, undefined));
 		await deps.store.remove(user, id);
 		poolFor(deps, user).drop(id);
 		return listing(deps, user);
@@ -313,7 +326,7 @@ export async function handleMcp(req: IncomingMessage, path: string, user: string
 	if (action === "/tools/refresh" && req.method === "POST") return toolsView(deps, user, rec, true);
 
 	if (action === "/oauth/start" && req.method === "POST") {
-		const body = await readJson(req);
+		const body = await readBody(req, OAuthStartBody);
 		const clientKind: OAuthClientKind = body.client === "app" ? "app" : "web";
 		try {
 			return await deps.auth.start(user, id, clientKind);

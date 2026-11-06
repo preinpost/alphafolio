@@ -12,7 +12,15 @@ import type { IncomingMessage } from "node:http";
 import type { TriggerSpec } from "@alphafolio/broker";
 import type { WatchSummary } from "@alphafolio/broker/watch-tools";
 import type { CardOutcomeStore } from "./card-outcomes.ts";
-import { HttpError, readJson } from "./ledger-api.ts";
+import { Type } from "typebox";
+import { HttpError, readBody } from "./http.ts";
+
+const TokenBody = Type.Object({ token: Type.String() });
+// dailyBuy: null·"" = 한도 없음, 숫자 문자열은 Number() 로 (기존 앱 호환)
+const LimitBody = Type.Object({
+	currency: Type.Union([Type.Literal("KRW"), Type.Literal("USD"), Type.Literal("USDT")]),
+	dailyBuy: Type.Optional(Type.Union([Type.Number(), Type.String(), Type.Null()])),
+});
 import { createOrderToken, type OrderTokenGuard, type VerifyFailure } from "./order-tokens.ts";
 import type { Currency, ExecRecord } from "./trade-store.ts";
 import { toSummary, TriggerError, type TriggerRecord, type TriggerStore } from "./triggers.ts";
@@ -220,8 +228,7 @@ export async function handleWatch(req: IncomingMessage, path: string, user: stri
 		if (path === "/api/watch" && req.method === "GET") return await ops.view(user);
 		// ⚠️ 확인 카드의 [켜기] 만 부른다 — 에이전트는 사용자 인증 토큰이 없어 여기에 올 수 없다
 		if (path === "/api/watch/arm" && req.method === "POST") {
-			const body = await readJson(req);
-			const token = String(body.token ?? "");
+			const { token } = await readBody(req, TokenBody);
 			const arm = () => ops.arm(user, token);
 			// 카드가 켠 직후 보여 주는 문장과 같게 (WatchCards)
 			const watch = outcomes
@@ -234,9 +241,8 @@ export async function handleWatch(req: IncomingMessage, path: string, user: stri
 		}
 		if (path === "/api/watch/stop-all" && req.method === "POST") return { stopped: await ops.stopAll(user, "app") };
 		if (path === "/api/watch/limits" && req.method === "PUT") {
-			const body = await readJson(req);
-			const currency = body.currency === "USD" || body.currency === "KRW" || body.currency === "USDT" ? body.currency : null;
-			if (!currency) throw new HttpError(400, "currency 는 KRW · USD · USDT");
+			const body = await readBody(req, LimitBody);
+			const currency = body.currency;
 			const v = body.dailyBuy === null || body.dailyBuy === "" || body.dailyBuy === undefined ? null : Number(body.dailyBuy);
 			return { limits: await ops.setLimit(user, currency, v) };
 		}

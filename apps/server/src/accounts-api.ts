@@ -4,7 +4,11 @@
  */
 import type { IncomingMessage } from "node:http";
 import type { AccountStore } from "./accounts.ts";
-import { readJson } from "./ledger-api.ts";
+import { Type } from "typebox";
+import { readBody } from "./http.ts";
+
+const PasswordBody = Type.Object({ current: Type.String(), next: Type.String() });
+const InviteBody = Type.Object({ note: Type.Optional(Type.String()), days: Type.Optional(Type.Number()) });
 
 export async function handleAccounts(
 	req: IncomingMessage,
@@ -20,8 +24,8 @@ export async function handleAccounts(
 	if (seg[0] === "me" && method === "POST") {
 		// POST /api/me/password { current, next } — 다른 기기 로그인은 끊기고 이 기기는 새 토큰으로 이어간다
 		if (seg[1] === "password") {
-			const body = await readJson(req);
-			await accounts.changePassword(user, String(body.current ?? ""), String(body.next ?? ""));
+			const body = await readBody(req, PasswordBody);
+			await accounts.changePassword(user, body.current, body.next);
 			return { token: issueToken(user) };
 		}
 		// POST /api/me/logout-all
@@ -36,11 +40,8 @@ export async function handleAccounts(
 		// GET/POST /api/admin/invites, POST /api/admin/invites/:id/revoke
 		if (kind === "invites" && !id && method === "GET") return accounts.listInvites(user);
 		if (kind === "invites" && !id && method === "POST") {
-			const body = await readJson(req);
-			return accounts.createInvite(user, {
-				note: typeof body.note === "string" ? body.note : undefined,
-				days: typeof body.days === "number" ? body.days : undefined,
-			});
+			const body = await readBody(req, InviteBody);
+			return accounts.createInvite(user, { note: body.note, days: body.days });
 		}
 		if (kind === "invites" && id && action === "revoke" && method === "POST") {
 			await accounts.revokeInvite(user, id);

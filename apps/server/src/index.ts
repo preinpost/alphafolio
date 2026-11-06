@@ -8,11 +8,12 @@
  * 컨테이너는 리버스 프록시 뒤에 둔다 (TLS·도메인은 프록시 담당).
  */
 import { copyFileSync, createReadStream, existsSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize, relative } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
-import { d1ConfigFromEnv, d1Ping, ensureMigrated, LedgerAccessError, type D1Config } from "@alphafolio/ledger";
+import { d1ConfigFromEnv, ensureMigrated, LedgerAccessError, type D1Config } from "@alphafolio/ledger";
 import {
 	fetchPortfolio,
 	fetchQuote,
@@ -57,12 +58,17 @@ import { handleJournal, JournalRecorder, JournalStore, JournalSync, parseOrderNo
 import { bearerFrom, createToken, verifyToken } from "./auth.ts";
 import { APP_VERSION, loadConfig, loadDotEnv } from "./config.ts";
 import { corsFor } from "./cors.ts";
-import { handleLedger, handleLedgerAdmin, HttpError, readJson, setLedgerConfigProvider } from "./ledger-api.ts";
-import { clientIp, LoginRateLimiter } from "./ratelimit.ts";
+import { handleLedger, handleLedgerAdmin, setLedgerConfigProvider } from "./ledger-api.ts";
+import { API_CSP, applySecurityHeaders, HttpError, json, readBody, webCspProvider } from "./http.ts";
+import { dispatch, RESPONDED, startsWith, under, type AuthedCtx, type Route } from "./routes.ts";
+import { authRoutes } from "./auth-api.ts";
+import { adminRoutes } from "./admin-api.ts";
+import { fallbackOn, logDebug } from "./log.ts";
+import { Type } from "typebox";
+import { LoginRateLimiter } from "./ratelimit.ts";
 import { RuntimeManager } from "./runtimes.ts";
-import { SECRET_CATALOG, SecretStore, specFor, LLM_SECRET_PROVIDERS } from "./secrets.ts";
+import { SecretStore, LLM_SECRET_PROVIDERS } from "./secrets.ts";
 import { AccountError, AccountStore } from "./accounts.ts";
-import { handleAccounts } from "./accounts-api.ts";
 import { attachWebSocket, type WsHub } from "./ws.ts";
 import { TriggerError, TriggerStore } from "./triggers.ts";
 import { Watcher, type WatchEvent } from "./watcher.ts";
@@ -75,7 +81,6 @@ import { createSafeFetch } from "@alphafolio/mcp";
 import { McpStore } from "./mcp-store.ts";
 import { CALLBACK_PATH, McpAuthManager } from "./mcp-auth.ts";
 import { Notifier, TELEGRAM_CHAT, TELEGRAM_TOKEN } from "./notify/index.ts";
-import { botIdOf, findPrivateChat, getBotName, isBotToken, sendMessage, TelegramError } from "./notify/telegram.ts";
 import { handleMcp, handleMcpCallback, mcpConfirmSecret, mcpHandles, prepareMcpWrite, type McpApiDeps, type McpWritePayload } from "./mcp-api.ts";
 import { staticCacheControl } from "./static-cache.ts";
 
@@ -89,11 +94,10 @@ const MIME: Record<string, string> = {
 	".webmanifest": "application/manifest+json",
 };
 
-function json(res: ServerResponse, status: number, body: unknown): void {
-	const payload = JSON.stringify(body);
-	res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-	res.end(payload);
-}
+/** 본문 스키마 — 형식만 (토큰 검증은 OrderTokenGuard, 메모는 parseOrderNote) */
+const OrderExecuteBody = Type.Object({ token: Type.String(), note: Type.Optional(Type.Unknown()) });
+const CardDismissBody = Type.Object({ token: Type.String() });
+const SESSION_PATH = /^\/api\/sessions\/([^/]+)$/;
 
 /**
  * 바깥 연결의 주소당 대기 시간 — Node 기본 250ms 는 먼 서버에 짧다.
@@ -443,8 +447,8 @@ async function main(): Promise<void> {
 				for (const b of ["kis", "toss", "binance", "binance_stock"] as const) {
 					try {
 						out.push(await orderTarget(brokerAccess(user), b));
-					} catch {
-						/* 키·계좌 없음 */
+					} catch (err) {
+						logDebug("watch", `주문 계좌 없음 user=${user} broker=${b}`, err); // 키·계좌 없음 — 흔하다
 					}
 				}
 				return out;
@@ -467,7 +471,7 @@ async function main(): Promise<void> {
 					return { sellable: p.qty, avgPrice: p.avgPrice };
 				}
 				const sellable = await targetSellable(a, target, symbol);
-				const pf = await fetchPortfolio(a, { sources: STOCK_SOURCES }).catch(() => null);
+				const pf = await fetchPortfolio(a, { sources: STOCK_SOURCES }).catch(fallbackOn("watch", `보호 평단 조회 실패 user=${user} — 평단 없이`, null));
 				const h = pf?.holdings.find((x) => x.symbol.toUpperCase() === symbol.toUpperCase() && x.broker === target.broker);
 				return { sellable, avgPrice: h && h.avgPrice > 0 ? h.avgPrice : null };
 			},
@@ -545,267 +549,45 @@ async function main(): Promise<void> {
 	// 초대 코드 추측 방지 — 로그인과 따로 센다 (가입 실패가 로그인을 막지 않게)
 	const signupLimiter = new LoginRateLimiter(cfg.login);
 
-	const server = createServer((req, res) => {
-		void handleRequest(req, res).catch((err: unknown) => {
-			// 자격증명 미설정은 서버 오류가 아니라 "설정이 필요함"이다
-			const needsSetup =
-				err instanceof KisCredentialsMissingError ||
-				err instanceof TossCredentialsMissingError ||
-				err instanceof NaverCredentialsMissingError ||
-				err instanceof NoBrokerConfiguredError;
-			// 없는 종목은 잘못된 입력이다 — 500 으로 내면 서버 장애처럼 보인다
-			const notFound = err instanceof QuoteNotFoundError;
-			const status =
-				err instanceof HttpError || err instanceof LedgerAccessError || err instanceof AccountError
-					? err.status
-					: needsSetup
-						? 503
-						: notFound
-							? 404
-							: 500;
-			const message = err instanceof Error ? err.message : String(err);
-			if (status === 500) console.error("[server]", err);
-			if (!res.headersSent) json(res, status, { error: message });
-		});
-	});
-
-	async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-		const path = url.pathname;
-
-		// iOS 앱은 capacitor://localhost 에서 부른다 — API 에만 CORS 를 붙인다 (정적 파일은 앱 번들에 있다)
-		if (path.startsWith("/api/")) {
-			const cors = corsFor(req.headers.origin, req.method, cfg.corsOrigins);
-			for (const [k, v] of Object.entries(cors.headers)) res.setHeader(k, v);
-			if (cors.preflight) {
-				res.writeHead(204);
-				res.end();
-				return;
-			}
-		}
-
-		// ── 공개 엔드포인트 ────────────────────────────────────────
-		if (path === "/api/health") {
-			json(res, 200, { ok: true, version: APP_VERSION, ledger: ledgerReady(), model: cfg.agent.model });
-			return;
-		}
-
-		if (path === "/api/auth/login" && req.method === "POST") {
-			const body = await readJson(req);
-			const user = String(body.user ?? "");
-
-			// IP와 계정 두 축으로 센다 — 한 곳에서 여러 계정을 훑는 경우와
-			// 여러 곳에서 한 계정을 노리는 경우를 모두 막는다.
-			const ip = clientIp(req.headers, req.socket.remoteAddress, cfg.login.trustProxy);
-			const keys = [`ip:${ip}`, `user:${user}`];
-
-			const verdict = loginLimiter.check(keys);
-			if (!verdict.allowed) {
-				res.setHeader("retry-after", String(verdict.retryAfterSec));
-				json(res, 429, {
-					error: `로그인 시도가 너무 많습니다. ${verdict.retryAfterSec}초 뒤에 다시 시도하세요.`,
-					retryAfterSec: verdict.retryAfterSec,
-				});
-				return;
-			}
-
-			const authedName = accounts.authenticate(user, String(body.password ?? ""));
-			if (!authedName) {
-				loginLimiter.recordFailure(keys);
-				json(res, 401, { error: "아이디 또는 비밀번호가 올바르지 않습니다" });
-				return;
-			}
-
-			loginLimiter.recordSuccess(keys);
-			json(res, 200, { token: issueToken(authedName), user: authedName });
-			return;
-		}
-
-		// 초대 코드로 가입 → 바로 로그인 (PLAN §25)
-		if (path === "/api/auth/signup" && req.method === "POST") {
-			if (!accounts.ready) {
-				json(res, 503, { error: "지금은 가입할 수 없습니다 (서버 DB 미설정)" });
-				return;
-			}
-			const ip = clientIp(req.headers, req.socket.remoteAddress, cfg.login.trustProxy);
-			const keys = [`ip:${ip}`];
-			const verdict = signupLimiter.check(keys);
-			if (!verdict.allowed) {
-				res.setHeader("retry-after", String(verdict.retryAfterSec));
-				json(res, 429, { error: `시도가 너무 많습니다. ${verdict.retryAfterSec}초 뒤에 다시 시도하세요.` });
-				return;
-			}
-			const body = await readJson(req);
-			try {
-				const name = await accounts.signup({
-					code: String(body.code ?? ""),
-					name: String(body.user ?? ""),
-					password: String(body.password ?? ""),
-				});
-				signupLimiter.recordSuccess(keys);
-				json(res, 200, { token: issueToken(name), user: name });
-			} catch (err) {
-				// 코드가 틀린 경우만 센다 — ID 중복·비밀번호 길이 같은 입력 실수로 잠기지 않게
-				if (err instanceof AccountError && err.status === 403) signupLimiter.recordFailure(keys);
-				throw err;
-			}
-			return;
-		}
-
+	// ── 라우트 표 ─────────────────────────────────────────────
+	/** 공개 — Bearer 없이 */
+	const publicRoutes: Route[] = [
+		{ path: "/api/health", handle: () => ({ ok: true, version: APP_VERSION, ledger: ledgerReady(), model: cfg.agent.model }) },
+		...authRoutes({ accounts, issueToken, loginLimiter, signupLimiter, trustProxy: cfg.login.trustProxy }),
 		// MCP OAuth 콜백 — 인가 서버가 브라우저를 돌려보낸다 (Bearer 없음). 1회용 state 가 사용자를 가리킨다
-		if (path === CALLBACK_PATH && req.method === "GET") {
-			await handleMcpCallback(url, res, mcpDeps);
-			return;
-		}
+		{
+			method: "GET",
+			path: CALLBACK_PATH,
+			handle: async ({ url, res }) => {
+				await handleMcpCallback(url, res, mcpDeps);
+				return RESPONDED;
+			},
+		},
+	];
 
-		// ── 인증 필요 ─────────────────────────────────────────────
-		if (path.startsWith("/api/")) {
-			const verified = verifyToken(bearerFrom(req.headers.authorization), cfg.auth.secret);
-			// 서명이 맞아도 계정이 비활성화됐거나 비밀번호가 바뀌었을 수 있다 (토큰 버전)
-			const user = verified && accounts.accepts(verified.user, verified.version) ? verified.user : null;
-			if (!user) {
-				json(res, 401, { error: "인증이 필요합니다" });
-				return;
-			}
+	/** 인증 필요 — 위에서부터 처음 맞는 것 하나 */
+	const apiRoutes: Route<AuthedCtx>[] = [
+		// 가계부 관리·초대 — /api/ledger 보다 먼저 (접두사가 겹친다)
+		{
+			path: (p) => p.startsWith("/api/ledgers") || p.startsWith("/api/invites"),
+			handle: ({ req, path, user }) => handleLedgerAdmin(req, path, user, (name) => accounts.has(name)),
+		},
+		{ path: under("/api/ledger"), handle: ({ req, url, path, user }) => handleLedger(req, url, path.slice("/api/ledger".length), user) },
+		// 시크릿 · 텔레그램 테스트 · 계정(/api/me, /api/admin)
+		...adminRoutes({ accounts, issueToken, secrets, runtimes, telegramBots, notifier, ledgerConfig }),
+		// ── 감시 트리거 (PLAN §40) ─────────────────────────
+		{ path: under("/api/watch"), handle: ({ req, path, user }) => handleWatch(req, path, user, watchOps, cardOutcomes) },
+		// ── MCP 서버 (설정 화면 전용 — 에이전트 툴 없음) ─────────
+		{ path: startsWith("/api/mcp/"), handle: ({ req, path, user }) => handleMcp(req, path, user, mcpDeps) },
 
-			// 가계부 관리·초대 — /api/ledger 보다 먼저 (접두사가 겹친다)
-			if (path.startsWith("/api/ledgers") || path.startsWith("/api/invites")) {
-				const result = await handleLedgerAdmin(req, path, user, (name) => accounts.has(name));
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			if (path === "/api/ledger" || path.startsWith("/api/ledger/")) {
-				const result = await handleLedger(req, url, path.slice("/api/ledger".length), user);
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			// ── 시크릿 ────────────────────────────────────────
-			// 원문은 어떤 경우에도 내보내지 않는다 (설정 여부 + 마스킹만).
-			if (path === "/api/secrets" && req.method === "GET") {
-				json(res, 200, {
-					items: secrets.status(user),
-					ephemeralMaster: secrets.ephemeralMaster,
-					storageReady: secrets.ready,
-					undecryptable: secrets.failedCount,
-				});
-				return;
-			}
-
-			if (path === "/api/secrets" && req.method === "PUT") {
-				const body = await readJson(req);
-				const name = String(body.name ?? "");
-				const value = String(body.value ?? "");
-				if (!specFor(name)) throw new HttpError(400, `저장할 수 없는 키입니다: ${name}`);
-				try {
-					await secrets.set(name, value, user);
-				} catch (err) {
-					throw new HttpError(400, err instanceof Error ? err.message : String(err));
-				}
-				// LLM 키는 떠 있는 런타임에 바로 반영 (재시작·재로그인 불필요)
-				const llmProvider = LLM_SECRET_PROVIDERS[name];
-				if (llmProvider) await runtimes.applyLlmKey(user, llmProvider, secrets.get(name, user) ?? null);
-				if (name.startsWith("TELEGRAM_")) telegramBots.refresh(user);
-				json(res, 200, { items: secrets.status(user) });
-				return;
-			}
-
-			if (path.startsWith("/api/secrets/") && req.method === "DELETE") {
-				const name = decodeURIComponent(path.slice("/api/secrets/".length));
-				if (!specFor(name)) throw new HttpError(400, `알 수 없는 키입니다: ${name}`);
-				await secrets.remove(name, user);
-				// 제거하면 서버 기본(auth.json·env)으로 되돌아간다
-				const llmProvider = LLM_SECRET_PROVIDERS[name];
-				if (llmProvider) await runtimes.applyLlmKey(user, llmProvider, null);
-				if (name.startsWith("TELEGRAM_")) telegramBots.refresh(user);
-				json(res, 200, { items: secrets.status(user) });
-				return;
-			}
-
-			// 연결 테스트 — 저장된 값으로 실제 호출을 한 번 해본다
-			if (path === "/api/secrets/test/d1" && req.method === "POST") {
-				try {
-					const ms = await d1Ping(ledgerConfig());
-					json(res, 200, { ok: true, message: `연결 성공 (${ms}ms)` });
-				} catch (err) {
-					json(res, 200, { ok: false, message: err instanceof Error ? err.message : String(err) });
-				}
-				return;
-			}
-
-			// ── 감시 트리거 (PLAN §40) ─────────────────────────
-			if (path === "/api/watch" || path.startsWith("/api/watch/")) {
-				const result = await handleWatch(req, path, user, watchOps, cardOutcomes);
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			// ── MCP 서버 (설정 화면 전용 — 에이전트 툴 없음) ─────────
-			if (path.startsWith("/api/mcp/")) {
-				const result = await handleMcp(req, path, user, mcpDeps);
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			// 텔레그램 연결 테스트 — 채팅 id 가 없으면 봇에게 온 최근 개인 메시지에서 찾아 저장하고, 테스트 메시지를 보낸다
-			if (path === "/api/notify/telegram/test" && req.method === "POST") {
-				const token = notifier.userSecret(TELEGRAM_TOKEN, user);
-				if (!token) {
-					json(res, 200, { ok: false, message: "봇 토큰을 먼저 저장하세요 (@BotFather → /newbot)" });
-					return;
-				}
-				if (!isBotToken(token)) {
-					json(res, 200, { ok: false, message: "봇 토큰 모양이 아닙니다 — 숫자:영문 형태의 토큰 전체를 붙여 넣으세요" });
-					return;
-				}
-				// 명령 수신(getUpdates 롱 폴링)과 채팅 찾기가 겹치면 409 — 테스트 동안 멈췄다가 끝나면 다시
-				telegramBots.refresh(user, { suspend: true });
-				try {
-					const bot = await getBotName(token);
-					let chat = notifier.userSecret(TELEGRAM_CHAT, user);
-					let found = "";
-					// 봇 자신의 id 를 넣은 경우 (웹 텔레그램 주소창의 숫자가 봇 id 다) — 무시하고 다시 찾는다
-					const wrongChat = chat === botIdOf(token);
-					if (!chat || wrongChat) {
-						const hit = await findPrivateChat(token);
-						if (!hit) {
-							const why = wrongChat ? "채팅 id 칸에 봇 자신의 id 가 들어 있습니다. " : "";
-							json(res, 200, {
-								ok: false,
-								message:
-									`${why}텔레그램에서 ${bot} 에게 아무 메시지나 보낸 뒤 다시 눌러 주세요. ` +
-									"그래도 안 되면 이 봇을 다른 프로그램이 읽고 있는 것입니다 — 채팅 id 에 내 계정 id(@userinfobot 이 알려 준다)를 직접 넣으세요.",
-							});
-							return;
-						}
-						await secrets.set(TELEGRAM_CHAT, hit.id, user);
-						chat = hit.id;
-						found = ` → ${hit.name}`;
-					}
-					await sendMessage(token, chat, "✅ <b>AlphaFolio 알림이 연결됐습니다</b>\n감시·체결 결과를 여기로 보냅니다.");
-					json(res, 200, { ok: true, message: `연결됨 · ${bot}${found}`, items: secrets.status(user) });
-				} catch (err) {
-					json(res, 200, { ok: false, message: err instanceof TelegramError ? err.message : String(err) });
-				} finally {
-					telegramBots.refresh(user);
-				}
-				return;
-			}
-
-			// ── 증권 ──────────────────────────────────────────
-			// 에이전트를 거치지 않는 조회 경로 (가계부 REST 와 같은 구조).
-			// 스냅샷 수동 촬영 — 시간 조건을 무시하고 지금 값으로 오늘자를 덮어쓴다 (확인·테스트용)
-			if (path === "/api/portfolio/snapshot" && req.method === "POST") {
-				json(res, 200, await snapshotScheduler.takeNow(user));
-				return;
-			}
-
-			if (path === "/api/portfolio/history" && req.method === "GET") {
+		// ── 증권 ──────────────────────────────────────────
+		// 에이전트를 거치지 않는 조회 경로 (가계부 REST 와 같은 구조).
+		// 스냅샷 수동 촬영 — 시간 조건을 무시하고 지금 값으로 오늘자를 덮어쓴다 (확인·테스트용)
+		{ method: "POST", path: "/api/portfolio/snapshot", handle: ({ user }) => snapshotScheduler.takeNow(user) },
+		{
+			method: "GET",
+			path: "/api/portfolio/history",
+			handle: async ({ url, user }) => {
 				const today = kstParts(new Date()).date;
 				const from = url.searchParams.get("from") ?? `${today.slice(0, 7)}-01`;
 				const to = url.searchParams.get("to") ?? today;
@@ -813,43 +595,32 @@ async function main(): Promise<void> {
 					throw new HttpError(400, "from/to 는 YYYY-MM-DD 형식이어야 합니다");
 				}
 				// summary=1 — 보유 종목 없이 합계만 (추이 차트)
-				json(res, 200, { items: await snapshots.range(user, from, to, { summary: url.searchParams.get("summary") === "1" }) });
-				return;
-			}
-
-			if (path === "/api/assets/manual" || path.startsWith("/api/assets/manual/")) {
-				const result = await handleManualAssets(req, path, user, manualAssets);
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			// ── 매매일지 (PLAN §42) ─────────────────────────────
-			if (path === "/api/journal" || path.startsWith("/api/journal/")) {
-				const result = await handleJournal(req, url, path, user, { store: journalStore, sync: journalSync });
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			if (path === "/api/portfolio" && req.method === "GET") {
-				json(res, 200, await fetchPortfolio(brokerAccess(user)));
-				return;
-			}
-
-			if (path === "/api/quote" && req.method === "GET") {
+				return { items: await snapshots.range(user, from, to, { summary: url.searchParams.get("summary") === "1" }) };
+			},
+		},
+		{ path: under("/api/assets/manual"), handle: ({ req, path, user }) => handleManualAssets(req, path, user, manualAssets) },
+		// ── 매매일지 (PLAN §42) ─────────────────────────────
+		{ path: under("/api/journal"), handle: ({ req, url, path, user }) => handleJournal(req, url, path, user, { store: journalStore, sync: journalSync }) },
+		{ method: "GET", path: "/api/portfolio", handle: ({ user }) => fetchPortfolio(brokerAccess(user)) },
+		{
+			method: "GET",
+			path: "/api/quote",
+			handle: ({ url, user }) => {
 				const symbol = url.searchParams.get("symbol");
 				if (!symbol) throw new HttpError(400, "symbol 이 필요합니다");
-				json(res, 200, await fetchQuote(brokerAccess(user), symbol));
-				return;
-			}
+				return fetchQuote(brokerAccess(user), symbol);
+			},
+		},
 
-			// ── 주문 ──────────────────────────────────────────
-			// ⚠️ 실제 체결로 이어지는 유일한 경로. 에이전트는 여기에 도달할 수 없다
-			//    (사용자 인증 토큰을 갖고 있지 않다).
-			if (path === "/api/orders/execute" && req.method === "POST") {
-				const body = await readJson(req);
-				const token = String(body.token ?? "");
+		// ── 주문 ──────────────────────────────────────────
+		// ⚠️ 실제 체결로 이어지는 유일한 경로. 에이전트는 여기에 도달할 수 없다
+		//    (사용자 인증 토큰을 갖고 있지 않다).
+		{
+			method: "POST",
+			path: "/api/orders/execute",
+			handle: async ({ req, user }) => {
+				const body = await readBody(req, OrderExecuteBody);
+				const token = body.token;
 				// 결과는 카드에 남긴다 — 대화를 다시 열어도 실행한 카드가 "취소" 로 보이지 않게
 				const result = await cardOutcomes.run(
 					user,
@@ -878,75 +649,122 @@ async function main(): Promise<void> {
 						return { state: "done", message: `${r.message}${id ? ` (${id.slice(0, 12)}${id.length > 12 ? "…" : ""})` : ""}` };
 					},
 				);
-				json(res, 200, { ok: true, ...result });
-				return;
-			}
-
-			// 확인 카드 [닫기] — 기록만 남긴다 (다시 열어도 닫은 카드로 보이게). 실행 결과가 있으면 덮지 않는다
-			if (path === "/api/cards/dismiss" && req.method === "POST") {
-				const body = await readJson(req);
+				return { ok: true, ...result };
+			},
+		},
+		// 확인 카드 [닫기] — 기록만 남긴다 (다시 열어도 닫은 카드로 보이게). 실행 결과가 있으면 덮지 않는다
+		{
+			method: "POST",
+			path: "/api/cards/dismiss",
+			handle: async ({ req, user }) => {
+				const body = await readBody(req, CardDismissBody);
 				cardOutcomes.record(user, body.token, { state: "dismissed", message: null });
-				json(res, 200, { ok: true });
-				return;
-			}
-
-			if (path === "/api/orders" && req.method === "GET") {
+				return { ok: true };
+			},
+		},
+		{
+			method: "GET",
+			path: "/api/orders",
+			handle: async ({ url, user }) => {
 				const ctx = tossContext(user);
 				const accountSeq = await defaultAccountSeq(ctx);
 				const status = url.searchParams.get("status") === "CLOSED" ? "CLOSED" : "OPEN";
-				json(res, 200, await listOrders(ctx, accountSeq, { status }));
-				return;
-			}
-
-			if (path.startsWith("/api/orders/") && path.endsWith("/cancel") && req.method === "POST") {
+				return listOrders(ctx, accountSeq, { status });
+			},
+		},
+		{
+			method: "POST",
+			path: (p) => p.startsWith("/api/orders/") && p.endsWith("/cancel"),
+			handle: async ({ path, user }) => {
 				const orderId = decodeURIComponent(path.slice("/api/orders/".length, -"/cancel".length));
 				if (!orderId) throw new HttpError(400, "orderId 가 필요합니다");
 				const ctx = tossContext(user);
 				const accountSeq = await defaultAccountSeq(ctx);
 				console.log(`[order] 취소 user=${user} orderId=${orderId.slice(0, 12)}…`);
 				await cancelOrder(ctx, accountSeq, orderId);
-				json(res, 200, { ok: true });
-				return;
-			}
+				return { ok: true };
+			},
+		},
 
-			if (path === "/api/me") {
-				json(res, 200, {
-					user,
-					groups: [...new Set(SECRET_CATALOG.map((x) => x.group))],
-					admin: accounts.isAdmin(user),
-					/** env = 서버 설정 계정(비밀번호를 앱에서 못 바꾼다), db = 가입 계정 */
-					source: accounts.sourceOf(user),
-				});
-				return;
-			}
-
-			if (path.startsWith("/api/me/") || path.startsWith("/api/admin/")) {
-				const result = await handleAccounts(req, path, user, accounts, issueToken);
-				if (result === undefined) throw new HttpError(404, `없는 경로: ${path}`);
-				json(res, 200, result);
-				return;
-			}
-
-			// 대화 목록 — 사이드바. 응답 중인 대화(앱을 꺼도 도는 것) 표시 포함
-			if (path === "/api/sessions" && req.method === "GET") {
-				json(res, 200, await runtimes.listConversations(user));
-				return;
-			}
-
-			// 대화 삭제 — 앱 화면에서만 (에이전트 툴 없음). 응답 중이어도 멈추고 지운다
-			const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(path);
-			if (sessionMatch && req.method === "DELETE") {
-				const ok = await runtimes.deleteConversation(user, sessionMatch[1] ?? "");
+		// 대화 목록 — 사이드바. 응답 중인 대화(앱을 꺼도 도는 것) 표시 포함
+		{ method: "GET", path: "/api/sessions", handle: ({ user }) => runtimes.listConversations(user) },
+		// 대화 삭제 — 앱 화면에서만 (에이전트 툴 없음). 응답 중이어도 멈추고 지운다
+		{
+			method: "DELETE",
+			path: (p) => SESSION_PATH.test(p),
+			handle: async ({ path, user }) => {
+				const ok = await runtimes.deleteConversation(user, SESSION_PATH.exec(path)?.[1] ?? "");
 				if (!ok) throw new HttpError(404, "없는 대화입니다");
-				json(res, 200, { deleted: true });
+				return { deleted: true };
+			},
+		},
+		{ path: "/api/state", handle: async ({ user }) => ({ user, ...(await runtimes.describe(user)) }) },
+	];
+
+	const webCspFor = webCspProvider(cfg.webDir);
+
+	const server = createServer((req, res) => {
+		// 요청 id — 500 응답에 실어 보내고 서버 로그와 맞춰 본다
+		const requestId = randomUUID();
+		res.setHeader("x-request-id", requestId);
+		void handleRequest(req, res).catch((err: unknown) => {
+			// 자격증명 미설정은 서버 오류가 아니라 "설정이 필요함"이다
+			const needsSetup =
+				err instanceof KisCredentialsMissingError ||
+				err instanceof TossCredentialsMissingError ||
+				err instanceof NaverCredentialsMissingError ||
+				err instanceof NoBrokerConfiguredError;
+			// 없는 종목은 잘못된 입력이다 — 500 으로 내면 서버 장애처럼 보인다
+			const notFound = err instanceof QuoteNotFoundError;
+			const status =
+				err instanceof HttpError || err instanceof LedgerAccessError || err instanceof AccountError
+					? err.status
+					: needsSetup
+						? 503
+						: notFound
+							? 404
+							: 500;
+			if (status === 500) {
+				// 내부 오류 문장(SQL·외부 API 응답 등)은 밖으로 내보내지 않는다 — 로그에서 요청 id 로 찾는다
+				console.error(`[server] 500 id=${requestId} ${req.method} ${req.url?.split("?")[0] ?? ""}`, err);
+				if (!res.headersSent) json(res, 500, { error: "서버 오류가 발생했습니다. 잠시 뒤 다시 시도하세요.", requestId });
 				return;
 			}
+			const message = err instanceof Error ? err.message : String(err);
+			if (!res.headersSent) json(res, status, { error: message });
+		});
+	});
 
-			if (path === "/api/state") {
-				json(res, 200, { user, ...(await runtimes.describe(user)) });
+	async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+		const path = url.pathname;
+		const isApi = path.startsWith("/api/");
+		applySecurityHeaders(res, isApi ? API_CSP : webCspFor());
+
+		// iOS 앱은 capacitor://localhost 에서 부른다 — API 에만 CORS 를 붙인다 (정적 파일은 앱 번들에 있다)
+		if (isApi) {
+			const cors = corsFor(req.headers.origin, req.method, cfg.corsOrigins);
+			for (const [k, v] of Object.entries(cors.headers)) res.setHeader(k, v);
+			if (cors.preflight) {
+				res.writeHead(204);
+				res.end();
 				return;
 			}
+		}
 
+		// ── 공개 엔드포인트 ────────────────────────────────────────
+		if (await dispatch(publicRoutes, { req, res, url, path })) return;
+
+		// ── 인증 필요 ─────────────────────────────────────────────
+		if (isApi) {
+			const verified = verifyToken(bearerFrom(req.headers.authorization), cfg.auth.secret);
+			// 서명이 맞아도 계정이 비활성화됐거나 비밀번호가 바뀌었을 수 있다 (토큰 버전)
+			const user = verified && accounts.accepts(verified.user, verified.version) ? verified.user : null;
+			if (!user) {
+				json(res, 401, { error: "인증이 필요합니다" });
+				return;
+			}
+			if (await dispatch(apiRoutes, { req, res, url, path, user })) return;
 			throw new HttpError(404, `없는 경로: ${path}`);
 		}
 

@@ -54,6 +54,7 @@ import type { NotifyMessage } from "./notify/index.ts";
 import type { Currency, ExecPlan, ExecRecord, TradeStore } from "./trade-store.ts";
 import type { TriggerRecord, TriggerStore } from "./triggers.ts";
 import type { WatchEvent } from "./watcher.ts";
+import { fallbackOn } from "./log.ts";
 
 export interface OrderSignal {
 	trigger: TriggerRecord;
@@ -187,7 +188,7 @@ export class OrderRunner {
 		} catch (err) {
 			return this.skip(t, sig, `증권사 연결 실패: ${err instanceof Error ? err.message : err}`);
 		}
-		const book = await venue.book().catch(() => null);
+		const book = await venue.book().catch(fallbackOn("trade", "호가 조회 실패 — 호가 없이 진행", null));
 		const ref = (book && midPrice(book)) || sig.bar.close;
 		let sellable: number | undefined;
 		if (order.side === "SELL") {

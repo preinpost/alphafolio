@@ -98,7 +98,7 @@ describe("마이그레이션", () => {
 					"INSERT INTO budgets (month, category, limit_amt) VALUES ('2026-09', '식비', 300000);",
 			);
 			const r = await migrate(old.cfg);
-			assert.deepEqual(r.applied, ["0006_ledgers", "0007_accounts", "0008_mcp_servers", "0009_triggers", "0010_trigger_execs", "0011_snapshot_networth", "0012_manual_assets", "0013_trade_journal"]);
+			assert.deepEqual(r.applied, ["0006_ledgers", "0007_accounts", "0008_mcp_servers", "0009_triggers", "0010_trigger_execs", "0011_snapshot_networth", "0012_manual_assets", "0013_trade_journal", "0014_tx_dedupe_per_ledger"]);
 
 			const mine = await createLedger(old.cfg, "ms", "새 가계부");
 			assert.equal((await listTransactions(old.cfg, mine.id)).length, 0);
@@ -109,6 +109,20 @@ describe("마이그레이션", () => {
 		} finally {
 			old.restore(); // fetch 를 바깥 테스트의 가짜 D1 로 되돌린다
 		}
+	});
+
+	it("dedupe_key 는 가계부 안에서만 유일하다 (0014)", async () => {
+		const a = await createLedger(cfg, "ms", "A");
+		const b = await createLedger(cfg, "ms", "B");
+		await addTransaction(cfg, a.id, { ...tx(1000), dedupeKey: "imp-1" });
+		// 다른 가계부의 같은 키는 괜찮다
+		await addTransaction(cfg, b.id, { ...tx(1000), dedupeKey: "imp-1" });
+		// 같은 가계부의 같은 키는 막힌다
+		await assert.rejects(addTransaction(cfg, a.id, { ...tx(2000), dedupeKey: "imp-1" }));
+		// 키 없는 거래는 몇 개든 된다
+		await addTransaction(cfg, a.id, tx(3000));
+		await addTransaction(cfg, a.id, tx(4000));
+		assert.equal((await listTransactions(cfg, a.id)).length, 3);
 	});
 });
 

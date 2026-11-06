@@ -16,6 +16,7 @@ import {
 	addTransaction,
 	budgetStatus,
 	deleteTransaction,
+	getTransaction,
 	ledgerOfTransaction,
 	LedgerValidationError,
 	listTransactions,
@@ -56,6 +57,8 @@ export interface LedgerDeleteDetails {
 	kind: "ledger-delete";
 	id: string;
 	deleted: boolean;
+	/** confirm:true 없이 부른 경우 — 지우지 않고 대상만 보여 준다 */
+	preview?: Transaction | null;
 }
 export interface LedgerBudgetDetails {
 	kind: "ledger-budget";
@@ -355,18 +358,33 @@ export function createLedgerTools(provider: D1Provider, member: string) {
 	const ledgerDelete = defineTool({
 		name: "ledger_delete",
 		label: "가계부 삭제",
-		description: "거래를 삭제한다. 되돌릴 수 없으므로 사용자가 명시적으로 요청했을 때만 호출한다.",
+		description:
+			"거래를 삭제한다. 되돌릴 수 없으므로 사용자가 명시적으로 요청했을 때만 호출한다. " +
+			"confirm 없이 부르면 지우지 않고 삭제 대상을 보여 준다 — 사용자에게 확인받은 뒤 confirm:true 로 다시 호출한다.",
 		parameters: Type.Object({
 			id: Type.String({ description: "거래 id (ULID)" }),
+			confirm: Type.Optional(Type.Boolean({ description: "true 일 때만 실제로 삭제한다. 생략하면 미리보기" })),
 		}),
 		execute: async (_id, params) => {
 			// 내 가계부에 없는 id 는 "없음" 으로 답한다 (남의 가계부 거래인지 흘리지 않는다)
 			const cfg = await ready();
 			const ledgerId = await ledgerOfTransaction(cfg, member, params.id);
+			if (params.confirm !== true) {
+				const tx = ledgerId === null ? null : await getTransaction(cfg, ledgerId, params.id);
+				const text = tx
+					? `아직 삭제하지 않았습니다. 삭제 대상: ${tx.date} ${tx.amount.toLocaleString("ko-KR")}원` +
+						`${tx.category ? ` · ${tx.category}` : ""}${tx.merchant ? ` · ${tx.merchant}` : ""}${tx.memo ? ` · ${tx.memo}` : ""} (${tx.id}). ` +
+						"사용자에게 확인받은 뒤 confirm:true 로 다시 호출하세요."
+					: `해당 id가 없습니다 (${params.id})`;
+				return {
+					content: [{ type: "text" as const, text }],
+					details: { kind: "ledger-delete", id: params.id, deleted: false, preview: tx } as LedgerDeleteDetails,
+				};
+			}
 			const ok = ledgerId !== null && (await deleteTransaction(cfg, ledgerId, params.id));
 			return {
 				content: [{ type: "text" as const, text: ok ? `삭제됨 (${params.id})` : `해당 id가 없습니다 (${params.id})` }],
-				details: { kind: "ledger-delete", id: params.id, deleted: ok },
+				details: { kind: "ledger-delete", id: params.id, deleted: ok } as LedgerDeleteDetails,
 			};
 		},
 	});

@@ -4,6 +4,7 @@
  * 요청은 고정 주소 api.telegram.org 로만 나간다 (사용자 입력 URL 없음 → SSRF 없음).
  * ⚠️ 봇 토큰은 URL 경로에 들어간다 (`/bot<토큰>/sendMessage`) — 오류 메시지·로그에 URL 이 섞이지 않게 토큰을 지운다.
  */
+import { fallbackOn } from "../log.ts";
 
 const API = "https://api.telegram.org";
 const TIMEOUT_MS = 10_000;
@@ -134,5 +135,5 @@ export async function editMessage(token: string, chatId: string, messageId: numb
 
 /** 버튼 누름에 답한다 (안 하면 버튼이 계속 로딩 중으로 보인다) */
 export async function answerCallback(token: string, callbackId: string, text: string, deps?: TelegramDeps): Promise<void> {
-	await call(token, "answerCallbackQuery", { callback_query_id: callbackId, text: text.slice(0, 190) }, deps).catch(() => undefined);
+	await call(token, "answerCallbackQuery", { callback_query_id: callbackId, text: text.slice(0, 190) }, deps).catch(fallbackOn("telegram", "answerCallbackQuery 실패", undefined, "debug"));
 }

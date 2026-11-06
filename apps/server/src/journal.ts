@@ -43,6 +43,7 @@ import {
 import { HttpError, readJson } from "./ledger-api.ts";
 import type { ExecRecord } from "./trade-store.ts";
 import type { TriggerRecord } from "./triggers.ts";
+import { fallbackOn } from "./log.ts";
 
 /** 가져오기 기본 기간 · 최대 (한국투자 국장 체결 조회가 3개월까지) */
 export const SYNC_DEFAULT_DAYS = 30;
@@ -388,7 +389,7 @@ export class JournalSync {
 		const plan = planSync(fills, entries, claimed);
 		const unnamed = [...new Set(plan.inserts.filter((i) => !i.input.name && !isCoinBroker(i.input.broker)).map((i) => i.input.symbol))];
 		if (unnamed.length > 0 && this.d.names) {
-			const names = await this.d.names(user, unnamed).catch(() => new Map<string, string>());
+			const names = await this.d.names(user, unnamed).catch(fallbackOn("journal", "종목 이름 조회 실패", new Map<string, string>(), "debug"));
 			for (const i of plan.inserts) if (!i.input.name) i.input.name = names.get(i.input.symbol) ?? null;
 		}
 		const applied = await this.d.store.apply(user, plan);
@@ -426,7 +427,7 @@ export class JournalRecorder {
 
 	private async nameOf(user: string, symbol: string, broker: string): Promise<string | null> {
 		if (!this.d.names || isCoinBroker(broker as JournalEntry["broker"])) return null;
-		const m = await this.d.names(user, [symbol]).catch(() => new Map<string, string>());
+		const m = await this.d.names(user, [symbol]).catch(fallbackOn("journal", "종목 이름 조회 실패", new Map<string, string>(), "debug"));
 		return m.get(symbol.toUpperCase()) ?? null;
 	}
 

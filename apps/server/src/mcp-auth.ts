@@ -29,6 +29,7 @@ import {
 	type OAuthDiscovery,
 } from "@alphafolio/mcp";
 import { McpConfigError, type McpStore, type StoredOAuth } from "./mcp-store.ts";
+import { fallbackOn } from "./log.ts";
 
 const STATE_TTL_MS = 10 * 60_000;
 const MAX_PENDING_PER_USER = 5;
@@ -166,7 +167,7 @@ export class McpAuthManager {
 			return { ok: true, clientKind: p.clientKind, serverName: rec.name, message: `${rec.name} 연결됨` };
 		} catch (err) {
 			if (err instanceof OAuthError && err.code === "invalid_client") {
-				await this.opts.store.forgetClient(p.discovery.authServer.issuer, p.redirectUri).catch(() => undefined);
+				await this.opts.store.forgetClient(p.discovery.authServer.issuer, p.redirectUri).catch(fallbackOn("mcp", "OAuth 클라이언트 캐시 삭제 실패", undefined));
 			}
 			console.warn(`[mcp] 코드 교환 실패 user=${p.user} server=${p.serverId}: ${err instanceof Error ? err.message : err}`);
 			return { ok: false, clientKind: p.clientKind, serverName: rec.name, message: `토큰을 받지 못했습니다: ${err instanceof Error ? err.message : String(err)}` };
