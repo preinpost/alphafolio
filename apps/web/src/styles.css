@@ -2720,11 +2720,12 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: baseline;
     gap: 4px 12px;
     margin-top: 6px;
-    font-size: 13.5px;
+    font-size: 15px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
   .hero-delta b {
-    font-weight: 600;
+    font-weight: 700;
   }
 
   /* 총자산 추이 — SVG 하나 + 격자·세로선·점·툴팁 오버레이 */
@@ -2786,7 +2787,7 @@ html.ua-keyboard .hide-on-keyboard {
     gap: 4px 8px;
     margin-top: 14px;
     padding: 12px 20px 18px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
     font-size: 13px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
@@ -2797,7 +2798,8 @@ html.ua-keyboard .hide-on-keyboard {
   .chart-empty {
     margin: 14px 20px 18px;
     padding: 28px 16px;
-    border: 1px dashed var(--border);
+    border: 0;
+    background: var(--sunken);
     border-radius: var(--r);
     text-align: center;
     font-size: 13px;
@@ -2824,13 +2826,13 @@ html.ua-keyboard .hide-on-keyboard {
   .search-field > svg {
     position: absolute;
     top: 50%;
-    left: 10px;
+    left: 12px;
     transform: translateY(-50%);
     color: var(--muted);
     pointer-events: none;
   }
   .search-field .input {
-    padding-left: 32px;
+    padding-left: 36px;
   }
   .hold-tools select.input {
     width: auto;
@@ -2846,10 +2848,8 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .hold-head {
     padding: 8px 20px;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    background: var(--sunken);
-    font-size: 11.5px;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
     font-weight: 600;
     color: var(--muted);
   }
@@ -2859,7 +2859,7 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .hold-row + .hold-row,
   .hold-list > * + * {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   button.hold-row {
     width: 100%;
@@ -2874,7 +2874,7 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: baseline;
     gap: 6px;
     min-width: 0;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
   }
   .hold-row .name > span:first-child {
@@ -2895,38 +2895,39 @@ html.ua-keyboard .hide-on-keyboard {
     color: var(--muted);
   }
   .hold-row .v {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
   .hold-row .s {
     font-size: 12px;
+    font-weight: 600;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
   .filter-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    height: 26px;
-    padding: 0 6px 0 10px;
+    gap: 6px;
+    height: 30px;
+    padding: 0 6px 0 12px;
     border-radius: 999px;
-    background: var(--selected);
-    font-size: 12.5px;
-    font-weight: 600;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 700;
   }
   .filter-pill button {
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    color: var(--muted);
+    color: var(--accent);
   }
   .filter-pill button:hover {
-    background: var(--hover);
-    color: var(--fg);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
 
   .alloc-row {
@@ -2964,8 +2965,8 @@ html.ua-keyboard .hide-on-keyboard {
     margin-bottom: 4px;
   }
   .quote-out .q-price {
-    font-size: 24px;
-    font-weight: 700;
+    font-size: 26px;
+    font-weight: 800;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
@@ -3062,8 +3063,9 @@ html.ua-keyboard .hide-on-keyboard {
   .month-step b {
     min-width: 92px;
     text-align: center;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
   .filterbar {
@@ -3076,9 +3078,12 @@ html.ua-keyboard .hide-on-keyboard {
   .filterbar select.input {
     width: auto;
     min-width: 180px;
-    height: 34px;
-    font-size: 13.5px;
-    font-weight: 600;
+    height: 40px;
+    border-radius: 12px;
+    background-color: var(--surface);
+    box-shadow: var(--af-shadow-sm);
+    font-size: 15px;
+    font-weight: 700;
   }
   .filterbar .hint {
     margin-left: auto;
@@ -3110,7 +3115,8 @@ html.ua-keyboard .hide-on-keyboard {
   .sum-side b {
     display: block;
     margin-top: 2px;
-    font-size: 16px;
+    font-size: 17px;
+    font-weight: 700;
     color: var(--fg);
     font-variant-numeric: tabular-nums;
   }
@@ -3126,10 +3132,10 @@ html.ua-keyboard .hide-on-keyboard {
     font-size: 13.5px;
   }
   .cat-rows {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .cat-row + .cat-row {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .cat-row .cnt {
     font-size: 12px;
@@ -3156,34 +3162,37 @@ html.ua-keyboard .hide-on-keyboard {
     flex: 1;
     min-width: 0;
   }
+  /* 날짜 머리 — 시안 B .tl-day: 바탕 없이 굵은 날짜 + 오른쪽 합계 */
   .day-h {
     display: flex;
+    align-items: baseline;
     justify-content: space-between;
-    padding: 14px 20px 6px;
-    border-top: 1px solid var(--border);
-    background: var(--sunken);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--muted);
+    padding: 16px 20px 6px;
+    border-top: 1px solid var(--line);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--fg);
   }
   .day-h span:last-child {
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
   .tx {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .day-h + .tx {
     border-top: 0;
   }
   .tx .src {
     margin-left: 4px;
-    padding: 1px 5px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--muted);
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--sunken);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--fg-2);
   }
   /* ── 매매일지 (PLAN §42) ── */
   .jr-row {
@@ -3238,9 +3247,9 @@ html.ua-keyboard .hide-on-keyboard {
     flex-direction: column;
     gap: 6px;
     padding: 12px 14px;
-    border-radius: var(--r-sm);
+    border-radius: var(--r);
     background: var(--sunken);
-    font-size: 13.5px;
+    font-size: 14px;
   }
   .jr-fact {
     display: flex;
@@ -3258,7 +3267,7 @@ html.ua-keyboard .hide-on-keyboard {
     padding: 12px 20px;
   }
   .budget + .budget {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .budget .top {
     display: flex;
@@ -3268,7 +3277,7 @@ html.ua-keyboard .hide-on-keyboard {
     font-size: 13.5px;
   }
   .budget .top b {
-    font-weight: 600;
+    font-weight: 700;
   }
   .budget .top .r {
     margin-left: auto;
@@ -3283,7 +3292,7 @@ html.ua-keyboard .hide-on-keyboard {
     padding: 16px 20px;
   }
   .invite-box + .invite-box {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .invite-box p {
     margin: 4px 0 12px;
@@ -3294,9 +3303,10 @@ html.ua-keyboard .hide-on-keyboard {
     gap: 8px;
   }
   .amount-input {
-    height: 48px !important;
-    font-size: 20px !important;
-    font-weight: 700;
+    height: 56px !important;
+    font-size: 24px !important;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
   .grid2 {
@@ -3322,6 +3332,7 @@ html.ua-keyboard .hide-on-keyboard {
     .filterbar select.input {
       width: 100%;
       min-width: 0;
+      font-size: 14px;
     }
     .sum-top {
       padding: 16px;
@@ -3365,14 +3376,14 @@ html.ua-keyboard .hide-on-keyboard {
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 38px;
-    padding: 0 12px;
+    height: 42px;
+    padding: 0 14px;
     border-radius: var(--r-sm);
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 700;
     color: var(--muted);
     text-align: left;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.2s, color 0.2s;
   }
   .set-tabs [role="tab"]:hover {
     background: var(--hover);
@@ -3381,18 +3392,17 @@ html.ua-keyboard .hide-on-keyboard {
   .set-tabs [role="tab"][aria-selected="true"] {
     background: var(--surface);
     color: var(--fg);
-    font-weight: 600;
-    box-shadow: var(--af-shadow-sm), 0 0 0 1px var(--border);
+    box-shadow: var(--af-shadow-sm);
   }
   .set-tabs .sep {
     height: 1px;
     margin: 8px 12px;
-    background: var(--border);
+    background: var(--line);
   }
   .set-panel {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
     min-width: 0;
     outline: none;
   }
@@ -3473,10 +3483,9 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: center;
     gap: 8px;
     margin-top: 12px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    background: var(--sunken);
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: var(--warn-soft);
   }
   .one-time .mono {
     flex: 1;
@@ -3518,9 +3527,9 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .theme-opt {
     padding: 10px;
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: var(--r);
-    background: var(--surface);
+    background: var(--sunken);
     text-align: left;
     transition: border-color 0.15s, background 0.15s;
   }
@@ -3528,8 +3537,9 @@ html.ua-keyboard .hide-on-keyboard {
     background: var(--sunken);
   }
   .theme-opt[aria-checked="true"] {
-    border-color: var(--fg);
-    box-shadow: 0 0 0 1px var(--fg);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 1px var(--accent);
   }
   .theme-opt .pv {
     display: grid;
@@ -3537,8 +3547,8 @@ html.ua-keyboard .hide-on-keyboard {
     height: 64px;
     margin-bottom: 10px;
     overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 1px var(--line);
   }
   .theme-opt .pv i {
     display: block;
@@ -3554,14 +3564,14 @@ html.ua-keyboard .hide-on-keyboard {
     font-size: 13.5px;
   }
   .kbd-row + .kbd-row {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .kbd-row:last-child {
     padding-bottom: 16px;
   }
   kbd.key {
     padding: 2px 7px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--line);
     border-radius: 6px;
     background: var(--sunken);
     font-family: var(--font-mono);
@@ -3819,7 +3829,7 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .confirm .c-kv {
     padding: 14px 18px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   /* 감시 카드 — 조건 줄 · 목표까지 거리 · 미리보기 */
   .confirm .w-cond {
@@ -3985,7 +3995,7 @@ html.ua-keyboard .hide-on-keyboard {
     flex-direction: column;
     gap: 12px;
     padding: 16px 20px 18px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .mcp-add .add-btns {
     display: flex;
