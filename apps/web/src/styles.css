@@ -392,10 +392,10 @@ html.ua-keyboard .hide-on-keyboard {
 }
 /* 표 — 금액 열이 흔들리지 않게 tabular, 헤어라인으로 나눈 행 (Markdown.tsx 가 .md-table 로 감싼다) */
 .prose .md-table {
-  margin: 0.75em 0;
+  margin: 0.5em 0 0.9em;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent);
   background: var(--surface);
 }
 .prose .md-table table {
@@ -405,14 +405,16 @@ html.ua-keyboard .hide-on-keyboard {
   font-variant-numeric: tabular-nums;
 }
 .prose .md-table th {
-  padding: 7px 12px;
+  padding: 9px 12px;
+  background: var(--sunken);
   font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: 700;
+  color: var(--fg-2);
   white-space: nowrap;
 }
 .prose .md-table td {
-  padding: 8px 12px;
+  padding: 9px 12px;
+  border-color: var(--line);
 }
 .prose .md-table tbody tr:last-child td {
   border-bottom: 0;
@@ -1792,11 +1794,14 @@ html.ua-keyboard .hide-on-keyboard {
     gap: 6px;
     max-width: min(560px, 85%);
   }
+  /* 내 말풍선 — 시안 B: 브랜드 바이올렛, 흰 글자 */
   .bubble {
-    padding: 10px 14px;
-    border-radius: 16px 16px 4px 16px;
-    background: var(--c-bubble);
+    padding: 12px 15px;
+    border-radius: 20px 20px 6px 20px;
+    background: var(--accent);
+    color: #fff;
     font-size: 15px;
+    line-height: 1.55;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -1810,8 +1815,7 @@ html.ua-keyboard .hide-on-keyboard {
     width: 112px;
     height: 112px;
     object-fit: cover;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    border-radius: 14px;
   }
   .msg-images.single img {
     width: auto;
@@ -1858,16 +1862,21 @@ html.ua-keyboard .hide-on-keyboard {
     flex-direction: column;
     gap: 4px;
   }
+  /* 툴 한 줄 — 시안 B .tool-step: 초록 원 체크 + 작은 글자 */
   .tool-chip {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     max-width: 100%;
     min-height: 22px;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--muted);
   }
   .tool-chip > svg {
+    box-sizing: content-box;
+    padding: 2px;
+    border-radius: 50%;
+    background: var(--ok-soft);
     color: var(--ok);
   }
   .tool-chip.running > .pixel-loader {
@@ -1896,24 +1905,27 @@ html.ua-keyboard .hide-on-keyboard {
    * 확인 카드 — 실제 주문이 나가는 유일한 경로라서 무게가 있어야 한다.
    * 증권사 · 예상 금액 · 예수금 변화 · 만료를 한 장에.
    */
+  /* 시안 B .ccard — 얇은 선, 큰 모서리, 위쪽 만료 막대는 주황 */
   .confirm {
     overflow: hidden;
+    max-width: 560px;
     background: var(--surface);
-    border: 1px solid color-mix(in oklch, var(--fg) 16%, var(--border));
+    border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
     border-radius: var(--r-lg);
-    box-shadow: var(--af-shadow-md);
+    box-shadow: var(--af-shadow-sm);
+    animation: rise 0.4s var(--ease) both;
   }
   .confirm.danger {
-    border-color: color-mix(in oklch, var(--danger) 45%, var(--border));
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
   }
   .confirm .expiry {
     height: 3px;
-    background: var(--sunken);
+    background: transparent;
   }
   .confirm .expiry i {
     display: block;
     height: 100%;
-    background: var(--fg);
+    background: var(--warn);
     transition: width 1s linear;
   }
   .confirm.danger .expiry i {
@@ -1923,20 +1935,20 @@ html.ua-keyboard .hide-on-keyboard {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
     padding: 14px 18px 0;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
+    color: var(--fg-2);
   }
   .confirm.danger .c-h .title {
     color: var(--danger);
   }
   .confirm .c-h .left {
     margin-left: auto;
-    font-family: var(--font-mono);
     font-size: 12px;
-    font-weight: 500;
-    color: var(--muted);
+    font-weight: 700;
+    color: color-mix(in srgb, var(--warn) 80%, var(--fg));
     font-variant-numeric: tabular-nums;
   }
   .confirm .c-main {
@@ -1956,8 +1968,9 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: baseline;
     gap: 4px 8px;
     font-family: var(--font-display);
-    font-size: 19px;
+    font-size: 18px;
     font-weight: 700;
+    letter-spacing: -0.02em;
   }
   .confirm .sym .mono {
     font-size: 13px;
@@ -1979,12 +1992,13 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .confirm .total b {
     font-size: 26px;
-    letter-spacing: -0.03em;
+    font-weight: 800;
+    letter-spacing: -0.035em;
     font-variant-numeric: tabular-nums;
   }
   .confirm .c-sec {
     padding: 14px 18px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   /* 값은 자르지 않고 줄을 바꾼다 — 무엇을 확인하는지 전부 보여야 한다 */
   .confirm .c-lines {
@@ -2030,7 +2044,7 @@ html.ua-keyboard .hide-on-keyboard {
     flex-direction: column;
     gap: 6px;
     padding: 12px 18px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
     font-size: 12.5px;
     color: var(--muted);
   }
@@ -2041,7 +2055,7 @@ html.ua-keyboard .hide-on-keyboard {
     margin: 0;
     padding: 12px 18px;
     list-style: none;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
     font-size: 12.5px;
     color: color-mix(in oklch, var(--warn) 70%, var(--fg));
   }
@@ -2057,8 +2071,22 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 12px 18px 16px;
-    border-top: 1px solid var(--border);
+    padding: 14px 18px 16px;
+    border-top: 1px solid var(--line);
+  }
+  /* 위험 확인은 빨간 채움 — 옅은 빨강은 보조 동작용 */
+  .confirm .c-f .btn-danger {
+    background: var(--danger);
+    color: #fff;
+  }
+  .confirm .c-f .btn-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 88%, #000);
+  }
+  .confirm .c-f .btn:not(.btn-sm) {
+    height: 48px;
+    padding: 0 22px;
+    border-radius: 14px;
+    font-size: 15px;
   }
   .confirm .c-f .note {
     flex: 1;
@@ -2075,8 +2103,8 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .confirm.done,
   .confirm.closed {
-    border-color: var(--border);
-    box-shadow: var(--af-shadow-sm);
+    border-color: color-mix(in srgb, var(--fg) 8%, transparent);
+    box-shadow: none;
   }
   .confirm.closed .c-main,
   .confirm.closed .c-sec,
@@ -2111,17 +2139,17 @@ html.ua-keyboard .hide-on-keyboard {
   }
   .side-tag.buy {
     color: var(--up);
-    background: color-mix(in oklch, var(--up) 10%, var(--surface));
+    background: var(--up-soft);
   }
   .side-tag.sell {
     color: var(--down);
-    background: color-mix(in oklch, var(--down) 10%, var(--surface));
+    background: var(--down-soft);
   }
   .cond {
     margin: 12px 18px 0;
     padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    border: 0;
+    border-radius: 14px;
     background: var(--sunken);
     font-family: var(--font-mono);
     font-size: 13.5px;
@@ -2132,7 +2160,7 @@ html.ua-keyboard .hide-on-keyboard {
     align-items: center;
     gap: 12px;
     padding: 12px 18px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
   .auto-row .grow {
     flex: 1;
@@ -2163,40 +2191,51 @@ html.ua-keyboard .hide-on-keyboard {
     border-radius: 12px;
   }
   .hello h2 {
-    font-size: 26px;
-    letter-spacing: -0.02em;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
   }
   .hello p {
-    font-size: 15px;
+    font-size: 14px;
     color: var(--muted);
   }
+  /* 제안 카드 — 시안 B: 그림자 카드 두 칸 */
   .suggest {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 10px;
     width: min(560px, 100%);
     margin-top: 18px;
   }
   .suggest button {
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: var(--r);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 84px;
+    padding: 14px;
+    border-radius: 18px;
     background: var(--surface);
-    font-size: 14px;
+    box-shadow: var(--af-shadow-sm);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
     text-align: left;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.15s, transform 0.2s var(--spring);
   }
   .suggest button:hover:not(:disabled) {
-    background: var(--sunken);
-    border-color: color-mix(in oklch, var(--fg) 18%, var(--border));
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  }
+  .suggest button:active:not(:disabled) {
+    transform: scale(0.97);
   }
   .suggest button:disabled {
     opacity: 0.5;
   }
   .suggest small {
     display: block;
-    margin-top: 2px;
+    margin-top: 8px;
     font-size: 12px;
+    font-weight: 500;
     color: var(--muted);
   }
 
@@ -2220,15 +2259,15 @@ html.ua-keyboard .hide-on-keyboard {
     max-width: 760px;
     margin: 0 auto;
     padding: 10px 10px 8px 16px;
-    border: 1px solid var(--border);
-    border-radius: 18px;
+    border: 1px solid transparent;
+    border-radius: 24px;
     background: var(--surface);
     box-shadow: var(--af-shadow-md);
     cursor: text;
-    transition: border-color 0.15s;
+    transition: border-color 0.2s;
   }
   .composer:focus-within {
-    border-color: color-mix(in oklch, var(--fg) 30%, var(--border));
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .composer textarea {
     display: block;
@@ -2243,7 +2282,7 @@ html.ua-keyboard .hide-on-keyboard {
     line-height: 1.5;
   }
   .composer textarea::placeholder {
-    color: color-mix(in oklch, var(--muted) 85%, var(--surface));
+    color: var(--faint);
   }
   .composer textarea:disabled {
     opacity: 0.6;
@@ -2269,14 +2308,14 @@ html.ua-keyboard .hide-on-keyboard {
   .send {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     margin-left: auto;
     flex-shrink: 0;
-    border-radius: 10px;
+    border-radius: 50%;
     background: var(--btn-bg);
     color: var(--btn-fg);
-    transition: background 0.15s, transform 0.06s;
+    transition: background 0.15s, transform 0.2s var(--spring);
   }
   .composer .hint + .send {
     margin-left: 0;
@@ -2285,7 +2324,7 @@ html.ua-keyboard .hide-on-keyboard {
     background: var(--btn-hover);
   }
   .send:active:not(:disabled) {
-    transform: scale(0.95);
+    transform: scale(0.9);
   }
   .send:disabled {
     background: var(--sunken);
@@ -2306,8 +2345,7 @@ html.ua-keyboard .hide-on-keyboard {
     width: 56px;
     height: 56px;
     object-fit: cover;
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
   }
   .attach-thumb button {
     position: absolute;
