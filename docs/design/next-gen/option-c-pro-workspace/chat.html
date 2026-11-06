@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>챗 · Alphafolio Pro</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="chat">
+<div class="app with-convs">
+  <nav class="rail"></nav>
+
+  <!-- 데스크톱: 최근 대화 -->
+  <aside class="convs" aria-label="최근 대화">
+    <div class="head"><div class="brand"><span class="logo">α</span>AlphaFolio</div><button class="btn" style="width:100%"><span data-i="plus"></span>새 대화</button></div>
+    <div class="conv-list" data-convs></div>
+    <div class="side-foot"><div class="status"><span class="dot"></span>연결됨 · <span class="mono">claude-sonnet-5-5</span> · v2.14.0</div></div>
+  </aside>
+
+  <main class="view chat-view" id="view">
+    <header class="top">
+      <button class="icon-btn only-m" style="margin-left:-10px" data-open="drawer" aria-label="메뉴 열기" data-i="menu"></button>
+      <div class="t"><h1 style="font-size:16px;overflow:hidden;text-overflow:ellipsis">SK하이닉스 분할 매수</h1><div class="sub mono">claude-sonnet-5-5</div></div>
+      <button class="icon-btn" aria-label="새 대화" data-i="plus"></button>
+    </header>
+
+    <div class="thread" id="thread">
+      <div class="msg-u"><div class="bubble">BTC 4시간봉 종가가 103,500 넘으면 0.012개 사게 걸어줘</div></div>
+      <div class="msg-ai"><span class="logo">α</span><div class="body">
+        <div class="tool-chip"><span data-i="check"></span><span>지난 90일로 조건을 돌려 봤어요</span></div>
+        <section class="confirm done" data-wired="1" aria-label="자동 매매 켜기 확인">
+          <div class="c-h"><span class="title">자동 매매 켜기</span><span class="badge warn">자동 매매</span><span class="badge">Binance</span></div>
+          <div class="c-main" style="padding-bottom:6px"><div><div class="sym">BTCUSDT <span class="mono mut" style="font-size:11.5px;font-weight:500">4시간봉</span></div><div class="how mono">close &gt; 103,500</div></div></div>
+          <div class="preview-sig">지난 90일이면 <b>3번 울림</b> · 마지막 마감 11/05 09:00
+            <div class="sig-strip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          <dl class="kv"><dt>계좌</dt><dd>Binance 현물</dd><dt>동작</dt><dd><b class="up">매수</b> 0.012 BTC</dd><dt>최악 허용가</dt><dd>104,020 USDT</dd><dt>하루 한도</dt><dd>2,000 USDT</dd></dl>
+          <div class="c-f"><div class="c-done"><span class="badge ok">완료</span>자동 매매를 켰습니다 — 설정 → 감시에서 멈출 수 있어요</div></div>
+        </section>
+      </div></div>
+
+      <div class="msg-u"><div class="bubble">하이닉스 지금 얼마야? 내 평단이랑 비교해줘</div></div>
+      <div class="msg-ai"><span class="logo">α</span><div class="body">
+        <div class="tool-chip"><span data-i="check"></span><span>SK하이닉스 시세를 확인했어요</span></div>
+        <div class="tool-chip"><span data-i="check"></span><span>한국투자 잔고를 불러왔어요</span></div>
+        <div class="md"><p>SK하이닉스는 <b>214,500원</b>(<span class="up">+3.12%</span>)입니다. 평단 188,000원 대비 <b class="up">+14.10%</b>, 평가손익 <b class="up">+662,500원</b>이에요.</p></div>
+        <div class="md-table"><table><thead><tr><th>항목</th><th>값</th><th>평단 대비</th></tr></thead><tbody>
+          <tr><td>현재가</td><td>214,500</td><td class="up">+14.10%</td></tr>
+          <tr><td>20일선</td><td>204,800</td><td class="up">+8.94%</td></tr>
+          <tr><td>52주 고가</td><td>231,000</td><td class="up">+22.87%</td></tr>
+        </tbody></table></div>
+        <div class="acts-row"><button class="icon-btn sm" aria-label="복사" data-toast="복사했습니다" data-i="copy"></button></div>
+      </div></div>
+
+      <div class="msg-u"><div class="att" role="img" aria-label="첨부 이미지">chart.png</div><div class="bubble">20일선 근처 205,000에 5주 지정가로 사줘. 근거는 눌림 매수</div></div>
+      <div class="msg-ai"><span class="logo">α</span><div class="body">
+        <div class="tool-chip"><span data-i="check"></span><span>주문 가능 금액을 확인했어요</span></div>
+        <div class="tool-chip"><span data-i="check"></span><span>한국투자 주문을 준비했어요</span></div>
+        <div class="md"><p>예수금 2,480,000원으로 충분합니다. 아래 카드를 확인하면 바로 전송돼요.</p></div>
+
+        <section class="confirm" aria-label="매수 주문 확인" data-remain="272" data-total="300" data-done-msg="한국투자 주문번호 0008123 — 매매일지에 기록했어요 (데모)">
+          <div class="expiry"><i style="width:90%"></i></div>
+          <div class="c-h"><span class="title">매수 주문 확인</span><span class="badge">한국투자</span><span class="left">4:32 후 만료</span></div>
+          <div class="c-main">
+            <div><div class="sym"><span class="side buy">매수</span>SK하이닉스 <span class="mono mut" style="font-size:11.5px;font-weight:500">000660</span></div><div class="how">지정가 205,000원 × 5주</div></div>
+            <div class="tot"><small>예상 금액</small><b>1,025,000원</b></div>
+          </div>
+          <div class="lines">
+            <div class="line"><span class="k">현재가</span><span>214,500원</span><span class="rr">지정가가 4.4% 낮음</span></div>
+            <div class="line"><span class="k">주문 후 예수금</span><span>1,455,000원</span></div>
+            <div class="line"><span class="k">계좌</span><span>한국투자 · 종합 ••••-01</span></div>
+          </div>
+          <label class="c-jn"><span>매매 근거 (선택) — 매매일지에 남습니다</span><input class="input sm" maxlength="1000" value="20일선 지지 확인, 눌림 매수" placeholder="예: 20일선 지지 확인, 실적 발표 전 분할 매수" /></label>
+          <div class="c-f">
+            <span class="note">확정하면 한국투자로 바로 전송됩니다.</span>
+            <div class="btns">
+              <button class="btn ghost2" data-dismiss>닫기</button>
+              <button class="btn buy hold-btn" data-verb="매수" aria-describedby="hold-hint"><span class="fill"></span><span>길게 눌러 매수</span></button>
+              <button class="btn buy now-btn" style="flex:1" hidden>매수 확정</button>
+            </div>
+            <button class="alt-confirm" data-alt id="hold-hint">길게 누르기 어려우면 — 버튼으로 확정</button>
+          </div>
+        </section>
+      </div></div>
+    </div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <label class="sr-only" for="af-composer">메시지</label>
+        <textarea id="af-composer" rows="1" placeholder="무엇이든 물어보세요"></textarea>
+        <div class="bar-row"><button class="icon-btn sm" aria-label="이미지 첨부" data-i="image"></button><span class="sp"></span><button class="send" aria-label="보내기" data-i="send"></button></div>
+      </div>
+      <p class="disclaimer only-d">AI 분석은 참고용이며, 투자 판단과 그 책임은 본인에게 있습니다.</p>
+    </div>
+  </main>
+</div>
+<nav class="tabbar"></nav>
+
+<!-- 모바일 드로어: 최근 대화 -->
+<aside class="drawer" id="drawer" aria-label="최근 대화" role="dialog" aria-modal="true">
+  <div class="drawer-h"><div class="brand"><span class="logo">α</span>AlphaFolio</div><span class="sp"></span><button class="icon-btn" data-close aria-label="닫기" data-i="x"></button></div>
+  <div style="padding:0 12px 4px"><button class="btn" style="width:100%;height:42px"><span data-i="plus"></span>새 대화</button></div>
+  <div class="conv-list" data-convs></div>
+  <div class="side-foot">
+    <div class="status"><span class="dot"></span>연결됨 · <span class="mono">claude-sonnet-5-5</span> · v2.14.0</div>
+    <div class="me"><span class="avatar">MS</span><span class="who">ms<small>관리자</small></span><button class="icon-btn" data-theme-toggle aria-label="테마 전환" data-i="moon"></button><button class="icon-btn" aria-label="로그아웃" data-i="logout"></button></div>
+  </div>
+</aside>
+
+<script src="assets/app.js"></script>
+<script>
+  const CONVS = [["오늘", [["SK하이닉스 분할 매수", "on"], ["BTC 4시간봉 돌파 감시", "live"], ["이번 달 지출 정리", "new"]]], ["어제", [["보유 종목 점검", ""], ["ETH 절반 익절", ""]]], ["지난 7일", [["삼성전자 배당 기준일", ""], ["NVDA 실적 발표 요약", ""], ["식비 예산 30만원", ""]]]];
+  document.querySelectorAll("[data-convs]").forEach((el) => {
+    el.innerHTML = CONVS.map(([g, xs]) => `<div class="conv-g">${g}</div>` + xs.map(([t, st]) =>
+      `<div class="conv ${st === "on" ? "on" : ""}"><span class="tt">${t}</span>${st === "live" ? '<span class="d live" role="img" aria-label="응답 중"></span>' : st === "new" ? '<span class="d" role="img" aria-label="새 답"></span>' : ""}<button class="del" aria-label="“${t}” 삭제" onclick="confirm('“${t}”\\n대화를 삭제할까요? 되돌릴 수 없습니다.')">${I.trash}</button></div>`).join("")).join("");
+  });
+  window.showEmpty = () => {
+    document.querySelector(".top h1").textContent = "새 대화";
+    document.getElementById("thread").innerHTML = `<div class="hello"><span class="logo" style="width:36px;height:36px;font-size:18px;border-radius:11px">α</span><h2>무엇을 도와드릴까요?</h2><p class="mut2" style="font-size:13.5px">시세·보유 종목·가계부·매매일지를 같은 대화에서 다룹니다. 주문과 감시는 확인 카드로 한 번 더 묻습니다.</p>
+      <div class="suggest">${[["삼성전자 얼마야", "시세 조회"], ["내 보유 종목 점검해줘", "포트폴리오"], ["이번 달 지출 얼마나 썼어?", "가계부"], ["오늘 증시 주도주 어디야?", "시장 요약"]].map(([t, s]) => `<button>${t}<small>${s}</small></button>`).join("")}</div></div>`;
+  };
+  // 마지막 메시지가 보이게
+  const toBottom = () => { const v = document.getElementById("view"); if (matchMedia("(min-width: 900px)").matches) v.scrollTop = v.scrollHeight; else window.scrollTo(0, document.body.scrollHeight); };
+  toBottom(); setTimeout(toBottom, 100);
+  const ta = document.getElementById("af-composer");
+  ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; });
+</script>
+</body>
+</html>

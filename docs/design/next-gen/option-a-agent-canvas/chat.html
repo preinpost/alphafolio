@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>챗 · Agent Canvas</title>
+<link rel="stylesheet" href="assets/canvas.css" />
+</head>
+<body data-page="chat">
+<div class="app">
+  <nav data-rail></nav>
+  <main class="main">
+    <div class="wrap">
+      <header class="topbar">
+        <button class="icon-btn mob" data-open="drawer" aria-label="대화 목록"><i data-i="menu"></i></button>
+        <div class="title"><b>보유 종목 점검 · ETH 감시</b></div>
+        <span class="status">Claude Sonnet</span>
+        <a class="icon-btn mob" href="chat-new.html" aria-label="새 대화"><i data-i="plus"></i></a>
+      </header>
+
+      <div class="msg-user">내 보유 종목 점검해줘</div>
+
+      <div class="msg-agent">
+        <div class="agent-line"><span class="orb"></span>alphafolio</div>
+        <div class="tool-chips"><span class="tool-chip">get_portfolio</span><span class="tool-chip">get_quotes</span></div>
+        <div class="prose">
+          <p>세 계좌(한국투자·토스·Binance)를 합친 투자 자산은 <b>2억 9,850만원</b>, 주식 평가손익은 <b class="up">+4,912만원</b>입니다. 비중이 큰 순서로 보면:</p>
+          <div class="md-table"><table>
+            <thead><tr><th>종목</th><th>평가금액</th><th>수익률</th><th>비중</th></tr></thead>
+            <tbody>
+              <tr><td>SK하이닉스</td><td>4,807만</td><td class="up">+31.4%</td><td>16.1%</td></tr>
+              <tr><td>비트코인</td><td>4,298만</td><td class="up">+38.2%</td><td>14.4%</td></tr>
+              <tr><td>엔비디아</td><td>4,259만</td><td class="up">+22.9%</td><td>14.3%</td></tr>
+              <tr><td>TIGER 미국S&amp;P500</td><td>3,892만</td><td class="up">+11.1%</td><td>13.0%</td></tr>
+              <tr><td>애플</td><td>3,038만</td><td class="down">−2.2%</td><td>10.2%</td></tr>
+              <tr><td>삼성전자</td><td>2,362만</td><td class="down">−6.2%</td><td>7.9%</td></tr>
+            </tbody>
+          </table></div>
+          <ul>
+            <li>반도체(SK하이닉스·엔비디아·삼성전자)가 투자 자산의 <b>38%</b>입니다.</li>
+            <li>손실 종목은 애플·삼성전자 두 개이고, 둘 다 매매일지에 손절가가 비어 있습니다.</li>
+          </ul>
+        </div>
+        <div class="msg-actions"><button data-toast="복사했습니다"><i data-i="copy"></i>복사</button></div>
+      </div>
+
+      <div class="msg-user">ETH 1시간봉 종가가 2,600 아래로 마감하면 알려줘</div>
+
+      <div class="msg-agent">
+        <div class="agent-line"><span class="orb"></span>alphafolio</div>
+        <div class="tool-chips"><span class="tool-chip">watch_create</span></div>
+        <div class="prose"><p>지난 30일 기준으로 미리 돌려 봤습니다. 아래 카드에서 켜 주세요.</p></div>
+
+        <section class="card confirm" id="wcard">
+          <div class="confirm-h"><span class="kicker ai">감시 켜기 확인</span><span class="badge">Binance</span><span class="timer" data-timer="512"><i data-i="clock"></i><b></b></span></div>
+          <div class="confirm-top">
+            <div class="what">ETH/USDT <span class="mono">1시간봉</span></div>
+            <div class="how">종가 &lt; 2,600</div>
+          </div>
+          <div class="confirm-b">
+            <dl class="kv">
+              <dt>동작</dt><dd>알림만</dd>
+              <dt>알림</dt><dd>앱 화면 · 텔레그램</dd>
+              <dt>반복 범위</dt><dd>정지할 때까지 · 쿨다운 4시간</dd>
+              <dt>시세 기준</dt><dd>Binance 현물</dd>
+            </dl>
+            <div class="preview">
+              <div class="between"><b style="font-size:13.5px">지난 30일이었다면</b><span class="badge ai">3번 울림</span></div>
+              <div class="bars" aria-hidden="true"><i style="height:30%"></i><i style="height:45%"></i><i style="height:38%"></i><i class="hit" style="height:90%"></i><i style="height:52%"></i><i style="height:40%"></i><i style="height:35%"></i><i style="height:28%"></i><i class="hit" style="height:80%"></i><i style="height:60%"></i><i style="height:44%"></i><i style="height:33%"></i><i style="height:48%"></i><i style="height:36%"></i><i class="hit" style="height:85%"></i><i style="height:40%"></i><i style="height:30%"></i><i style="height:26%"></i></div>
+              <div class="faint" style="font-size:12px;margin-top:6px">마지막 11월 2일 14:00</div>
+            </div>
+            <p class="confirm-foot" style="text-align:left">봉이 닫힌 뒤의 값으로만 판정합니다 (중간에 꼬리로 찍고 돌아온 가격에는 울리지 않습니다). 알림만 보내고 주문은 내지 않습니다.</p>
+            <div class="confirm-actions">
+              <button class="btn ghost" onclick="var c=document.getElementById('wcard');c.classList.add('is-closed');document.getElementById('wclosed').hidden=false">닫기</button>
+              <button class="btn accent" onclick="document.getElementById('wcard').classList.add('is-done');document.getElementById('wdone').hidden=false">감시 켜기</button>
+            </div>
+          </div>
+          <div class="confirm-result" id="wdone" hidden><span class="ck"><i data-i="check"></i></span><div><b>감시를 켰습니다</b><span class="muted">봉이 닫힐 때마다 확인합니다 · 설정 → 감시에서 관리</span></div></div>
+          <div class="confirm-result" id="wclosed" hidden><div class="muted">닫았습니다. 필요하면 다시 요청하세요.</div></div>
+        </section>
+      </div>
+
+      <div class="msg-user">이번 달 지출 얼마나 썼어?</div>
+      <div class="msg-agent">
+        <div class="tool-chips"><span class="tool-chip running">ledger_summary</span></div>
+        <div class="thinking"><span class="orb"></span>가계부를 읽는 중…</div>
+      </div>
+    </div>
+  </main>
+</div>
+<div data-composer data-busy></div>
+<nav data-tabbar></nav>
+<aside class="drawer" id="drawer" aria-label="대화 목록"></aside>
+<script src="assets/canvas.js"></script>
+</body>
+</html>

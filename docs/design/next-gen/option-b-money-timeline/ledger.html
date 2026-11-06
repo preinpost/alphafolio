@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>가계부 — Alphafolio B</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="ledger">
+<main class="app">
+  <header class="topbar">
+    <h1 class="desktop-only" style="flex:none">가계부</h1>
+    <div class="month num" aria-label="월 이동"><button aria-label="이전 달" data-icon="left"></button><span id="monthLabel">11월</span><button aria-label="다음 달" data-icon="right"></button></div>
+    <span class="spacer"></span>
+    <button class="btn xs primary" data-open="tx" onclick="txNew()" data-icon="plus" aria-label="기록 추가" style="white-space:nowrap"><span class="mobile-only">기록</span><span class="desktop-only">기록 추가</span></button>
+  </header>
+
+  <div class="book-bar">
+    <label class="book-pick" style="flex:1;min-width:0"><span class="sr">가계부 선택</span>
+      <select class="select sm" style="height:32px;padding:0 4px;background:none;font-weight:700;font-size:15px;border:0;min-width:0" aria-label="가계부 선택">
+        <option>우리집 · 2명 · 기본</option><option>개인</option>
+      </select>
+    </label>
+    <div class="seg sm inline" role="group" aria-label="범위"><button class="on">전체</button><button>내 기록</button></div>
+    <button class="btn xs line" data-open="manage" style="white-space:nowrap">관리·초대</button>
+  </div>
+
+  <!-- 받은 초대 -->
+  <div class="invite" id="invite">
+    <p><b>지수</b> 님이 <b>‘부모님 생활비’</b> 가계부에 초대했어요</p>
+    <button class="btn xs ghost" onclick="invite.remove();toast('초대를 거절했습니다')">거절</button>
+    <button class="btn xs primary" onclick="invite.remove();toast('‘부모님 생활비’ 가계부에 참여했습니다')">수락</button>
+  </div>
+
+  <div class="section desk-grid">
+    <div class="col">
+      <!-- 이달 지출 -->
+      <section class="card" style="order:1">
+        <div class="eyebrow">11월 지출</div>
+        <div class="big-num num" style="margin-top:2px"><span data-count="1128400">0</span><small>원</small></div>
+        <div class="deltas num"><span><span>수입</span>4,820,000원</span><span style="color:var(--ok)"><span>예산 남음</span>671,600원</span></div>
+        <div class="catbar" role="img" aria-label="카테고리별 지출 비중" id="catbar"></div>
+        <div class="cat-legend num" id="catLegend"></div>
+      </section>
+
+      <!-- 내역 -->
+      <div style="order:4">
+        <div class="tools" style="margin-top:6px">
+          <label class="search"><span data-icon="search"></span><span class="sr">내역 검색</span><input class="input sm" type="search" id="lq" placeholder="가맹점·메모 검색" autocomplete="off" /></label>
+          <span id="catPill"></span>
+        </div>
+        <div id="txList"></div>
+        <p class="hint" style="margin:14px 4px 0">챗에서 <span class="mono">어제 김밥천국 8천원</span>처럼 말해도 기록됩니다.</p>
+      </div>
+    </div>
+
+    <div class="col">
+      <!-- 예산 -->
+      <section class="card" style="order:2">
+        <div class="card-h"><h2>예산</h2><span class="eyebrow num">1,800,000원</span></div>
+        <div class="budget"><div class="top"><span>식비</span><span class="num">462,800 / 600,000원</span></div><div class="prog"><i style="width:77%;background:var(--k-ledger)"></i></div></div>
+        <div class="budget"><div class="top"><span>생활</span><span class="num">188,200 / 400,000원</span></div><div class="prog"><i style="width:47%;background:var(--k-ledger)"></i></div></div>
+        <div class="budget"><div class="top"><span>교통</span><span class="num">134,500 / 150,000원</span></div><div class="prog"><i style="width:90%;background:var(--warn)"></i></div></div>
+        <div class="budget"><div class="top"><span>문화</span><span class="num up">212,000 / 200,000원 · 12,000원 초과</span></div><div class="prog"><i style="width:100%;background:var(--up)"></i></div></div>
+        <p class="hint" style="margin:12px 0 0">예산은 챗에서 <span class="mono">식비 예산 30만원</span>처럼 정합니다.</p>
+      </section>
+
+      <!-- 사람별 -->
+      <section class="card" style="order:3">
+        <div class="card-h"><h2>사람별</h2><span class="eyebrow">가계부 전체 기준</span></div>
+        <div class="member"><span class="av" style="background:#5b4dff">민</span><span style="width:60px">민수 <span class="muted">· 나</span></span><div class="bar prog"><i style="width:58%;background:#5b4dff"></i></div><b class="num">654,400원</b></div>
+        <div class="member"><span class="av" style="background:#0ea5a4">지</span><span style="width:60px">지수</span><div class="bar prog"><i style="width:42%;background:#0ea5a4"></i></div><b class="num">474,000원</b></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<!-- 기록 추가·고치기 -->
+<div class="sheet" id="sheet-tx" role="dialog" aria-labelledby="txTitle">
+  <div class="grab"></div>
+  <div class="sheet-h"><h3 id="txTitle">기록 추가</h3><button class="icon-btn" data-close aria-label="닫기" data-icon="x"></button></div>
+  <div class="field"><div class="seg" role="group" aria-label="구분" id="txType"><button class="on">지출</button><button>수입</button></div></div>
+  <label class="field"><span>금액</span><input class="input num" id="txAmt" inputmode="numeric" placeholder="0원" style="font-size:22px;font-weight:800;height:56px" /></label>
+  <label class="field"><span>가맹점·내용</span><input class="input" id="txName" placeholder="예: 김밥천국" /></label>
+  <div class="row2">
+    <label class="field"><span>분류</span><input class="input" id="txCat" placeholder="예: 식비" list="cats" /></label>
+    <label class="field"><span>날짜</span><input class="input num" type="date" id="txDate" value="2026-11-06" /></label>
+  </div>
+  <datalist id="cats"><option>식비</option><option>생활</option><option>교통</option><option>문화</option><option>주거</option></datalist>
+  <label class="field"><span>메모 (선택)</span><input class="input" id="txMemo" /></label>
+  <div class="actions">
+    <button class="btn danger" id="txDel" style="flex:0 0 auto" data-open="txdel">삭제</button>
+    <button class="btn" data-close>취소</button>
+    <button class="btn primary" data-close data-toast="저장했습니다">저장</button>
+  </div>
+</div>
+<div class="sheet" id="sheet-txdel" role="dialog" aria-label="기록 삭제">
+  <div class="grab"></div>
+  <h3>이 기록을 지울까요?</h3>
+  <div class="actions"><button class="btn" data-open="tx">취소</button><button class="btn danger" data-close data-toast="지웠습니다">삭제</button></div>
+</div>
+
+<!-- 가계부 관리 -->
+<div class="sheet" id="sheet-manage" role="dialog" aria-labelledby="mgTitle">
+  <div class="grab"></div>
+  <div class="sheet-h"><h3 id="mgTitle">가계부 관리</h3><button class="icon-btn" data-close aria-label="닫기" data-icon="x"></button></div>
+  <label class="field"><span>이름</span><div style="display:flex;gap:8px"><input class="input" value="우리집" aria-label="가계부 이름" /><button class="btn" data-toast="이름을 바꿨습니다">바꾸기</button></div></label>
+  <div class="kv" style="margin-top:6px"><span>기본 가계부</span><span class="pill ok">기본</span></div>
+  <div class="divider"></div>
+  <div class="eyebrow" style="font-weight:700">멤버 2 · 소유자 민수</div>
+  <div class="list-row"><span class="av logo-sq" style="background:#5b4dff;width:34px;height:34px">민</span><div class="main"><div class="t">민수 <span class="muted">(나)</span></div><div class="s">소유자</div></div></div>
+  <div class="list-row"><span class="logo-sq" style="background:#0ea5a4;width:34px;height:34px">지</span><div class="main"><div class="t">지수</div><div class="s">멤버</div></div>
+    <button class="btn xs line" data-toast="지수 님에게 소유권을 넘겼습니다">소유권 넘기기</button><button class="btn xs ghost" data-toast="지수 님을 내보냈습니다">내보내기</button></div>
+  <label class="field"><span>초대</span><div style="display:flex;gap:8px"><input class="input" placeholder="상대 ID" aria-label="초대할 ID" /><button class="btn primary" data-toast="상대가 앱에서 수락하면 멤버가 됩니다">초대</button></div></label>
+  <div class="list-row"><div class="main"><div class="t">hyun</div><div class="s">초대 대기 중</div></div><button class="btn xs ghost" data-toast="초대를 취소했습니다">초대 취소</button></div>
+  <div class="divider"></div>
+  <div class="eyebrow" style="font-weight:700">새 가계부</div>
+  <div style="display:flex;gap:8px;margin-top:8px"><input class="input" placeholder="예: 우리집, 개인" aria-label="새 가계부 이름" /><button class="btn" data-toast="새 가계부를 만들었습니다">만들기</button></div>
+  <div class="divider"></div>
+  <div class="actions mt0" style="flex-wrap:wrap">
+    <button class="btn line" data-toast="백업 파일을 받았습니다">백업</button>
+    <button class="btn line" data-toast="‘우리집’ 가계부에서 나갔습니다">나가기</button>
+  </div>
+  <label class="field"><span class="up">가계부 삭제 — 내역·예산이 모두 지워지고 되돌릴 수 없습니다</span><div style="display:flex;gap:8px"><input class="input" placeholder='확인: "우리집" 입력' aria-label="삭제 확인용 가계부 이름" /><button class="btn danger" disabled>삭제</button></div></label>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+  const CATS = [["식비", 462800, "#f59f00"], ["문화", 212000, "#a35bff"], ["생활", 188200, "#12b886"], ["교통", 134500, "#3182f6"], ["주거", 130900, "#8b95a1"]];
+  const tot = CATS.reduce((a, c) => a + c[1], 0);
+  let cat = null, lqv = "";
+  /* [날짜, 가맹점, 분류, 금액(+수입), 누가, 메모, 챗] */
+  const T = [
+    ["2026-11-06", "을지면옥", "식비", -32000, "민수", "팀 점심", true],
+    ["2026-11-06", "카카오T", "교통", -14200, "지수", "", false],
+    ["2026-11-05", "급여", "", 4820000, "민수", "", false],
+    ["2026-11-05", "이마트", "생활", -86400, "지수", "주말 장보기", false],
+    ["2026-11-05", "넷플릭스", "문화", -17000, "민수", "", true],
+    ["2026-11-04", "김밥천국", "식비", -8000, "민수", "", true],
+    ["2026-11-03", "관리비 11월", "주거", -130900, "지수", "자동이체", false],
+    ["2026-11-02", "CGV", "문화", -38000, "지수", "", false],
+  ];
+  const won = n => (n < 0 ? "−" : "+") + Math.abs(n).toLocaleString("ko-KR") + "원";
+  const DOW = "일월화수목금토";
+  function render() {
+    catbar.innerHTML = CATS.map(([n, v, c]) => `<button title="${n}" aria-label="${n}만 보기" style="flex:${v};background:${c};opacity:${cat && cat !== n ? .3 : 1}" data-cat="${n}"></button>`).join("");
+    catLegend.innerHTML = CATS.map(([n, v, c]) => `<button class="${cat === n ? "on" : ""}" data-cat="${n}" title="이 분류만 보기"><i style="background:${c}"></i>${n}<b>${Math.round(v / tot * 100)}%</b></button>`).join("");
+    catPill.innerHTML = cat ? `<span class="filter-pill">${cat}<button aria-label="분류 필터 해제" onclick="cat=null;render()">${ICONS.x.replace("<svg", '<svg width="13" height="13"')}</button></span>` : "";
+    const rows = T.filter(t => (!cat || t[2] === cat) && (!lqv || (t[1] + t[5]).includes(lqv)));
+    if (!rows.length) { txList.innerHTML = `<div class="empty">조건에 맞는 내역이 없습니다.</div>`; return; }
+    const days = {};
+    rows.forEach(t => (days[t[0]] ||= []).push(t));
+    txList.innerHTML = Object.entries(days).map(([d, ts]) => {
+      const dt = new Date(d + "T00:00:00");
+      const spent = ts.filter(t => t[3] < 0).reduce((a, t) => a + t[3], 0);
+      return `<div class="tl-day"><h3>${dt.getMonth() + 1}월 ${dt.getDate()}일 ${DOW[dt.getDay()]}</h3><span class="num">${spent ? `지출 ${Math.abs(spent).toLocaleString("ko-KR")}원` : ""}</span></div><div class="tl">` +
+        ts.map(t => `<div class="tl-item k-ledger" role="button" tabindex="0" data-open="tx" data-t="${T.indexOf(t)}">
+          <div class="tl-ico" style="${t[3] > 0 ? "background:var(--ok-soft);color:var(--ok)" : ""}"><b style="font-size:13px">${t[3] > 0 ? "수입" : (t[2] || "?").slice(0, 2)}</b></div>
+          <div class="tl-body"><div class="tl-title">${t[1]}</div><div class="tl-sub">${t[6] ? '<span class="tag brand">챗</span>' : ""}${t[3] > 0 ? "수입" : t[2] || "분류 없음"} · ${t[4]}${t[5] ? " · " + t[5] : ""}</div></div>
+          <div class="tl-amt num ${t[3] > 0 ? "up" : ""}">${won(t[3])}</div>
+        </div>`).join("") + `</div>`;
+    }).join("");
+  }
+  document.addEventListener("click", e => { const b = e.target.closest("[data-cat]"); if (b) { cat = cat === b.dataset.cat ? null : b.dataset.cat; render(); } });
+  lq.oninput = e => { lqv = e.target.value.trim(); render(); };
+  render();
+
+  window.txNew = () => { txTitle.textContent = "기록 추가"; txDel.hidden = true; [txAmt, txName, txCat, txMemo].forEach(i => i.value = ""); };
+  txList.addEventListener("click", e => {
+    const it = e.target.closest("[data-t]"); if (!it) return;
+    const t = T[+it.dataset.t];
+    txTitle.textContent = "기록 고치기"; txDel.hidden = false;
+    txAmt.value = Math.abs(t[3]).toLocaleString("ko-KR") + "원"; txName.value = t[1]; txCat.value = t[2]; txMemo.value = t[5]; txDate.value = t[0];
+    document.querySelectorAll("#txType button").forEach((b, i) => b.classList.toggle("on", (t[3] > 0) === (i === 1)));
+  });
+  txList.addEventListener("keydown", e => { if (e.key === "Enter") e.target.closest("[data-t]")?.click(); });
+</script>
+</body>
+</html>

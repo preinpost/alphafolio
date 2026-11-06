@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>제안 C · Pro Workspace — Alphafolio</title>
+<link rel="stylesheet" href="assets/styles.css" />
+<style>
+  body { background: radial-gradient(900px 480px at 10% -10%, var(--accent-bg), transparent), var(--bg); }
+  .hd { display: flex; align-items: center; gap: 10px; }
+  .kick { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--accent); }
+  h1 { font-size: 30px; letter-spacing: -0.035em; line-height: 1.15; margin: 14px 0 10px; font-weight: 780; }
+  h1 span { color: var(--tx-3); }
+  .lead { color: var(--tx-2); font-size: 14.5px; line-height: 1.65; max-width: 720px; }
+  .pillars { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 22px 0 30px; }
+  .pillar { padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-1); }
+  .pillar b { display: block; margin-bottom: 3px; font-size: 13.5px; }
+  .pillar p { color: var(--tx-3); font-size: 12.5px; line-height: 1.55; }
+  h2.sec { font-size: 12px; color: var(--tx-3); font-weight: 700; letter-spacing: .04em; margin: 0 0 10px; }
+  .screens { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .scr { border: 1px solid var(--line); border-radius: 14px; background: var(--bg-1); overflow: hidden; display: flex; flex-direction: column; }
+  .scr:hover { border-color: var(--accent); }
+  .scr .thumb { aspect-ratio: 390 / 600; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden; position: relative; }
+  .scr .thumb iframe { position: absolute; left: 0; top: 0; width: 390px; height: 600px; border: 0; pointer-events: none; transform-origin: 0 0; }
+  .scr .m { padding: 10px 12px 12px; }
+  .scr .m b { font-size: 14px; }
+  .scr .m p { color: var(--tx-3); font-size: 12px; margin-top: 3px; line-height: 1.5; }
+  .scr .m code { font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--tx-4); }
+  .lists { display: grid; gap: 10px; margin-top: 30px; }
+  .lists .card-b { font-size: 13px; color: var(--tx-2); line-height: 1.6; }
+  .lists ul { padding-left: 16px; } .lists li + li { margin-top: 3px; }
+  .tokens { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .tok { display: flex; gap: 7px; align-items: center; font-size: 12px; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-1); }
+  .tok i { width: 12px; height: 12px; border-radius: 3px; }
+  @media (min-width: 700px) { h1 { font-size: 42px; } .pillars { grid-template-columns: repeat(2, 1fr); } .screens { grid-template-columns: repeat(3, 1fr); gap: 14px; } .lists { grid-template-columns: 1fr 1fr; } }
+  @media (min-width: 1100px) { .pillars { grid-template-columns: repeat(4, 1fr); } .screens { grid-template-columns: repeat(5, 1fr); } }
+</style>
+</head>
+<body>
+<div class="idx">
+  <div class="hd"><span class="logo">α</span><span class="kick">ALPHAFOLIO · NEXT-GEN UI · 제안 C</span><span class="sp"></span><button class="btn sm" data-theme-toggle>다크 / 라이트</button></div>
+  <h1>Pro Workspace <span>— 폰에서 먼저, 촘촘하게</span></h1>
+  <p class="lead">지금 앱의 메뉴 다섯 개(<b>챗 · 투자 · 일지 · 가계부 · 설정</b>)와 각 메뉴가 실제로 하는 일만 그대로 옮겼습니다. 기본 화면은 390px iOS(Capacitor)이고, 데스크톱은 같은 화면을 넓혀 레일 + 2단 + 옆 챗 패널로 펼칩니다. 다크 우선, 표 수준의 정보 밀도, AI·초점은 보라색 하나로만 표시합니다.</p>
+
+  <div class="pillars">
+    <div class="pillar"><b>모바일 우선 5탭</b><p>하단 탭바에 실제 메뉴 5개. 44px 이상 터치 영역, 위쪽 고정 헤더에 그 화면의 행동(새로고침·기록·월 이동)만.</p></div>
+    <div class="pillar"><b>숫자가 주인공</b><p>화면당 큰 숫자 하나(총자산·매매 수·이달 지출). Pretendard 탭 숫자 정렬, 티커·조건식은 JetBrains Mono.</p></div>
+    <div class="pillar"><b>챗은 맥락 안에</b><p>각 화면의 “챗에서 이렇게 말해도 됩니다” 안내는 보라색 카드로. 넓은 화면에서는 같은 대화가 오른쪽 패널에 붙습니다.</p></div>
+    <div class="pillar"><b>안전한 확정</b><p>주문 확인 카드는 만료 바 + 길게 눌러 확정. 길게 누르기가 어려우면 한 번 누르는 버튼으로 바꿀 수 있습니다(키보드·스크린리더는 바로 확정).</p></div>
+  </div>
+
+  <h2 class="sec">화면 — 각 링크는 폰·데스크톱 모두 반응형</h2>
+  <div class="screens" id="screens"></div>
+
+  <div class="lists">
+    <section class="card"><div class="card-h"><h2>이번 개정에서 뺀 것</h2></div><div class="card-b"><ul>
+      <li>⌘K 명령 팔레트·슬래시 명령·단축키 표기·상태 바 범례 (<code class="mono">palette.html</code> 삭제)</li>
+      <li>워크스페이스 3패인·관심종목·상단 시세 티커 (<code class="mono">workspace.html</code>)</li>
+      <li>히트맵·손익 기여도·What-if 슬라이더 (<code class="mono">holdings.html</code>)</li>
+      <li>10단 호가·차트 주문/손절선·별도 주문 티켓 (<code class="mono">order.html</code>)</li>
+      <li>감시 백테스트·알림 히스토리 화면 (<code class="mono">watch.html</code> → 설정 › 감시)</li>
+      <li>가계부 /spend 한 줄 파서·지출 달력, 일지 태그·감정 성과 분석</li>
+      <li>별도 모바일 목업(<code class="mono">mobile.html</code>) — 모든 화면이 곧 모바일 화면</li>
+    </ul></div></section>
+    <section class="card"><div class="card-h"><h2>토큰</h2></div><div class="card-b">
+      <div class="tokens">
+        <span class="tok"><i style="background:var(--accent)"></i>AI·초점</span><span class="tok"><i style="background:var(--up)"></i>상승·매수</span><span class="tok"><i style="background:var(--dn)"></i>하락·매도</span><span class="tok"><i style="background:var(--warn)"></i>주의</span><span class="tok"><i style="background:var(--ok)"></i>완료·수입</span>
+      </div>
+      <p style="margin-top:12px">기능 목록은 <code class="mono">FEATURES.md</code> 에 메뉴별로 정리했습니다. 데이터는 모두 목업이며 실제로 전송되는 동작은 없습니다.</p>
+    </div></section>
+  </div>
+</div>
+<script src="assets/app.js"></script>
+<script>
+  const S = [
+    ["chat", "챗", "대화 목록(드로어), 툴 칩, 표, 주문·감시 확인 카드, 이미지 첨부"],
+    ["portfolio", "투자", "총자산·추이, 미체결 취소, 보유 자산 표, 배분·계좌·화폐별, 시세 조회"],
+    ["journal", "일지", "기간 요약·기록 습관, 날짜별 매매, 기록 보기/직접 기록 시트"],
+    ["ledger", "가계부", "월 이동, 이달 지출·분류, 내역, 예산·사람별, 관리·초대 시트"],
+    ["settings", "설정", "계정·연결·MCP 서버·감시·AI 모델·화면·관리자"],
+  ];
+  const box = document.getElementById("screens");
+  box.innerHTML = S.map(([f, t, d]) => `<a class="scr" href="${f}.html"><div class="thumb"><iframe src="${f}.html" loading="lazy" tabindex="-1" title="${t} 미리보기"></iframe></div><div class="m"><b>${t}</b><p>${d}</p><code>${f}.html</code></div></a>`).join("");
+  const fit = () => box.querySelectorAll(".thumb").forEach((t) => (t.firstChild.style.transform = `scale(${t.clientWidth / 390})`));
+  fit(); addEventListener("resize", fit);
+</script>
+</body>
+</html>

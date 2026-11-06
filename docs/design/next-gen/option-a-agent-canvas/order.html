@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>주문 확인 카드 · Agent Canvas</title>
+<link rel="stylesheet" href="assets/canvas.css" />
+</head>
+<body data-page="chat" data-conv="order">
+<div class="app">
+  <nav data-rail></nav>
+  <main class="main">
+    <div class="wrap">
+      <header class="topbar">
+        <button class="icon-btn mob" data-open="drawer" aria-label="대화 목록"><i data-i="menu"></i></button>
+        <div class="title"><b>삼성전자 10주 매수</b></div>
+        <span class="status">Claude Sonnet</span>
+        <a class="icon-btn mob" href="chat-new.html" aria-label="새 대화"><i data-i="plus"></i></a>
+      </header>
+
+      <div class="msg-user">삼성전자 10주 71,200원에 토스로 사줘</div>
+
+      <div class="msg-agent">
+        <div class="agent-line"><span class="orb"></span>alphafolio</div>
+        <div class="tool-chips"><span class="tool-chip">get_quote</span><span class="tool-chip">order_preview</span></div>
+        <div class="prose"><p>현재가는 <b>71,400원</b>(전일 대비 <span class="up">+0.85%</span>)입니다. 지정가 71,200원으로 준비했어요. 카드에서 확인하면 토스로 바로 전송됩니다.</p></div>
+
+        <section class="card confirm" id="ocard">
+          <div class="confirm-h"><span class="kicker buy">매수 주문 확인</span><span class="badge">토스</span><span class="timer" data-timer="287" aria-label="남은 확인 시간"><i data-i="clock"></i><b></b></span></div>
+          <div class="confirm-top buy">
+            <div class="what">삼성전자 <span class="mono">005930</span></div>
+            <div class="how">10주 × 71,200원</div>
+          </div>
+          <div class="confirm-b">
+            <dl class="kv">
+              <dt>주문 방식</dt><dd>지정가 71,200원</dd>
+              <dt>예상 금액</dt><dd>712,000원</dd>
+              <dt>계좌</dt><dd>토스증권 위탁</dd>
+            </dl>
+            <label class="field note"><span>매매 근거 (선택) — 매매일지에 남습니다</span>
+              <textarea class="input" maxlength="1000" placeholder="예: 20일선 지지 확인, 실적 발표 전 분할 매수"></textarea>
+            </label>
+            <div class="slide" id="slide" data-alt="밀기 어려우면 버튼으로 주문">
+              <div class="slide-fill"></div>
+              <div class="slide-label"><span>밀어서 매수 주문</span></div>
+              <div class="slide-knob"><i data-i="arrow"></i></div>
+            </div>
+            <p class="confirm-foot">주문을 누르면 토스로 바로 전송됩니다.</p>
+            <div class="confirm-actions"><button class="btn ghost" onclick="var c=document.getElementById('ocard');c.classList.add('is-closed');document.getElementById('oclosed').hidden=false">닫기</button></div>
+          </div>
+          <div class="confirm-result" id="odone" hidden><span class="ck"><i data-i="check"></i></span><div><b>주문을 접수했습니다</b><span class="muted num">주문번호 0000128491 · 매매일지에 저절로 들어갑니다</span></div></div>
+          <div class="confirm-result" id="oclosed" hidden><div class="muted">닫았습니다. 필요하면 다시 요청하세요.</div></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<div data-composer></div>
+<nav data-tabbar></nav>
+<aside class="drawer" id="drawer" aria-label="대화 목록"></aside>
+<script src="assets/canvas.js"></script>
+<script>
+  document.getElementById("slide").addEventListener("confirmed", () => {
+    document.getElementById("ocard").classList.add("is-done");
+    document.getElementById("odone").hidden = false;
+    document.querySelector("#ocard .timer").hidden = true;
+  });
+</script>
+</body>
+</html>

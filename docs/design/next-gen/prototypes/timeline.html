@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>AlphaFolio — 머니 타임라인</title>
+<link rel="stylesheet" href="shared.css" />
+<style>
+	.wrap { max-width: 760px; margin: 0 auto; }
+	h1 { font-size: 30px; letter-spacing: -.03em; margin: 4px 0 16px; }
+	.filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 22px; position: sticky; top: 0; padding: 10px 0; background: var(--bg); z-index: 5; }
+	.filters .chip.on { background: var(--ink); color: var(--bg); }
+	.day { margin: 26px 0 8px; display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-3); font-weight: 600; }
+	.ev { display: grid; grid-template-columns: 40px 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 16px; transition: background .15s; cursor: pointer; }
+	.ev:hover { background: var(--surface); }
+	.ic { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 17px; background: var(--surface-2); }
+	.ev .t { font-weight: 600; } .ev .s { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+	.ev .v { text-align: right; font-family: var(--mono); font-size: 15px; }
+	.ev .v small { display: block; font-size: 11px; color: var(--ink-3); font-family: var(--sans); }
+	.ev.trade .ic { background: var(--up-soft); } .ev.trade.sell .ic { background: var(--down-soft); }
+	.ev.journal .ic { background: var(--accent-soft); }
+	.ev.alert .ic { background: color-mix(in srgb, var(--warn) 18%, transparent); }
+	.note { grid-column: 2 / 4; font-size: 14px; line-height: 1.6; color: var(--ink-2); border-left: 2px solid var(--accent); padding-left: 12px; margin-top: 4px; }
+	.insight { margin: 14px 0; padding: 16px; border-radius: 16px; background: var(--accent-soft); color: var(--ink); font-size: 14px; line-height: 1.6; }
+	.insight b { color: var(--accent); }
+	.hidden { display: none; }
+	.sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 8px; }
+	.sum .card { padding: 14px; } .sum .num { font-size: 18px; font-weight: 700; margin-top: 4px; }
+	.add { display: flex; gap: 8px; align-items: center; padding: 12px 14px; border: 1.5px dashed var(--line); border-radius: 16px; color: var(--ink-3); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="shell">
+	<nav class="rail"></nav>
+	<main class="main"><div class="wrap">
+		<div class="eyebrow">머니 타임라인 · 거래·일지·가계부·알림을 한 줄로</div>
+		<h1>11월</h1>
+		<div class="sum">
+			<div class="card"><div class="faint" style="font-size:12px">순자산 변화</div><div class="num up">+₩5,912,400</div></div>
+			<div class="card"><div class="faint" style="font-size:12px">지출</div><div class="num">₩1,084,300</div></div>
+			<div class="card"><div class="faint" style="font-size:12px">실현손익</div><div class="num up">+₩842,000</div></div>
+		</div>
+		<div class="filters" id="f">
+			<button class="chip on" data-k="all">전체</button><button class="chip" data-k="trade">⇅ 매매</button><button class="chip" data-k="journal">✎ 일지</button><button class="chip" data-k="ledger">₩ 가계부</button><button class="chip" data-k="alert">🔔 알림</button><button class="chip" data-k="income">↓ 수입</button>
+		</div>
+		<div class="add">＋ <span>무엇이든 적어보세요 — “어제 김밥천국 8천원”, “NVDA 산 이유: …”</span></div>
+		<div id="list"></div>
+	</div></main>
+</div>
+<div class="agentbar"><span class="ctx">≡ 타임라인 · 11월</span><input placeholder="“이번 달 식비가 왜 늘었어?”" /><kbd>⌘K</kbd><button class="send">↑</button></div>
+<script src="shared.js"></script>
+<script>
+AF.init("timeline.html");
+const days = [
+	["11월 6일 목", "오늘", [
+		["alert", "🔔", "반도체 비중 31.4% — 상한 30% 초과", "감시 #2 · 08:30", "", ""],
+		["ledger", "☕", "스타벅스 역삼점", "식비 · 현대카드 · 08:12", -6100, "자동 분류"],
+	]],
+	["11월 5일 수", "+₩3,184,200", [
+		["trade", "⇅", "NVIDIA 3주 매수", "토스 · $186.20 · 23:41", -771600, "체결"],
+		["journal", "✎", "NVDA 추가 매수 이유", "일지 · 23:45", "", "", "실적 발표 전 1/3만. 데이터센터 가이던스가 기대 이하면 $170 아래에서 손절. 목표 비중 22%."],
+		["ledger", "🍜", "김밥천국", "식비 · 에이전트 입력 · 12:20", -8000, "“어제 김밥천국 8천원”"],
+		["income", "↓", "삼성전자 분기배당", "KIS · 입금", 11610, "세후"],
+	]],
+	["11월 4일 화", "−₩412,800", [
+		["ledger", "🍻", "팀 회식 — 육전식당", "식비 · 신한카드 · 21:03", -128000, "예산 초과 요인"],
+		["insight"],
+		["trade sell", "⇅", "현대차 15주 매도", "KIS · ₩218,500 · 14:02", 3277500, "실현 +₩842,000"],
+		["alert", "🔔", "ETHUSDT 1시간봉 종가 < 2,600", "Binance · 09:00 · 1/3회", "", "알림만"],
+	]],
+	["11월 1일 토", "", [
+		["income", "↓", "월급", "국민은행 · 입금", 4820000, ""],
+		["ledger", "🏠", "관리비", "주거 · 자동이체", -214300, "고정"],
+	]],
+];
+const list = document.getElementById("list");
+list.innerHTML = days.map(([d, s, evs]) => `<div class="day"><span>${d}</span><span class="num">${s}</span></div>` + evs.map((e) => {
+	if (e[0] === "insight") return `<div class="insight" data-k="ledger"><span class="badge ai">AI 인사이트</span><br/>11월 식비가 지난달 같은 날보다 <b>+41%</b> 빨라요. 대부분 <b>회식 1건</b> 때문이고, 그 외 평일 점심은 오히려 −8%예요. 회식비를 ‘업무 외 모임’ 예산으로 옮길까요?</div>`;
+	const [k, ic, t, sub, v, tag, note] = e;
+	return `<div class="ev ${k}" data-k="${k.split(" ")[0]}"><div class="ic">${ic}</div><div><div class="t">${t}</div><div class="s">${sub}</div></div>
+		<div class="v ${typeof v === "number" ? AF.tone(v) : ""}">${typeof v === "number" ? AF.signed(v) : ""}<small>${tag}</small></div>${note ? `<div class="note">${note}</div>` : ""}</div>`;
+}).join("")).join("");
+document.getElementById("f").onclick = (e) => {
+	const b = e.target.closest("button"); if (!b) return;
+	document.querySelectorAll("#f .chip").forEach((x) => x.classList.toggle("on", x === b));
+	list.querySelectorAll("[data-k]").forEach((el) => el.classList.toggle("hidden", b.dataset.k !== "all" && el.dataset.k !== b.dataset.k));
+	AF.haptic(5);
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>매매일지 · Alphafolio Pro</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="journal">
+<div class="app with-copilot">
+  <nav class="rail"></nav>
+  <main class="view">
+    <header class="top">
+      <div class="t"><h1>매매일지</h1><div class="sub">앱 주문·자동 매매는 저절로, 계좌 체결은 가져오기로</div></div>
+      <button class="btn sm" data-toast="체결 2건을 가져왔습니다 (데모)" aria-label="체결 가져오기"><span data-i="refresh"></span><span class="only-d">가져오기</span></button>
+      <button class="btn pri sm" data-open="jr-new" aria-label="직접 기록"><span data-i="plus"></span><span class="only-d">기록</span></button>
+    </header>
+
+    <div class="page">
+      <div class="seg block mo1" role="group" aria-label="기간" style="max-width:420px"><button aria-pressed="true">30일</button><button aria-pressed="false">90일</button><button aria-pressed="false">올해</button><button aria-pressed="false">전체</button></div>
+
+      <div class="cols">
+        <div class="col">
+          <section class="card mo4" aria-labelledby="jr-t">
+            <div class="card-h"><h2 id="jr-t">매매<span class="cnt">6건</span></h2><span class="filter-pill" id="tagpill" hidden>#눌림목<button aria-label="태그 필터 해제">${'x'}</button></span></div>
+            <div class="tools">
+              <label class="search"><span data-i="search"></span><span class="sr-only">일지 검색</span><input class="input sm" type="search" placeholder="종목·근거 검색" /></label>
+              <div class="hscroll" role="group" aria-label="걸러 보기" data-single>
+                <button class="chip" aria-pressed="true">전체</button><button class="chip" aria-pressed="false">근거 없음 <span class="n">2</span></button><button class="chip" aria-pressed="false">매수</button><button class="chip" aria-pressed="false">매도</button><button class="chip" aria-pressed="false">체결 확인 전 <span class="n">1</span></button>
+              </div>
+            </div>
+            <div role="list" id="list" class="bt"></div>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card mo2" aria-labelledby="sum">
+            <div class="hero hero-top" style="padding-bottom:14px">
+              <div style="flex:1"><div class="eyebrow" id="sum">30일 매매</div><div class="big">6<span class="u">건</span></div></div>
+            </div>
+            <div class="kpis"><div>매수<b>3</b></div><div>매도<b>2</b></div><div>확인 전<b class="ac-t">1</b></div></div>
+            <button class="hab" title="근거 없는 것만 보기"><div class="top2"><b>근거를 적은 매매</b><span class="r">4/6 · 67%</span></div><div class="meter"><i style="width:67%"></i></div></button>
+            <div class="hab"><div class="top2"><b>손절가를 정한 매수</b><span class="r">1/3 · 33%</span></div><div class="meter"><i style="width:33%"></i></div></div>
+            <div class="hab"><div class="top2"><b>회고를 쓴 매매</b><span class="r">1/6 · 17%</span></div><div class="meter"><i style="width:17%"></i></div></div>
+          </section>
+
+          <a href="chat.html" class="ask mo3"><span class="spark" data-i="spark"></span><span>챗에서 <q>어제 산 삼성전자 근거 적어줘</q>처럼 말해도 됩니다</span></a>
+
+          <section class="card mo5">
+            <div class="card-h"><h2>태그</h2><span class="sp"></span><span class="eyebrow">누르면 그 태그만</span></div>
+            <div class="card-b" style="display:flex;flex-wrap:wrap;gap:6px">
+              <button class="chip" aria-pressed="false">#눌림목 <span class="n">1</span></button><button class="chip" aria-pressed="false">#실적 <span class="n">1</span></button><button class="chip" aria-pressed="false">#돌파 <span class="n">1</span></button><button class="chip" aria-pressed="false">#익절 <span class="n">1</span></button><button class="chip" aria-pressed="false">#배당 <span class="n">1</span></button>
+            </div>
+          </section>
+
+          <section class="card mo6">
+            <div class="card-h"><h2>감정</h2></div>
+            <div class="rows">
+              <div class="row" style="min-height:42px"><span class="grow"><span class="name" style="font-weight:500">차분</span></span><span class="mut num" style="font-size:12px">17%</span><b class="num" style="width:40px;text-align:right">1건</b></div>
+              <div class="row" style="min-height:42px"><span class="grow"><span class="name" style="font-weight:500">확신</span></span><span class="mut num" style="font-size:12px">17%</span><b class="num" style="width:40px;text-align:right">1건</b></div>
+              <div class="row" style="min-height:42px"><span class="grow"><span class="name" style="font-weight:500">조급</span></span><span class="mut num" style="font-size:12px">17%</span><b class="num" style="width:40px;text-align:right">1건</b></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="copilot" aria-label="챗">
+    <div class="cp-h"><span class="logo" style="width:22px;height:22px;font-size:11px">α</span><b>ETH 절반 익절</b><span class="sp"></span><a class="icon-btn sm" href="chat.html" aria-label="챗 화면으로" data-i="right"></a></div>
+    <div class="thread">
+      <div class="msg-u"><div class="bubble">어제 판 이더리움 회고 적어줘. 목표가 지켜서 잘했다고</div></div>
+      <div class="msg-ai"><span class="logo">α</span><div class="body">
+        <div class="tool-chip"><span data-i="check"></span><span>매매일지를 찾았어요</span></div>
+        <div class="tool-chip"><span data-i="check"></span><span>일지에 회고를 남겼어요</span></div>
+        <div class="md"><p>11월 3일 <b>ETH 0.4개 매도</b>(4,010.2) 기록에 회고를 적었어요.</p><ul><li>실현 <b class="up">+212.40 USDT</b></li><li>회고: 목표가 4,000 도달 후 계획대로 절반 익절</li></ul></div>
+      </div></div>
+    </div>
+    <div class="composer-wrap"><div class="composer"><label class="sr-only" for="cpc">메시지</label><textarea id="cpc" rows="1" placeholder="무엇이든 물어보세요"></textarea><div class="bar-row"><button class="icon-btn sm" aria-label="이미지 첨부" data-i="image"></button><span class="sp"></span><button class="send" aria-label="보내기" data-i="send"></button></div></div></div>
+  </aside>
+</div>
+<nav class="tabbar"></nav>
+
+<!-- 기록 보기·고치기 (계좌·앱에서 들어온 기록) -->
+<section class="sheet" id="jr-view" role="dialog" aria-modal="true" aria-labelledby="jv-t">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="jv-t">SK하이닉스 매수</h2><button class="icon-btn" data-close aria-label="닫기" data-i="x"></button></div>
+  <div class="sheet-b">
+    <div class="facts">
+      <div class="fact"><span class="k">체결</span><span>5주 · 205,000원 <span class="badge warn">체결 확인 전</span></span></div>
+      <div class="fact"><span class="k">날짜</span><span>2026-11-06 10:42</span></div>
+      <div class="fact"><span class="k">계좌</span><span>한국투자 · 챗 주문</span></div>
+      <div class="fact"><span class="k">주문</span><span>지정가 205,000원 × 5</span></div>
+    </div>
+    <p class="field-hint" style="margin-top:-6px">체결은 [가져오기]가 증권사에서 확인해 채웁니다.</p>
+    <a href="chat.html" class="ask" style="margin-top:-4px"><span class="spark" data-i="spark"></span><span>주문을 준비한 대화 보기</span><span class="go" data-i="right"></span></a>
+    <label class="field"><span>근거 — 왜 샀나·팔았나</span><textarea class="input" maxlength="1000">HBM4 공급 확정 뉴스 후 눌림. 20일선 지지 확인하고 1차 분할 매수</textarea></label>
+    <div class="grid2">
+      <label class="field"><span>목표가</span><input class="input num" inputmode="decimal" value="240,000" /></label>
+      <label class="field"><span>손절가</span><input class="input num" inputmode="decimal" placeholder="—" /></label>
+    </div>
+    <label class="field"><span>태그 (쉼표·띄어쓰기로 나눔)</span><input class="input" value="눌림목, 실적" /></label>
+    <div class="field"><span>감정</span><div style="display:flex;flex-wrap:wrap;gap:6px" role="group" aria-label="감정" data-single>
+      <button class="chip" aria-pressed="true">차분</button><button class="chip" aria-pressed="false">확신</button><button class="chip" aria-pressed="false">불안</button><button class="chip" aria-pressed="false">조급</button><button class="chip" aria-pressed="false">욕심</button><button class="chip" aria-pressed="false">충동</button>
+    </div></div>
+    <label class="field"><span>회고 — 결과와 배운 점</span><textarea class="input" maxlength="2000" placeholder="예: 손절가를 지켰다. 다음엔 거래량 확인 후 진입"></textarea></label>
+  </div>
+  <div class="sheet-f"><button class="btn danger" onclick="confirm('이 기록을 지울까요?\n지운 매매는 다음 가져오기에서 다시 들어오지 않습니다.')">삭제</button><button class="btn" data-close>취소</button><button class="btn pri" data-close data-toast="저장했습니다">저장</button></div>
+</section>
+
+<!-- 직접 기록 -->
+<section class="sheet" id="jr-new" role="dialog" aria-modal="true" aria-labelledby="jn-t">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="jn-t">매매 직접 기록</h2><button class="icon-btn" data-close aria-label="닫기" data-i="x"></button></div>
+  <div class="sheet-b">
+    <div class="seg block" role="group" aria-label="매수·매도"><button class="buy" aria-pressed="true">매수</button><button class="sell" aria-pressed="false">매도</button></div>
+    <div class="grid2">
+      <label class="field"><span>종목코드·티커</span><input class="input mono" placeholder="005930, AAPL, BTCUSDT" /></label>
+      <label class="field"><span>종목명 (선택)</span><input class="input" placeholder="삼성전자" /></label>
+    </div>
+    <div class="grid2">
+      <label class="field"><span>수량</span><input class="input num" inputmode="decimal" placeholder="10" /></label>
+      <label class="field"><span>평균 체결가 (선택)</span><input class="input num" inputmode="decimal" placeholder="71,000" /></label>
+    </div>
+    <div class="grid2">
+      <label class="field"><span>날짜</span><input class="input" type="date" value="2026-11-06" max="2026-11-06" /></label>
+      <label class="field"><span>어디서</span><select class="input"><option>한국투자</option><option>토스</option><option>Binance</option><option>Binance 주식</option><option>Binance 선물</option><option>기타</option></select></label>
+    </div>
+    <div class="grid2">
+      <label class="field"><span>통화 (비우면 종목으로)</span><input class="input mono" placeholder="KRW · USD · USDT" /></label>
+      <label class="field"><span>수수료·세금 (선택)</span><input class="input num" inputmode="decimal" /></label>
+    </div>
+    <label class="field"><span>근거 — 왜 샀나·팔았나</span><textarea class="input" placeholder="예: 20일선 지지 + 외국인 3일 순매수, 실적 발표 전 분할 매수"></textarea></label>
+    <div class="grid2">
+      <label class="field"><span>목표가</span><input class="input num" inputmode="decimal" /></label>
+      <label class="field"><span>손절가</span><input class="input num" inputmode="decimal" /></label>
+    </div>
+    <label class="field"><span>태그 (쉼표·띄어쓰기로 나눔)</span><input class="input" placeholder="돌파, 실적, 눌림목" /></label>
+    <div class="field"><span>감정</span><div style="display:flex;flex-wrap:wrap;gap:6px" role="group" aria-label="감정" data-single>
+      <button class="chip" aria-pressed="false">차분</button><button class="chip" aria-pressed="false">확신</button><button class="chip" aria-pressed="false">불안</button><button class="chip" aria-pressed="false">조급</button><button class="chip" aria-pressed="false">욕심</button><button class="chip" aria-pressed="false">충동</button>
+    </div></div>
+    <label class="field"><span>회고 — 결과와 배운 점</span><textarea class="input" placeholder="예: 손절가를 지켰다. 다음엔 거래량 확인 후 진입"></textarea></label>
+  </div>
+  <div class="sheet-f"><button class="btn" data-close>취소</button><button class="btn pri" data-close data-toast="기록했습니다">저장</button></div>
+</section>
+
+<script src="assets/app.js"></script>
+<script src="assets/data.js"></script>
+<script>
+  document.querySelector("#tagpill button").innerHTML = I.x;
+  const WD = "일월화수목금토";
+  let last = "", out = "";
+  for (const e of JR) {
+    if (e.d !== last) {
+      last = e.d; const dt = new Date(e.d + "T00:00:00");
+      out += `<div class="day-h"><span>${dt.getMonth() + 1}월 ${dt.getDate()}일 (${WD[dt.getDay()]})</span><span>${JR.filter((x) => x.d === e.d).length}건</span></div>`;
+    }
+    const badge = e.st === "pending" ? ' <span class="badge warn">체결 확인 전</span>' : e.st === "canceled" ? ' <span class="badge">체결 없이 끝남</span>' : "";
+    out += `<button class="row jr ${e.st === "canceled" ? "dim" : ""}" role="listitem" data-open="jr-view">
+      <span class="side ${e.side === "BUY" ? "buy" : "sell"}">${e.side === "BUY" ? "매수" : "매도"}</span>
+      <span class="grow"><span class="name"><span>${e.name}</span><span class="mono mut" style="font-weight:500;font-size:11px">${e.sym}</span></span>
+        <span class="meta">${e.trade} · ${e.broker}${e.src ? `<span class="src">${e.src}</span>` : ""}${badge}</span>
+        <span class="thesis ${e.thesis ? "" : "miss"}">${e.thesis ?? "+ 근거를 적어 두세요"}${e.tags.length ? ` <span class="tags">${e.tags.map((t) => "#" + t).join(" ")}</span>` : ""}</span></span>
+      <span class="amt">${e.amt ? `<b>${e.amt}</b>` : ""}${e.pnl ? `<small class="up">실현 ${e.pnl}</small>` : ""}${e.emo ? `<small class="mut">${e.emo}</small>` : ""}</span>
+    </button>`;
+  }
+  document.getElementById("list").innerHTML = out;
+</script>
+</body>
+</html>

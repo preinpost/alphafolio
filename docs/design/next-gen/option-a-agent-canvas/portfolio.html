@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>투자 · Agent Canvas</title>
+<link rel="stylesheet" href="assets/canvas.css" />
+</head>
+<body data-page="portfolio">
+<div class="app">
+  <nav data-rail></nav>
+  <main class="main">
+    <div class="wrap">
+      <header class="topbar">
+        <div class="title"><h1>투자</h1><div class="sub">계좌 4개 · 방금 전 읽음</div></div>
+        <button class="btn sm" data-toast="새로 읽었습니다" aria-label="새로고침"><i data-i="refresh"></i><span class="desk">새로고침</span></button>
+      </header>
+
+      <div class="notice warn" style="margin-bottom:12px"><i data-i="info"></i><span>Binance: Earn 유연 예치 잔고를 읽지 못해 코인 금액이 일부 빠졌습니다.</span></div>
+
+      <div class="grid-main">
+        <div class="col">
+          <!-- 총자산 — 화면의 큰 숫자 하나 -->
+          <section class="card" aria-labelledby="nw">
+            <div class="hero-top">
+              <div class="eyebrow" id="nw">총자산 (원화 환산)</div>
+              <div class="big-num">482,160,000<span class="unit">원</span></div>
+              <div class="deltas">
+                <span><span class="faint">전일 대비</span> <b class="up">+3,104,000원 (+0.65%)</b></span>
+                <span><span class="faint">이번 달</span> <b class="up">+12,480,000원 (+2.66%)</b></span>
+                <span><span class="faint">주식 평가손익</span> <b class="up">+49,120,000원</b></span>
+              </div>
+            </div>
+            <div class="chart-tools">
+              <span class="eyebrow">추이</span>
+              <div class="seg" data-seg="range" role="group" aria-label="차트 기간"><button data-v="1m">1개월</button><button data-v="3m" class="on">3개월</button><button data-v="6m">6개월</button><button data-v="1y">1년</button></div>
+            </div>
+            <div data-panel="range:1m" hidden><svg data-chart="470,472,469,473,475,474,476,479,477,480,478,481,482" aria-label="총자산 1개월 추이"></svg><div class="chart-axis"><span>10/7</span><span>10/21</span><span>11/6</span></div></div>
+            <div data-panel="range:3m"><svg data-chart="441,446,443,450,455,452,458,462,459,466,470,468,473,476,474,479,482" aria-label="총자산 3개월 추이"></svg><div class="chart-axis"><span>8/6</span><span>9/21</span><span>11/6</span></div></div>
+            <div data-panel="range:6m" hidden><svg data-chart="402,410,405,418,425,421,433,440,436,446,455,452,462,470,468,476,482" aria-label="총자산 6개월 추이"></svg><div class="chart-axis"><span>5/6</span><span>8/6</span><span>11/6</span></div></div>
+            <div data-panel="range:1y" hidden><svg data-chart="352,360,355,368,377,371,386,394,389,402,415,410,425,440,436,452,468,482" aria-label="총자산 1년 추이"></svg><div class="chart-axis"><span>2025/11</span><span>2026/5</span><span>11/6</span></div></div>
+          </section>
+
+          <!-- 미체결 주문 -->
+          <section class="card">
+            <div class="card-h"><h2>미체결 주문<span class="count">2</span></h2></div>
+            <div class="rows">
+              <div class="r"><span class="side-tag buy">매수</span><span class="grow"><span class="name">삼성전자</span><span class="meta num">10주 · 71,200 · 접수</span></span><button class="btn xs" data-toast="주문 취소를 요청했습니다">취소</button></div>
+              <div class="r"><span class="side-tag sell">매도</span><span class="grow"><span class="name">SK하이닉스</span><span class="meta num">20주 · 225,000 · 일부 체결</span></span><button class="btn xs" data-toast="주문 취소를 요청했습니다">취소</button></div>
+            </div>
+          </section>
+
+          <!-- 보유 자산 -->
+          <section class="card" aria-labelledby="hold">
+            <div class="card-h">
+              <h2 id="hold">보유 자산<span class="count">14</span></h2>
+              <span class="filter-pill" id="acc-pill" hidden><span><b></b>만</span><button data-unpress="acc" aria-label="계좌 필터 해제"><i data-i="x"></i></button></span>
+              <span class="spacer"></span>
+              <div class="seg" data-seg="view" role="group" aria-label="보기 방식"><button data-v="account" class="on">계좌별</button><button data-v="symbol">종목별</button></div>
+            </div>
+            <div class="tools">
+              <div class="line">
+                <label class="search"><i data-i="search"></i><span class="sr-only">종목 검색</span><input class="input sm" type="search" placeholder="종목명·티커 검색" autocomplete="off" /></label>
+                <label><span class="sr-only">정렬</span><select class="input sm"><option>평가금액순</option><option>수익률순</option><option>이름순</option></select></label>
+              </div>
+              <div class="hscroll fade-x" role="group" aria-label="자산 종류" data-chips>
+                <button class="chip" aria-pressed="true">전체</button><button class="chip" aria-pressed="false">국내주식</button><button class="chip" aria-pressed="false">해외주식</button><button class="chip" aria-pressed="false">코인</button><button class="chip" aria-pressed="false">직접 입력</button>
+              </div>
+            </div>
+            <div class="hold hold-head" aria-hidden="true"><span>종목</span><span class="c-price" style="text-align:right">현재가</span><span class="c-val" style="text-align:right">평가금액</span><span style="text-align:right"><span class="desk">손익</span><span class="mob">평가 · 손익</span></span></div>
+
+            <div role="list" data-panel="view:account">
+              <div class="hold-acc"><span>한국투자</span><span class="num faint">1억 1,061만</span></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>SK하이닉스</span><span class="mono">000660</span></div><div class="meta">220주 · 평단 166,300원</div></div><div class="c-price v num">218,500원</div><div class="c-val"><div class="v num">48,070,000원</div></div><div><div class="v num mob">4,807만</div><div class="v num desk up">+11,484,000원</div><div class="s up"><span class="mob">+1,148만 · </span>+31.4%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>TIGER 미국S&amp;P500</span><span class="mono">360750</span></div><div class="meta">1,820주 · 평단 19,240원</div></div><div class="c-price v num">21,385원</div><div class="c-val"><div class="v num">38,920,700원</div></div><div><div class="v num mob">3,892만</div><div class="v num desk up">+3,903,900원</div><div class="s up"><span class="mob">+390만 · </span>+11.1%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>삼성전자</span><span class="mono">005930</span></div><div class="meta">410주 · 평단 61,400원</div></div><div class="c-price v num">57,600원</div><div class="c-val"><div class="v num">23,616,000원</div></div><div><div class="v num mob">2,362만</div><div class="v num desk down">−1,558,000원</div><div class="s down"><span class="mob">−156만 · </span>−6.2%</div></div></div>
+
+              <div class="hold-acc"><span>토스</span><span class="num faint">7,297만</span></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>엔비디아</span><span class="mono">NVDA</span></div><div class="meta">205주 · 평단 $120.58</div></div><div class="c-price v num">$148.20</div><div class="c-val"><div class="v num">$30,381</div><div class="s faint">≈ 42,594,000원</div></div><div><div class="v num mob">$30,381</div><div class="v num desk up">+$5,662</div><div class="s up"><span class="mob">+$5,662 · </span>+22.9%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>애플</span><span class="mono">AAPL</span></div><div class="meta">96주 · 평단 $231.10</div></div><div class="c-price v num">$226.04</div><div class="c-val"><div class="v num">$21,700</div><div class="s faint">≈ 30,382,000원</div></div><div><div class="v num mob">$21,700</div><div class="v num desk down">−$486</div><div class="s down"><span class="mob">−$486 · </span>−2.2%</div></div></div>
+
+              <div class="hold-acc"><span>Binance <span class="badge warn" style="margin-left:4px">일부 누락</span></span><span class="num faint">4,348만</span></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>비트코인</span><span class="mono">BTC</span></div><div class="meta">0.312 BTC · 평단 $71,200</div></div><div class="c-price v num">$98,410</div><div class="c-val"><div class="v num">30,704 USDT</div><div class="s faint">≈ 42,980,000원</div></div><div><div class="v num mob">30,704 USDT</div><div class="v num desk up">+8,490 USDT</div><div class="s up"><span class="mob">+8,490 · </span>+38.2%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>이더리움</span><span class="mono">ETH</span></div><div class="meta">0.12 ETH</div></div><div class="c-price v num">$2,612.50</div><div class="c-val"><div class="v num">313 USDT</div><div class="s faint">≈ 438,000원</div></div><div><div class="v num mob">313 USDT</div><div class="s faint">손익 없음</div></div></div>
+              <div id="dust" hidden>
+                <div class="hold" role="listitem"><div class="grow"><div class="name"><span>BNB</span><span class="mono">BNB</span></div><div class="meta">0.0011 BNB</div></div><div class="c-price v num">$612.40</div><div class="c-val"><div class="v num">0.67 USDT</div></div><div><div class="v num mob">0.67 USDT</div><div class="s faint">손익 없음</div></div></div>
+              </div>
+              <button class="row-add" data-show="dust" data-self-hide><i data-i="down"></i>1달러 미만 코인 3개 더 보기</button>
+
+              <div class="hold-acc"><span>직접 입력</span><span class="num faint">1억 4,900만</span></div>
+              <button class="hold" role="listitem" id="row-jeonse" data-show="edit-jeonse" data-hide="row-jeonse" title="눌러서 금액 고치기"><div class="grow"><div class="name"><span>전세보증금</span></div><div class="meta">부동산</div></div><div class="c-price v num">—</div><div class="c-val"><div class="v num">120,000,000원</div></div><div><div class="v num mob">1억 2,000만</div><div class="s faint">직접 입력</div></div></button>
+              <form class="inline-edit" id="edit-jeonse" hidden onsubmit="event.preventDefault();toast('전세보증금 금액을 고쳤습니다');document.getElementById('edit-jeonse').hidden=true;document.getElementById('row-jeonse').hidden=false">
+                <div class="line"><input class="input sm" aria-label="이름" value="전세보증금" /><select class="input sm" aria-label="종류"><option>예금·현금</option><option>연금</option><option selected>부동산</option><option>기타 투자</option><option>기타</option></select></div>
+                <div class="line"><input class="input sm num" inputmode="decimal" aria-label="금액" value="120,000,000" /><select class="input sm" aria-label="통화"><option>원</option><option>달러</option></select></div>
+                <input class="input sm" placeholder="메모 (선택)" aria-label="메모" value="2027년 3월 만기" />
+                <div class="row"><button type="button" class="btn xs danger" data-toast="전세보증금을(를) 지웠습니다">삭제</button><span class="spacer"></span><button type="button" class="btn xs ghost" data-hide="edit-jeonse" data-show="row-jeonse">취소</button><button class="btn xs primary">저장</button></div>
+              </form>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>퇴직연금 DC</span></div><div class="meta">연금</div></div><div class="c-price v num">—</div><div class="c-val"><div class="v num">14,600,000원</div></div><div><div class="v num mob">1,460만</div><div class="s faint">직접 입력</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>주택청약</span></div><div class="meta">예금·현금</div></div><div class="c-price v num">—</div><div class="c-val"><div class="v num">14,400,000원</div></div><div><div class="v num mob">1,440만</div><div class="s faint">직접 입력</div></div></div>
+            </div>
+
+            <div role="list" data-panel="view:symbol" hidden>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>전세보증금</span></div><div class="meta">직접 입력 · 부동산</div></div><div class="c-price v num">—</div><div class="c-val"><div class="v num">120,000,000원</div></div><div><div class="v num mob">1억 2,000만</div><div class="s faint">직접 입력</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>SK하이닉스</span><span class="mono">000660</span></div><div class="meta">한국투자 · 220주</div></div><div class="c-price v num">218,500원</div><div class="c-val"><div class="v num">48,070,000원</div></div><div><div class="v num mob">4,807만</div><div class="v num desk up">+11,484,000원</div><div class="s up"><span class="mob">+1,148만 · </span>+31.4%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>비트코인</span><span class="mono">BTC</span></div><div class="meta">Binance · 0.312 BTC</div></div><div class="c-price v num">$98,410</div><div class="c-val"><div class="v num">30,704 USDT</div><div class="s faint">≈ 42,980,000원</div></div><div><div class="v num mob">30,704 USDT</div><div class="v num desk up">+8,490 USDT</div><div class="s up"><span class="mob">+8,490 · </span>+38.2%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>엔비디아</span><span class="mono">NVDA</span></div><div class="meta">토스 · 205주</div></div><div class="c-price v num">$148.20</div><div class="c-val"><div class="v num">$30,381</div><div class="s faint">≈ 42,594,000원</div></div><div><div class="v num mob">$30,381</div><div class="v num desk up">+$5,662</div><div class="s up"><span class="mob">+$5,662 · </span>+22.9%</div></div></div>
+              <div class="hold" role="listitem"><div class="grow"><div class="name"><span>TIGER 미국S&amp;P500</span><span class="mono">360750</span></div><div class="meta">한국투자 · 1,820주</div></div><div class="c-price v num">21,385원</div><div class="c-val"><div class="v num">38,920,700원</div></div><div><div class="v num mob">3,892만</div><div class="v num desk up">+3,903,900원</div><div class="s up"><span class="mob">+390만 · </span>+11.1%</div></div></div>
+              <div class="empty">종목별 보기 — 같은 종목은 계좌를 합쳐 한 줄로 보입니다.</div>
+            </div>
+
+            <div id="edit-new" hidden>
+              <form class="inline-edit" onsubmit="event.preventDefault();toast('주택담보 예금을(를) 추가했습니다');document.getElementById('edit-new').hidden=true;document.getElementById('add-manual').hidden=false">
+                <div class="line"><input class="input sm" placeholder="이름 (예: 주택청약, 퇴직연금)" aria-label="이름" /><select class="input sm" aria-label="종류"><option>예금·현금</option><option>연금</option><option>부동산</option><option>기타 투자</option><option>기타</option></select></div>
+                <div class="line"><input class="input sm num" inputmode="decimal" placeholder="금액" aria-label="금액" /><select class="input sm" aria-label="통화"><option>원</option><option>달러</option></select></div>
+                <input class="input sm" placeholder="메모 (선택)" aria-label="메모" />
+                <div class="row"><span class="spacer"></span><button type="button" class="btn xs ghost" data-hide="edit-new" data-show="add-manual">취소</button><button class="btn xs primary">저장</button></div>
+              </form>
+            </div>
+            <button class="row-add" id="add-manual" data-show="edit-new" data-self-hide><i data-i="plus"></i>직접 입력 자산 추가 (예금·연금·부동산 등)</button>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card">
+            <div class="card-h"><h2>자산 배분</h2></div>
+            <div class="card-b">
+              <div class="bar" role="img" aria-label="국내주식 28.0%, 해외주식 25.0%, 코인 8.9%, 현금성 13.2%, 기타 24.9%"><i style="width:28%;background:var(--d1)"></i><i style="width:25%;background:var(--d2)"></i><i style="width:8.9%;background:var(--d3)"></i><i style="width:13.2%;background:var(--d4)"></i><i style="width:24.9%;background:var(--d5)"></i></div>
+              <div class="leg">
+                <i class="sw" style="background:var(--d1)"></i><span>국내주식</span><span class="pct">28.0%</span><span class="amt">1.35억</span>
+                <i class="sw" style="background:var(--d2)"></i><span>해외주식</span><span class="pct">25.0%</span><span class="amt">1.21억</span>
+                <i class="sw" style="background:var(--d3)"></i><span>코인</span><span class="pct">8.9%</span><span class="amt">4,300만</span>
+                <i class="sw" style="background:var(--d4)"></i><span>현금성</span><span class="pct">13.2%</span><span class="amt">6,360만</span>
+                <i class="sw" style="background:var(--d5)"></i><span>기타</span><span class="pct">24.9%</span><span class="amt">1.20억</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-h"><h2>계좌</h2><span class="spacer"></span><span class="eyebrow">누르면 해당 계좌만</span></div>
+            <div class="rows">
+              <button class="r" data-press="acc" aria-pressed="false"><span class="grow"><span class="name">한국투자</span><span class="meta num">1억 1,061만원 · 예수금 842만원</span></span><span class="amt"><b>1.19억</b><small>24.7%</small></span></button>
+              <button class="r" data-press="acc" aria-pressed="false"><span class="grow"><span class="name">토스</span><span class="meta num">$52,081 · 412만원</span></span><span class="amt"><b>7,709만</b><small>16.0%</small></span></button>
+              <button class="r" data-press="acc" aria-pressed="false"><span class="grow"><span class="name">Binance <span class="badge warn">일부 누락</span></span><span class="meta num">31,016 USDT · Earn 잔고 누락</span></span><span class="amt"><b>4,348만</b><small>9.0%</small></span></button>
+              <button class="r" data-press="acc" aria-pressed="false"><span class="grow"><span class="name">직접 입력</span><span class="meta num">1억 4,900만원 · 3건</span></span><span class="amt"><b>1.49억</b><small>30.9%</small></span></button>
+              <div class="r" style="opacity:.8"><span class="grow"><span class="name">Binance 선물 <span class="badge bad">조회 실패</span></span><span class="meta danger-text">API 키에 선물 권한이 없습니다</span></span></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-h"><h2>화폐별</h2></div>
+            <div class="rows">
+              <div class="r"><span class="grow"><span class="name">원화</span><span class="meta">총자산의 73.6%</span></span><span class="amt"><b>354,740,000원</b></span></div>
+              <div class="r"><span class="grow"><span class="name">달러</span><span class="meta">총자산의 17.4%</span></span><span class="amt"><b>$59,880.42</b><small>≈ 8,394만원</small></span></div>
+              <div class="r"><span class="grow"><span class="name">코인 (USDT 환산)</span><span class="meta">총자산의 9.0%</span></span><span class="amt"><b>31,016 USDT</b><small>≈ 4,348만원</small></span></div>
+              <div class="r"><span class="grow"><span class="name">예수금</span><span class="meta">주문에 바로 쓸 수 있는 현금</span></span><span class="amt"><b>8,420,000원</b><small>$1,204.18</small></span></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-h"><h2>시세 조회</h2></div>
+            <div class="card-b">
+              <form class="quote-form" onsubmit="event.preventDefault();document.getElementById('q-out').hidden=false">
+                <label class="sr-only" for="q">종목코드 또는 티커</label>
+                <input id="q" class="input" placeholder="종목코드 또는 티커 (예: 005930, AAPL)" autocomplete="off" value="005930" />
+                <button class="btn">조회</button>
+              </form>
+              <div class="q-out" id="q-out" hidden aria-live="polite">
+                <div class="row"><b>삼성전자</b><span class="mono faint">005930</span><span class="badge">KOSPI</span></div>
+                <div class="q-price num">71,400원</div>
+                <div class="num up" style="font-size:13px;font-weight:600">전일 대비 +0.85%</div>
+                <div style="margin-top:12px"><a class="text-link" href="order.html">챗에서 분석·주문 준비하기 <i data-i="arrow"></i></a></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<nav data-tabbar></nav>
+<script src="assets/canvas.js"></script>
+</body>
+</html>

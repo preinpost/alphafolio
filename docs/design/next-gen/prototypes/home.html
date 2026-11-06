@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>AlphaFolio — 브리핑 홈</title>
+<link rel="stylesheet" href="shared.css" />
+<style>
+	.hero { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; align-items: end; margin-bottom: 28px; }
+	.greet { font-size: 15px; color: var(--ink-2); margin-bottom: 6px; }
+	.big { font-size: clamp(40px, 6vw, 64px); font-weight: 700; letter-spacing: -.04em; line-height: 1; }
+	.delta { font-size: 18px; margin-top: 10px; display: flex; gap: 12px; align-items: center; }
+	.range { display: flex; gap: 4px; margin-top: 14px; }
+	.range button { padding: 4px 10px; border-radius: 8px; font-size: 13px; color: var(--ink-3); }
+	.range button.on { background: var(--surface-2); color: var(--ink); }
+	.chart { height: 150px; color: var(--up); }
+	.brief { border-left: 3px solid var(--accent); padding: 4px 0 4px 18px; margin-bottom: 28px; max-width: 760px; }
+	.brief p { margin: 6px 0; font-size: 17px; line-height: 1.65; }
+	.brief .src { font-size: 12px; color: var(--ink-3); }
+	.brief mark { background: none; font-weight: 650; }
+	.cursor::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+	@keyframes blink { 50% { opacity: 0 } }
+	.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+	.w4 { grid-column: span 4; } .w8 { grid-column: span 8; } .w6 { grid-column: span 6; } .w12 { grid-column: span 12; }
+	.widget { position: relative; }
+	.widget header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+	.widget h3 { margin: 0; font-size: 15px; }
+	.why { font-size: 12px; color: var(--ink-3); margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+	.mover { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 9px 0; }
+	.mover + .mover { border-top: 1px solid var(--line); }
+	.mover .n { font-weight: 600; } .mover .s { font-size: 12px; color: var(--ink-3); }
+	.alertbar { height: 8px; border-radius: 99px; background: var(--surface-2); position: relative; margin: 14px 0 6px; }
+	.alertbar i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: linear-gradient(90deg, var(--down), var(--accent)); }
+	.alertbar b { position: absolute; top: -5px; width: 2px; height: 18px; background: var(--ink); }
+	.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+	.btn { padding: 9px 14px; border-radius: 12px; background: var(--surface-2); font-size: 14px; font-weight: 600; transition: .15s var(--ease); }
+	.btn:active { transform: scale(.97); }
+	.btn.primary { background: var(--ink); color: var(--bg); }
+	.budget { display: flex; gap: 3px; height: 34px; align-items: flex-end; }
+	.budget i { flex: 1; background: var(--surface-2); border-radius: 3px; }
+	.budget i.hot { background: var(--up); }
+	.ghost { opacity: 0; }
+	.suggest { display: flex; gap: 8px; flex-wrap: wrap; margin: 28px 0 0; }
+	.pin { position: absolute; top: 14px; right: 14px; font-size: 12px; color: var(--ink-3); opacity: 0; transition: .2s; }
+	.widget:hover .pin { opacity: 1; }
+	@media (max-width: 900px) { .hero { grid-template-columns: 1fr; } .w4, .w6, .w8 { grid-column: span 12; } }
+</style>
+</head>
+<body>
+<div class="shell">
+	<nav class="rail"></nav>
+	<main class="main">
+		<section class="hero rise">
+			<div>
+				<div class="greet">11월 6일 목요일 · 오전 8:42 · 장 시작 18분 전</div>
+				<div class="big num" id="nw">₩0</div>
+				<div class="delta"><span class="up num">▲ +3,184,200 (+1.42%)</span><span class="faint">어제 대비 · 순자산</span></div>
+				<div class="range"><button>1D</button><button>1W</button><button class="on">1M</button><button>YTD</button><button>1Y</button><button>ALL</button></div>
+			</div>
+			<div class="chart" id="hero-chart"></div>
+		</section>
+
+		<section class="brief rise" style="animation-delay:.15s">
+			<div class="eyebrow">오늘의 브리핑 <span class="badge ai">AI · 08:30 생성</span></div>
+			<div id="brief-text"></div>
+			<div class="src">근거: KIS 잔고 08:30 · 토스 잔고 08:30 · 나스닥 마감 · 가계부 11월 · 감시 3건</div>
+		</section>
+
+		<section class="grid" id="widgets"></section>
+
+		<div class="suggest">
+			<span class="chip">↳ 엔비디아 수익 일부 실현하면 세금은?</span>
+			<span class="chip">↳ 이번 주 배당 들어올 거 있어?</span>
+			<span class="chip">↳ 11월 예산 남은 거 보여줘</span>
+		</div>
+	</main>
+</div>
+
+<div class="agentbar">
+	<span class="ctx">◎ 브리핑</span>
+	<input placeholder="무엇이든 물어보거나 시키세요 — “반도체 비중 30% 넘으면 알려줘”" />
+	<kbd>⌘K</kbd><button class="send">↑</button>
+</div>
+
+<script src="shared.js"></script>
+<script>
+AF.init("home.html");
+AF.countUp(document.getElementById("nw"), 227_418_600, (v) => AF.won(v));
+const series = AF.walk(60, 212, 0.022, 0.0012, 11);
+const hc = document.getElementById("hero-chart");
+hc.innerHTML = AF.spark(series, hc.clientWidth || 400, 150);
+
+// 브리핑 스트리밍 (에이전트가 텍스트 + 위젯을 함께 흘려보냄)
+const brief = [
+	"밤사이 <mark class='up'>나스닥이 +1.8%</mark> 올랐고, 보유 중인 <mark>NVIDIA가 +4.2%</mark>로 순자산 상승의 61%를 차지했어요.",
+	"반도체 비중이 <mark>31.4%</mark>로 설정한 상한(30%)을 넘었어요. 리밸런싱 안을 아래에 준비해 뒀어요.",
+	"가계부는 11월 6일 기준 식비가 예산의 <mark class='up'>48%</mark> — 지난달 같은 날보다 빠른 속도예요.",
+];
+const bt = document.getElementById("brief-text");
+let i = 0;
+function streamLine() {
+	if (i >= brief.length) { bt.lastChild?.classList.remove("cursor"); return; }
+	bt.lastChild?.classList.remove("cursor");
+	const p = document.createElement("p"); p.className = "cursor"; bt.appendChild(p);
+	const html = brief[i]; let k = 0;
+	const tick = () => {
+		// 태그는 통째로 넘김
+		if (html[k] === "<") k = html.indexOf(">", k) + 1; else k++;
+		p.innerHTML = html.slice(0, k);
+		if (k < html.length) setTimeout(tick, 14); else { spawnWidget(i); i++; setTimeout(streamLine, 220); }
+	};
+	tick();
+}
+
+// 생성형 위젯: 에이전트가 ui.widget 이벤트로 내려주는 것을 흉내
+const W = [
+	() => `<article class="card widget w8 rise"><span class="pin">📌 홈에 고정</span><header><h3>순자산 상승 기여도</h3><span class="badge ai">생성됨</span></header>
+		${[["NVIDIA", "NVDA · 토스", 1942000, 4.21], ["SK하이닉스", "000660 · KIS", 812000, 2.95], ["삼성전자", "005930 · KIS", 284000, 0.98], ["USD/KRW", "환차익", 241000, 0.31], ["Bitcoin", "BTC · Binance", -95000, -0.84]]
+			.map(([n, s, v, p]) => `<div class="mover"><div><div class="n">${n}</div><div class="s">${s}</div></div><div class="num ${AF.tone(v)}">${AF.signed(v)}</div><div class="num ${AF.tone(p)}" style="width:64px;text-align:right">${AF.pct(p)}</div></div>`).join("")}
+		<div class="why">왜 이 위젯? — 어제 대비 변동 상위 5개 · 환차익은 USD 자산 × 환율 변동으로 분리했어요.</div></article>`,
+	() => `<article class="card widget w4 rise" style="outline:1.5px solid var(--up);outline-offset:-1.5px"><header><h3>⚠ 반도체 비중 초과</h3><span class="badge">감시 #2</span></header>
+		<div class="num" style="font-size:32px;font-weight:700">31.4<span class="faint" style="font-size:16px">% / 30%</span></div>
+		<div class="alertbar"><i style="width:78.5%"></i><b style="left:75%"></b></div>
+		<div class="s faint" style="font-size:12px">상한까지 −₩3.2M 초과</div>
+		<div class="actions"><a class="btn primary" href="order.html">리밸런싱 안 보기</a><button class="btn">무시</button></div>
+		<div class="why">설정: 10/12 “반도체 30% 넘으면 알려줘”</div></article>`,
+	() => `<article class="card widget w6 rise"><header><h3>11월 식비 페이스</h3><a class="badge" href="timeline.html">타임라인 →</a></header>
+		<div style="display:flex;justify-content:space-between;align-items:baseline"><div class="num" style="font-size:26px;font-weight:700">₩384,200</div><div class="faint num">/ ₩800,000</div></div>
+		<div class="budget" style="margin-top:12px">${[22, 30, 18, 64, 41, 55, 0, 0, 0, 0, 0, 0, 0, 0].map((h, j) => `<i class="${h > 50 ? "hot" : ""}" style="height:${Math.max(h, 6)}%"></i>`).join("")}</div>
+		<div class="why">11/4 회식(₩128,000)이 튀었어요. 이대로면 월말 예상 ₩1.07M.</div></article>`,
+];
+function spawnWidget(n) { document.getElementById("widgets").insertAdjacentHTML("beforeend", W[[0, 1, 2][n]]()); AF.haptic(); }
+setTimeout(streamLine, 600);
+</script>
+</body>
+</html>

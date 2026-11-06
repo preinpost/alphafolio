@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>가계부 · Agent Canvas</title>
+<link rel="stylesheet" href="assets/canvas.css" />
+<style>
+  .month { display: flex; align-items: center; gap: 2px; }
+  .month b { font-family: var(--serif); font-weight: 400; font-size: 28px; line-height: 1; padding: 0 4px; white-space: nowrap; }
+  .cat { display: grid; grid-template-columns: 10px 1fr auto auto; gap: 10px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); width: 100%; text-align: left; font-size: 14px; }
+  .cat .c { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .cat .a { font-weight: 620; font-variant-numeric: tabular-nums; text-align: right; min-width: 82px; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 11.5px; font-weight: 700; background: var(--accent-soft); color: var(--accent); flex: none; }
+  .ledger-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .ledger-bar select { flex: 1; min-width: 0; }
+  @media (min-width: 861px) { .month b { font-size: 40px; } .cat { padding: 10px 20px; } .ledger-bar select { flex: 0 1 240px; } }
+</style>
+</head>
+<body data-page="ledger">
+<div class="app">
+  <nav data-rail></nav>
+  <main class="main">
+    <div class="wrap">
+      <header class="topbar">
+        <div class="month">
+          <button class="icon-btn plain" aria-label="이전 달" data-toast="10월로 이동"><i data-i="left"></i></button>
+          <b aria-live="polite">2026년 11월</b>
+          <button class="icon-btn plain" aria-label="다음 달" disabled style="opacity:.35"><i data-i="right"></i></button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn sm primary" data-open="add" aria-label="기록 추가"><i data-i="plus"></i><span class="desk">기록 추가</span></button>
+      </header>
+
+      <div class="ledger-bar">
+        <label class="sr-only" for="book">가계부 선택</label>
+        <select id="book" class="input sm"><option>우리집 · 2명 · 기본</option><option>개인</option></select>
+        <div class="seg" data-seg="scope" role="group" aria-label="범위"><button class="on" data-v="all">전체</button><button data-v="mine">내 기록</button></div>
+        <button class="btn sm" data-open="manage">관리·초대</button>
+      </div>
+
+      <div class="grid-main">
+        <div class="col">
+          <!-- 받은 초대 -->
+          <section class="card" id="invite">
+            <div class="r"><span class="avatar">JY</span><span class="grow"><span class="name">jiyoon 님이 ‘여행 경비’ 가계부에 초대했습니다</span><span class="meta">수락하면 멤버가 됩니다</span></span></div>
+            <div class="row" style="padding:0 16px 14px;justify-content:flex-end"><button class="btn xs ghost" data-hide="invite" onclick="toast('초대를 거절했습니다')">거절</button><button class="btn xs primary" data-hide="invite" onclick="toast('‘여행 경비’ 가계부에 참여했습니다')">수락</button></div>
+          </section>
+
+          <!-- 이달 지출 — 화면의 큰 숫자 하나 -->
+          <section class="card" aria-labelledby="sp">
+            <div class="hero-top" style="padding-bottom:14px">
+              <div class="eyebrow" id="sp">11월 지출 · 우리집 전체</div>
+              <div class="big-num">1,486,000<span class="unit">원</span></div>
+              <div class="sum-side"><div>수입<b class="ok-text">5,286,800원</b></div><div>예산 남음<b>914,000원</b></div></div>
+            </div>
+            <div style="padding:0 16px 12px"><div class="bar" role="img" aria-label="분류별 지출 비중"><i style="width:37.7%;background:var(--d5)"></i><i style="width:27.7%;background:var(--d2)"></i><i style="width:21.4%;background:var(--d4)"></i><i style="width:6.5%;background:var(--d1)"></i><i style="width:6.7%;background:var(--d3)"></i></div></div>
+            <button class="cat" data-toast="고정비만 봅니다"><i class="sw" style="background:var(--d5)"></i><span>고정비 <span class="c">4건</span></span><span class="c">37.7%</span><span class="a">560,000원</span></button>
+            <button class="cat" data-toast="외식만 봅니다"><i class="sw" style="background:var(--d2)"></i><span>외식 <span class="c">11건</span></span><span class="c">27.7%</span><span class="a">412,000원</span></button>
+            <button class="cat" data-toast="장보기만 봅니다"><i class="sw" style="background:var(--d4)"></i><span>장보기 <span class="c">5건</span></span><span class="c">21.4%</span><span class="a">318,000원</span></button>
+            <button class="cat" data-toast="교통만 봅니다"><i class="sw" style="background:var(--d1)"></i><span>교통 <span class="c">9건</span></span><span class="c">6.5%</span><span class="a">96,000원</span></button>
+            <button class="cat" data-toast="생활만 봅니다"><i class="sw" style="background:var(--d3)"></i><span>생활 <span class="c">3건</span></span><span class="c">6.7%</span><span class="a">100,000원</span></button>
+          </section>
+
+          <a class="ask-hint" href="chat-new.html"><span class="orb"></span><span>챗에서 <q>어제 김밥천국 8천원</q>처럼 말해도 기록됩니다</span><i data-i="right"></i></a>
+
+          <!-- 내역 -->
+          <section class="card" aria-labelledby="tx">
+            <div class="card-h"><h2 id="tx">내역<span class="count">34건</span></h2></div>
+            <div class="tools">
+              <label class="search"><i data-i="search"></i><span class="sr-only">내역 검색</span><input class="input sm" type="search" placeholder="가맹점·메모 검색" autocomplete="off" /></label>
+              <div class="hscroll fade-x" role="group" aria-label="분류 필터" data-chips>
+                <button class="chip" aria-pressed="true">전체</button><button class="chip" aria-pressed="false">고정비</button><button class="chip" aria-pressed="false">외식</button><button class="chip" aria-pressed="false">장보기</button><button class="chip" aria-pressed="false">교통</button><button class="chip" aria-pressed="false">생활</button><button class="chip" aria-pressed="false">수입</button>
+              </div>
+            </div>
+            <div class="rows" role="list">
+              <div class="day-h"><span>11월 5일 (목)</span><span class="num">지출 50,000원</span></div>
+              <button class="r" role="listitem" data-open="edit"><i class="sw" style="background:var(--d2)"></i><span class="grow"><span class="name">김밥천국</span><span class="meta">외식 · ms <span class="src">챗</span></span></span><span class="amt"><b>−8,000원</b></span></button>
+              <button class="r" role="listitem" data-open="edit"><i class="sw" style="background:var(--d2)"></i><span class="grow"><span class="name">을지로 칼국수</span><span class="meta">외식 · jiyoon · 저녁</span></span><span class="amt"><b>−42,000원</b></span></button>
+              <div class="day-h"><span>11월 4일 (수)</span><span class="num">지출 87,400원</span></div>
+              <button class="r" role="listitem" data-open="edit"><i class="sw" style="background:var(--d4)"></i><span class="grow"><span class="name">이마트 성수</span><span class="meta">장보기 · jiyoon</span></span><span class="amt"><b>−87,400원</b></span></button>
+              <div class="day-h"><span>11월 1일 (일)</span><span class="num">지출 560,000원</span></div>
+              <button class="r" role="listitem" data-open="edit"><i class="sw" style="background:var(--ok)"></i><span class="grow"><span class="name">11월 급여</span><span class="meta">수입 · ms</span></span><span class="amt"><b class="ok-text">+5,240,000원</b></span></button>
+              <button class="r" role="listitem" data-open="edit"><i class="sw" style="background:var(--d5)"></i><span class="grow"><span class="name">관리비</span><span class="meta">고정비 · ms · 10월분</span></span><span class="amt"><b>−310,000원</b></span></button>
+              <button class="r" role="listitem" data-open="edit"><i class="sw" style="background:var(--d5)"></i><span class="grow"><span class="name">통신비</span><span class="meta">고정비 · ms <span class="src">챗</span></span></span><span class="amt"><b>−250,000원</b></span></button>
+            </div>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card">
+            <div class="card-h"><h2>예산</h2><span class="spacer"></span><span class="eyebrow num">148만 / 240만</span></div>
+            <div class="meter-row"><div class="top"><i class="sw" style="background:var(--d2)"></i><b>외식</b><span class="r2">412,000원 / 45만</span></div><div class="meter" role="meter" aria-valuenow="92" aria-label="외식 예산 사용률"><i style="width:92%"></i></div></div>
+            <div class="meter-row"><div class="top"><i class="sw" style="background:var(--d5)"></i><b>고정비</b><span class="r2">560,000원 / 65만</span></div><div class="meter" role="meter" aria-valuenow="86" aria-label="고정비 예산 사용률"><i style="width:86%"></i></div></div>
+            <div class="meter-row"><div class="top"><i class="sw" style="background:var(--d4)"></i><b>장보기</b><span class="r2">318,000원 / 70만</span></div><div class="meter" role="meter" aria-valuenow="45" aria-label="장보기 예산 사용률"><i style="width:45%"></i></div></div>
+            <div class="meter-row"><div class="top"><i class="sw" style="background:var(--d1)"></i><b>교통</b><span class="r2">96,000원 / 20만</span></div><div class="meter" role="meter" aria-valuenow="48" aria-label="교통 예산 사용률"><i style="width:48%"></i></div></div>
+            <div class="meter-row"><div class="top"><i class="sw" style="background:var(--d3)"></i><b>생활</b><span class="badge bad">20,000원 초과</span><span class="r2">100,000원 / 8만</span></div><div class="meter over" role="meter" aria-valuenow="125" aria-label="생활 예산 사용률"><i style="width:100%"></i></div></div>
+            <p class="card-note">예산은 챗에서 <b class="mono">식비 예산 30만원</b>처럼 말하면 정해집니다.</p>
+          </section>
+
+          <section class="card">
+            <div class="card-h"><h2>사람별</h2><span class="spacer"></span><span class="eyebrow">가계부 전체 기준</span></div>
+            <div class="rows">
+              <div class="r"><span class="avatar">MS</span><span class="grow"><span class="name">ms <span class="faint" style="font-weight:500">· 나</span></span><div class="meter" style="margin-top:6px"><i style="width:58%"></i></div></span><span class="amt"><b>862,000원</b><small>19건 · 58%</small></span></div>
+              <div class="r"><span class="avatar">JY</span><span class="grow"><span class="name">jiyoon</span><div class="meter" style="margin-top:6px"><i style="width:42%"></i></div></span><span class="amt"><b>624,000원</b><small>13건 · 42%</small></span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<nav data-tabbar></nav>
+
+<!-- 기록 추가 -->
+<div class="sheet" id="add" role="dialog" aria-labelledby="add-h">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="add-h">기록 추가</h2><button class="icon-btn plain" data-close aria-label="닫기"><i data-i="x"></i></button></div>
+  <div class="sheet-b">
+    <div class="seg block" data-seg="type" role="group" aria-label="구분"><button class="on" data-v="exp">지출</button><button data-v="inc">수입</button></div>
+    <label class="field"><span>금액</span><input class="input num" style="height:56px;font-size:24px;font-weight:650" inputmode="numeric" placeholder="0원" /></label>
+    <label class="field"><span>가맹점·내용</span><input class="input" placeholder="예: 김밥천국" /></label>
+    <div class="grid2">
+      <label class="field"><span>분류</span><input class="input" list="cats" placeholder="예: 식비" /><datalist id="cats"><option value="외식"></option><option value="장보기"></option><option value="교통"></option><option value="고정비"></option><option value="생활"></option></datalist></label>
+      <label class="field"><span>날짜</span><input class="input" type="date" value="2026-11-06" /></label>
+    </div>
+    <label class="field"><span>메모 (선택)</span><input class="input" /></label>
+  </div>
+  <div class="sheet-f"><button class="btn" data-close>취소</button><button class="btn primary" data-close onclick="toast('기록했습니다')">저장</button></div>
+</div>
+
+<!-- 기록 고치기 -->
+<div class="sheet" id="edit" role="dialog" aria-labelledby="ed-h">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="ed-h">기록 고치기</h2><button class="icon-btn plain" data-close aria-label="닫기"><i data-i="x"></i></button></div>
+  <div class="sheet-b">
+    <div class="seg block" data-seg="type2" role="group" aria-label="구분"><button class="on" data-v="exp">지출</button><button data-v="inc">수입</button></div>
+    <label class="field"><span>금액</span><input class="input num" style="height:56px;font-size:24px;font-weight:650" inputmode="numeric" value="42,000" /></label>
+    <label class="field"><span>가맹점·내용</span><input class="input" value="을지로 칼국수" /></label>
+    <div class="grid2">
+      <label class="field"><span>분류</span><input class="input" value="외식" /></label>
+      <label class="field"><span>날짜</span><input class="input" type="date" value="2026-11-05" /></label>
+    </div>
+    <label class="field"><span>메모 (선택)</span><input class="input" value="저녁" /></label>
+    <p class="field-hint">jiyoon 님이 남긴 기록입니다.</p>
+  </div>
+  <div class="sheet-f"><button class="btn danger" data-close onclick="toast('기록을 지웠습니다')">삭제</button><button class="btn" data-close>취소</button><button class="btn primary" data-close onclick="toast('저장했습니다')">저장</button></div>
+</div>
+
+<!-- 가계부 관리 (LedgerSettings) -->
+<div class="sheet" id="manage" role="dialog" aria-labelledby="mg-h">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="mg-h">가계부 관리</h2><button class="icon-btn plain" data-close aria-label="닫기"><i data-i="x"></i></button></div>
+  <div class="sheet-b">
+    <div class="between"><span class="faint" style="font-size:13px">우리집 · 소유자 ms · 기본 가계부</span></div>
+    <label class="field"><span>이름</span><div class="row"><input class="input" value="우리집" /><button class="btn" data-toast="이름을 바꿨습니다">저장</button></div></label>
+    <div class="field"><span>멤버 2</span>
+      <div class="facts">
+        <div class="fact" style="align-items:center"><span class="avatar">MS</span><span class="grow">ms (나) <span class="badge">소유자</span></span></div>
+        <div class="fact" style="align-items:center"><span class="avatar">JY</span><span class="grow">jiyoon</span><button class="btn xs ghost" data-toast="jiyoon 님에게 소유권을 넘겼습니다">소유권 넘기기</button><button class="btn xs danger" data-toast="jiyoon 님을 내보냈습니다">내보내기</button></div>
+      </div>
+    </div>
+    <label class="field"><span>초대 — 상대가 앱에서 수락하면 멤버가 됩니다</span><div class="row"><input class="input" placeholder="상대 ID" /><button class="btn" data-toast="초대를 보냈습니다">초대</button></div></label>
+    <label class="field"><span>새 가계부</span><div class="row"><input class="input" placeholder="예: 우리집, 개인" /><button class="btn" data-toast="새 가계부를 만들었습니다">만들기</button></div></label>
+    <div class="row" style="flex-wrap:wrap"><button class="btn sm" data-toast="백업 파일을 받았습니다">백업</button><button class="btn sm danger" data-toast="데모에서는 삭제하지 않습니다">가계부 삭제</button></div>
+    <p class="field-hint">삭제하면 내역·예산이 모두 지워지고 되돌릴 수 없습니다. 이름을 입력해 확인합니다.</p>
+  </div>
+</div>
+<script src="assets/canvas.js"></script>
+</body>
+</html>

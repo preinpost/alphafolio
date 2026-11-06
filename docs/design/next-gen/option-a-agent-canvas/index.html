@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Proposal A · Agent Canvas — alphafolio</title>
+<link rel="stylesheet" href="assets/canvas.css" />
+<style>.idx { max-width: 1120px; margin: 0 auto; padding: 18px 18px 80px; position: relative; } @media (min-width: 861px) { .idx { padding: 28px 40px 100px; } }</style>
+</head>
+<body data-page="index">
+<main class="main">
+  <div class="idx">
+    <div class="between">
+      <span class="brand"><span class="brand-mark"></span>alphafolio · next-gen</span>
+      <button class="icon-btn" data-theme-toggle aria-label="테마 전환"><i data-i="moon"></i></button>
+    </div>
+    <section class="hero">
+      <span class="badge ai">UI 제안 A / 3</span>
+      <h1>Agent <em>Canvas</em></h1>
+      <p class="lede">지금 앱의 <b>메뉴 5개(챗·투자·일지·가계부·설정)와 기능은 그대로</b> 두고, 옷만 바꿉니다. 웜 뉴트럴 바탕에 세리프 제목, 보라색 에이전트 포인트. 챗은 지금처럼 답을 글과 표로 주고, 주문·감시는 <b>확인 카드</b>로 묻습니다. 아이폰(390px)이 기준이고 데스크톱은 그 화면을 넓힌 것입니다.</p>
+      <div class="row" style="flex-wrap:wrap"><a class="btn primary" href="chat-new.html">데모 시작 →</a><a class="btn" href="FEATURES.md">기능 인벤토리</a></div>
+    </section>
+
+    <div class="screens">
+      <a class="card screen-link" href="chat-new.html"><div class="n">01 · 챗</div><h3>새 대화</h3><p>제안 4개(시세·포트폴리오·가계부·시장), 이미지 첨부 입력창, 모바일 대화 목록 드로어.</p></a>
+      <a class="card screen-link" href="chat.html"><div class="n">02 · 챗</div><h3>대화 · 감시 확인 카드</h3><p>도구 호출 칩, 표가 있는 답변, 감시 켜기 확인 카드(지난 30일 미리보기), 응답 중 상태.</p></a>
+      <a class="card screen-link" href="order.html"><div class="n">03 · 챗</div><h3>주문 확인 카드</h3><p>증권사 배지·남은 확인 시간·매매 근거 메모. 밀어서 주문 + 두 번 누르는 버튼 대안.</p></a>
+      <a class="card screen-link" href="portfolio.html"><div class="n">04 · 투자</div><h3>투자</h3><p>총자산·추이, 미체결 주문, 보유 자산(계좌별/종목별·검색·정렬), 직접 입력 자산, 배분·계좌·화폐별, 시세 조회.</p></a>
+      <a class="card screen-link" href="journal.html"><div class="n">05 · 일지</div><h3>매매일지</h3><p>가져오기·직접 기록, 기간, 근거 없음 필터, 기록 습관·태그·감정, 기록 시트.</p></a>
+      <a class="card screen-link" href="ledger.html"><div class="n">06 · 가계부</div><h3>가계부</h3><p>월 이동, 가계부 선택·범위, 이달 지출·분류, 내역, 예산, 사람별, 초대, 관리 시트.</p></a>
+      <a class="card screen-link" href="settings.html"><div class="n">07 · 설정</div><h3>설정</h3><p>계정 · 연결 · MCP 서버 · 감시 · AI 모델 · 화면 · 관리자 — 지금 앱과 같은 7개 탭.</p></a>
+      <a class="card screen-link" href="chat.html#alert"><div class="n">08 · 공통</div><h3>감시 알림 토스트</h3><p>감시가 발동하면 어느 화면에서든 위에서 내려오는 알림 → 설정의 감시로.</p></a>
+    </div>
+
+    <div class="cols2">
+      <div>
+        <h2 class="h-serif">원칙</h2>
+        <div class="principle"><span class="n">1</span><div><b>기능은 지금 앱 그대로</b><span>새 메뉴·새 기능 없음. 메뉴마다 하는 일은 FEATURES.md 와 1:1.</span></div></div>
+        <div class="principle"><span class="n">2</span><div><b>에이전트는 챗에</b><span>입력창은 챗 화면에만. 다른 화면은 지금 앱의 안내 문구(“챗에서 … 처럼 말해도 됩니다”)를 챗으로 가는 링크로.</span></div></div>
+        <div class="principle"><span class="n">3</span><div><b>실행은 반드시 사람이</b><span>챗의 카드는 확인 카드뿐. 남은 확인 시간을 보여 주고, 밀어서 확인 또는 두 번 누르기.</span></div></div>
+        <div class="principle"><span class="n">4</span><div><b>모바일이 먼저</b><span>390px 하단 탭바·바텀 시트가 기준. 데스크톱은 사이드바 + 두 열로 넓힐 뿐.</span></div></div>
+      </div>
+      <div>
+        <h2 class="h-serif">시스템</h2>
+        <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:16px"><span class="badge bad">상승 +2.82%</span><span class="badge" style="background:var(--down-soft);color:var(--down)">하락 −1.37%</span><span class="badge ai">에이전트</span><span class="badge warn">일부 누락</span><span class="badge ok">체결</span></div>
+        <p class="muted" style="font-size:14px;margin:0">Pretendard Variable(본문·숫자) · Instrument Serif + Noto Serif KR(제목) · JetBrains Mono(도구 호출·코드). 한국식 빨강=상승 / 파랑=하락, 음수는 “−”. 라이트·다크·시스템. 화면당 큰 숫자 하나.</p>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="assets/canvas.js"></script>
+</body>
+</html>

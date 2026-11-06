@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>투자 · Alphafolio Pro</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="portfolio">
+<div class="app with-copilot">
+  <nav class="rail"></nav>
+  <main class="view">
+    <header class="top">
+      <div class="t"><h1>투자</h1><div class="sub">계좌 4곳 · 13:16 기준 · 환율 1,393.6</div></div>
+      <button class="btn sm" data-toast="새로 불러왔습니다 (데모)" aria-label="새로고침"><span data-i="refresh"></span><span class="only-d">새로고침</span></button>
+    </header>
+
+    <div class="page">
+      <div class="notice warn mo1"><span data-i="alert"></span><span>Binance — Earn 잔고를 읽지 못해 총자산에서 빠졌습니다.</span></div>
+
+      <div class="cols">
+        <div class="col">
+          <!-- 총자산 -->
+          <section class="card mo2" aria-labelledby="nw">
+            <div class="hero hero-top">
+              <div style="min-width:0;flex:1 1 280px">
+                <div class="eyebrow" id="nw">총자산 (원화 환산)</div>
+                <div class="big" id="nwv"></div>
+                <div class="deltas" id="deltas"></div>
+              </div>
+              <div class="seg" role="group" aria-label="차트 기간"><button aria-pressed="true">1개월</button><button aria-pressed="false">3개월</button><button aria-pressed="false">6개월</button><button aria-pressed="false">1년</button></div>
+            </div>
+            <div id="chart" style="padding:4px 0 0"></div>
+          </section>
+
+          <!-- 미체결 -->
+          <section class="card mo3">
+            <div class="card-h"><h2>미체결 주문<span class="cnt">2</span></h2></div>
+            <div class="rows" id="orders"></div>
+          </section>
+
+          <!-- 보유 자산 -->
+          <section class="card mo5" aria-labelledby="hold-t">
+            <div class="card-h">
+              <h2 id="hold-t">보유 자산<span class="cnt" id="hcnt"></span></h2>
+              <span id="pill"></span>
+              <span class="sp"></span>
+              <div class="seg" role="group" aria-label="보기 방식"><button aria-pressed="true">계좌별</button><button aria-pressed="false">종목별</button></div>
+            </div>
+            <div class="tools">
+              <div class="tools-1">
+                <label class="search"><span data-i="search"></span><span class="sr-only">종목 검색</span><input class="input sm" type="search" placeholder="종목명·티커 검색" id="q" /></label>
+                <label><span class="sr-only">정렬</span><select class="input sm" style="width:auto" id="sort"><option value="value">평가금액순</option><option value="pnl">수익률순</option><option value="name">이름순</option></select></label>
+              </div>
+              <div class="hscroll" role="group" aria-label="자산 종류" id="kinds"></div>
+            </div>
+            <div class="hold-head" aria-hidden="true"><span>종목</span><span>현재가</span><span>평가금액</span><span>손익</span></div>
+            <div role="list" id="hold"></div>
+            <button class="row-add" id="dust"><span data-i="down"></span>1달러 미만 코인 3개 더 보기</button>
+            <button class="row-add" id="add-manual"><span data-i="plus"></span>직접 입력 자산 추가 (예금·연금·부동산 등)</button>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card mo4">
+            <div class="card-h"><h2>자산 배분</h2></div>
+            <div class="card-b"><div class="bar" id="abar" role="img"></div><div class="legend" id="alegend"></div></div>
+          </section>
+
+          <section class="card mo6">
+            <div class="card-h"><h2>계좌</h2><span class="sp"></span><span class="eyebrow">누르면 해당 계좌만</span></div>
+            <div class="rows" id="sources"></div>
+          </section>
+
+          <section class="card mo7">
+            <div class="card-h"><h2>화폐별</h2></div>
+            <div class="rows">
+              <div class="row"><span class="grow"><span class="name">원화</span><span class="meta">총자산의 61.3%</span></span><span class="amt"><b>70,542,000원</b></span></div>
+              <div class="row"><span class="grow"><span class="name">달러</span><span class="meta">총자산의 19.0%</span></span><span class="amt"><b>$15,702.00</b><small class="mut">≈ 2,188만원</small></span></div>
+              <div class="row"><span class="grow"><span class="name">코인 (USDT 환산)</span><span class="meta">총자산의 19.7%</span></span><span class="amt"><b>16,320.15 USDT</b><small class="mut">≈ 2,274만원</small></span></div>
+              <div class="row"><span class="grow"><span class="name">예수금</span><span class="meta">주문에 바로 쓸 수 있는 현금</span></span><span class="amt"><b>2,480,000원</b><small class="mut">$1,240.00</small></span></div>
+            </div>
+          </section>
+
+          <section class="card mo8">
+            <div class="card-h"><h2>시세 조회</h2></div>
+            <div class="card-b">
+              <form class="tools-1" onsubmit="event.preventDefault()">
+                <label class="sr-only" for="qq">종목코드 또는 티커</label>
+                <input id="qq" class="input" placeholder="종목코드 또는 티커 (예: 005930, AAPL)" value="000660" autocomplete="off" />
+                <button class="btn" style="height:42px">조회</button>
+              </form>
+              <div class="quote-out" aria-live="polite">
+                <div style="display:flex;align-items:center;gap:6px"><b>SK하이닉스</b><span class="mono mut">000660</span><span class="badge">KRX</span></div>
+                <div class="px">214,500원</div>
+                <div class="num up" style="font-size:13px;font-weight:650">전일 대비 +3.12%</div>
+                <a href="chat.html" class="ask" style="margin-top:12px"><span class="spark" data-i="spark"></span><span>챗에서 분석·주문 준비하기</span><span class="go" data-i="right"></span></a>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 데스크톱 넓은 화면: 같은 챗을 옆에 -->
+  <aside class="copilot" aria-label="챗">
+    <div class="cp-h"><span class="logo" style="width:22px;height:22px;font-size:11px">α</span><b>보유 종목 점검</b><span class="mono mut" style="font-size:11px">claude-sonnet-5-5</span><span class="sp"></span><a class="icon-btn sm" href="chat.html" aria-label="챗 화면으로" data-i="right"></a></div>
+    <div class="thread">
+      <div class="msg-u"><div class="bubble">내 보유 종목 점검해줘</div></div>
+      <div class="msg-ai"><span class="logo">α</span><div class="body">
+        <div class="tool-chip"><span data-i="check"></span><span>계좌 4곳 잔고를 모았어요</span></div>
+        <div class="md"><p>총자산 <b>1억 1,517만원</b>, 주식 평가손익 <b class="up">+1,208만원</b>입니다.</p><p>NVIDIA 한 종목이 해외주식의 <b>50%</b>를 차지해 쏠림이 큽니다. NAVER·Tesla 는 평단 아래입니다.</p></div>
+        <div class="md-table"><table><thead><tr><th>종목</th><th>비중</th><th>수익률</th></tr></thead><tbody>
+          <tr><td>NVIDIA</td><td>8.8%</td><td class="up">+54.35%</td></tr><tr><td>삼성전자</td><td>7.5%</td><td class="up">+4.97%</td></tr><tr><td>Tesla</td><td>2.6%</td><td class="dn">−13.97%</td></tr></tbody></table></div>
+      </div></div>
+    </div>
+    <div class="composer-wrap"><div class="composer"><label class="sr-only" for="cpc">메시지</label><textarea id="cpc" rows="1" placeholder="무엇이든 물어보세요"></textarea><div class="bar-row"><button class="icon-btn sm" aria-label="이미지 첨부" data-i="image"></button><span class="sp"></span><button class="send" aria-label="보내기" data-i="send"></button></div></div></div>
+  </aside>
+</div>
+<nav class="tabbar"></nav>
+
+<!-- 직접 입력 자산 편집 (모바일 시트 — 데스크톱은 같은 시트가 가운데) -->
+<section class="sheet" id="manual-sheet" role="dialog" aria-modal="true" aria-labelledby="ms-t">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="ms-t">직접 입력 자산</h2><button class="icon-btn" data-close aria-label="닫기" data-i="x"></button></div>
+  <div class="sheet-b">
+    <label class="field"><span>이름</span><input class="input" value="퇴직연금 IRP" placeholder="이름 (예: 주택청약, 퇴직연금)" /></label>
+    <div class="grid2">
+      <label class="field"><span>종류</span><select class="input"><option>예금</option><option selected>연금</option><option>부동산</option><option>투자</option><option>기타</option></select></label>
+      <label class="field"><span>통화</span><select class="input"><option>원</option><option>달러</option></select></label>
+    </div>
+    <label class="field"><span>금액</span><input class="input amount-input" inputmode="numeric" value="32,150,000" /></label>
+    <label class="field"><span>메모 (선택)</span><input class="input" value="미래에셋 · 11월 1일 기준" /></label>
+  </div>
+  <div class="sheet-f"><button class="btn danger" data-close>삭제</button><button class="btn" data-close>취소</button><button class="btn pri" data-close data-toast="저장했습니다">저장</button></div>
+</section>
+
+<script src="assets/app.js"></script>
+<script src="assets/data.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $("nwv").innerHTML = `${fmt(PF.netWorth)}<span class="u">원</span>`;
+  $("deltas").innerHTML = `<span><span class="mut">전일 대비</span> <b class="up">+${fmt(PF.daily.diff)}원 (${pct(PF.daily.pct)})</b></span><span><span class="mut">이번 달</span> <b class="up">+${fmt(PF.monthly.diff)}원 (${pct(PF.monthly.pct)})</b></span><span><span class="mut">주식 평가손익</span> <b class="up">+${fmt(PF.profit)}원</b></span>`;
+  $("chart").innerHTML = areaChart(PF.history, { w: 600, h: 150, color: "var(--up)" });
+  $("orders").innerHTML = PF.orders.map((o) => `<div class="row"><span class="side ${o.side === "BUY" ? "buy" : "sell"}">${o.side === "BUY" ? "매수" : "매도"}</span><span class="grow"><span class="name"><span>${o.sym}</span></span><span class="meta">${o.qty}주 · ${o.price} · ${o.st}</span></span><button class="btn sm" onclick="confirm('${o.sym} ${o.side === "BUY" ? "매수" : "매도"} ${o.qty}주 주문을 취소할까요?')">취소</button></div>`).join("");
+
+  const tot = PF.netWorth;
+  $("abar").setAttribute("aria-label", PF.alloc.map(([l, v]) => `${l} ${((v / tot) * 100).toFixed(1)}%`).join(", "));
+  $("abar").innerHTML = PF.alloc.map(([, v, c]) => `<i style="width:${(v / tot) * 100}%;background:${c}"></i>`).join("");
+  $("alegend").innerHTML = PF.alloc.map(([l, v, c]) => `<span class="sw" style="background:${c}"></span><span>${l}</span><span class="p">${((v / tot) * 100).toFixed(1)}%</span><span class="a">${short(v)}</span>`).join("");
+
+  let only = null, kind = "all";
+  const LABEL = { kis: "한국투자", toss: "토스", binance: "Binance", manual: "직접 입력" };
+  function sources() {
+    $("sources").innerHTML = PF.sources.map((s) => `<button class="row" aria-pressed="${only === s.id}" data-src="${s.id}"><span class="grow"><span class="name"><span>${s.label}</span>${s.status ? `<span class="badge ${s.status[1]}">${s.status[0]}</span>` : ""}</span><span class="meta">${s.parts}</span></span><span class="amt"><b>${short(s.val)}</b><small class="mut">${((s.val / tot) * 100).toFixed(1)}%</small></span></button>`).join("");
+  }
+  const KINDS = [["all", "전체"], ["domesticStock", "국내주식"], ["overseasStock", "해외주식"], ["crypto", "코인"], ["manual", "직접 입력"]];
+  $("kinds").innerHTML = KINDS.map(([k, l]) => `<button class="chip" aria-pressed="${k === "all"}" data-kind="${k}">${l}</button>`).join("");
+  $("kinds").dataset.single = "";
+  function hold() {
+    const q = $("q").value.trim().toLowerCase(), sort = $("sort").value;
+    const rows = PF.holdings.filter((h) => (!only || h.src === only) && (kind === "all" || h.k === kind) && (!q || (h.name + h.sym).toLowerCase().includes(q)))
+      .sort(sort === "name" ? (a, b) => a.name.localeCompare(b.name, "ko") : sort === "pnl" ? (a, b) => (b.pp ?? -1e9) - (a.pp ?? -1e9) : (a, b) => b.val - a.val);
+    $("hcnt").textContent = rows.length;
+    $("pill").innerHTML = only ? `<span class="filter-pill">${LABEL[only]}만<button aria-label="계좌 필터 해제" data-src="${only}">${I.x}</button></span>` : "";
+    $("hold").innerHTML = rows.map((h) => {
+      const p = h.pp === null ? `<div class="s mut">${h.manual ? "직접 입력" : "손익 없음"}</div>` : `<div class="s ${cls(h.pp)}"><span class="m-only">${h.pnlS || sgn(h.pnl) + short(Math.abs(h.pnl))} · </span>${pct(h.pp)}</div>`;
+      const meta = [LABEL[h.src], h.qty, h.avg && `평단 ${h.avg}`].filter(Boolean).join(" · ");
+      const tag = h.manual ? `button data-open="manual-sheet" title="눌러서 금액 고치기"` : "div";
+      return `<${tag} class="hold" role="listitem">
+        <div style="min-width:0"><div class="nm"><span>${h.name}</span>${h.sym ? `<span class="mono">${h.sym}</span>` : ""}${h.manual ? `<span class="mut" style="width:13px;height:13px;display:inline-flex">${I.edit}</span>` : ""}</div><div class="mt">${meta}</div></div>
+        <div class="c-price num">${h.price ?? "—"}</div>
+        <div class="w"><div class="v"><span class="only-d">${fmt(h.val)}</span><span class="only-m">${short(h.val)}</span></div><div class="s mut">${h.sub || `${((h.val / tot) * 100).toFixed(1)}%`}</div></div>
+        <div class="c-pnl">${h.pp === null ? p : `<div class="v ${cls(h.pp)}">${h.pnlS || sgn(h.pnl) + fmt(Math.abs(h.pnl))}</div><div class="s ${cls(h.pp)}">${pct(h.pp)}</div>`}</div>
+        <div class="m-only" style="grid-column:2;grid-row:2">${p}</div>
+        <div class="wbar"><i style="width:${Math.min(100, (h.val / 32150000) * 100)}%"></i></div>
+      </${tag.split(" ")[0]}>`;
+    }).join("") || `<div class="empty">조건에 맞는 자산이 없습니다.</div>`;
+  }
+  document.addEventListener("click", (e) => {
+    const s = e.target.closest("[data-src]"); if (s) { only = only === s.dataset.src ? null : s.dataset.src; sources(); hold(); }
+    const k = e.target.closest("[data-kind]"); if (k) { kind = k.dataset.kind; hold(); }
+  });
+  $("q").addEventListener("input", hold); $("sort").addEventListener("change", hold);
+  $("add-manual").addEventListener("click", () => openSheet("manual-sheet"));
+  sources(); hold(); paintIcons();
+</script>
+</body>
+</html>

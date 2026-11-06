@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>AlphaFolio — 포트폴리오 딥뷰</title>
+<link rel="stylesheet" href="shared.css" />
+<style>
+	.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; margin-bottom: 20px; }
+	h1 { margin: 4px 0 0; font-size: 34px; letter-spacing: -.03em; }
+	.lens { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 12px; }
+	.lens button { padding: 7px 12px; border-radius: 9px; font-size: 13px; color: var(--ink-2); }
+	.lens button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+	.layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; }
+	#tm { position: relative; height: 460px; border-radius: var(--radius); overflow: hidden; }
+	.tile { position: absolute; padding: 10px; border: 2px solid var(--bg); border-radius: 10px; color: #fff; overflow: hidden; transition: all .5s var(--ease); cursor: pointer; }
+	.tile:hover { filter: brightness(1.08); z-index: 2; }
+	.tile .n { font-weight: 700; font-size: 14px; } .tile .p { font-family: var(--mono); font-size: 13px; opacity: .92; }
+	.tile .w { font-size: 11px; opacity: .75; }
+	.side .card + .card { margin-top: 16px; }
+	.slider { margin: 16px 0; }
+	.slider label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+	input[type=range] { width: 100%; accent-color: var(--accent); }
+	.impact { font-size: 30px; font-weight: 700; letter-spacing: -.03em; transition: color .2s; }
+	.attr { display: flex; height: 26px; border-radius: 8px; overflow: hidden; margin-top: 14px; }
+	.attr i { display: grid; place-items: center; font-style: normal; font-size: 11px; color: #fff; transition: flex .4s var(--ease); }
+	.legend { display: flex; gap: 12px; font-size: 12px; margin-top: 8px; flex-wrap: wrap; }
+	.legend span::before { content: "■ "; color: var(--c); }
+	.detail { display: none; }
+	.detail.open { display: block; animation: pop .25s var(--ease); }
+	.row { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; }
+	@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } #tm { height: 360px; } }
+</style>
+</head>
+<body>
+<div class="shell">
+	<nav class="rail"></nav>
+	<main class="main">
+		<div class="top">
+			<div><div class="eyebrow">포트폴리오 · KIS + 토스 + Binance + 수동자산</div><h1 class="num">₩227,418,600</h1></div>
+			<div class="lens" id="lens">
+				<button data-l="day" class="on">오늘 등락</button><button data-l="total">누적 수익</button><button data-l="sector">섹터</button><button data-l="ccy">통화</button>
+			</div>
+		</div>
+		<div class="layout">
+			<div>
+				<div id="tm" class="card" style="padding:0"></div>
+				<div class="card" style="margin-top:16px">
+					<div class="eyebrow">이번 달 수익 어트리뷰션</div>
+					<div class="attr" id="attr"></div>
+					<div class="legend"><span style="--c:#e5383b">종목 선택</span><span style="--c:#6b4eff">섹터 배분</span><span style="--c:#c27a00">환율</span><span style="--c:#2f6fed">현금 드래그</span></div>
+				</div>
+			</div>
+			<aside class="side">
+				<div class="card detail" id="detail"></div>
+				<div class="card" id="whatif">
+					<div style="display:flex;justify-content:space-between"><div class="eyebrow">What-if 시나리오</div><span class="badge ai">에이전트와 연동</span></div>
+					<div class="slider"><label><span>USD/KRW</span><b class="num" id="fxv">1,392</b></label><input type="range" id="fx" min="1250" max="1550" value="1392" /></div>
+					<div class="slider"><label><span>반도체 섹터</span><b class="num" id="sev">0%</b></label><input type="range" id="se" min="-30" max="30" value="0" /></div>
+					<div class="slider"><label><span>KOSPI 전체</span><b class="num" id="kov">0%</b></label><input type="range" id="ko" min="-20" max="20" value="0" /></div>
+					<div class="faint" style="font-size:12px">예상 순자산 변화</div>
+					<div class="impact num" id="impact">₩0</div>
+					<div class="faint num" id="impact2" style="font-size:13px">±0.00%</div>
+					<div style="margin-top:14px;display:flex;gap:8px"><button class="chip" onclick="reset()">초기화</button><button class="chip">“이 시나리오 대비책 짜줘” →</button></div>
+				</div>
+			</aside>
+		</div>
+	</main>
+</div>
+<div class="agentbar"><span class="ctx" id="ctx">▦ 포트폴리오</span><input placeholder="“환율 1,450원이면?” 처럼 물으면 슬라이더가 움직여요" /><kbd>⌘K</kbd><button class="send">↑</button></div>
+
+<script src="shared.js"></script>
+<script>
+AF.init("portfolio.html");
+// 보유 (원화 환산 평가액, 오늘 %, 누적 %, 섹터, 통화, 반도체 여부)
+const H = [
+	["NVIDIA", "NVDA", 48_200_000, 4.21, 182.4, "반도체", "USD", 1],
+	["삼성전자", "005930", 31_500_000, 0.98, 12.3, "반도체", "KRW", 1],
+	["SK하이닉스", "000660", 22_400_000, 2.95, 64.1, "반도체", "KRW", 1],
+	["Apple", "AAPL", 18_900_000, 0.42, 21.7, "IT", "USD", 0],
+	["KODEX 200", "069500", 16_200_000, 0.61, 8.9, "지수", "KRW", 0],
+	["Bitcoin", "BTC", 14_800_000, -0.84, 41.2, "가상자산", "USD", 0],
+	["현대차", "005380", 9_800_000, -1.22, -6.4, "자동차", "KRW", 0],
+	["NAVER", "035420", 7_600_000, -0.35, -18.2, "IT", "KRW", 0],
+	["TIGER 미국S&P500", "360750", 12_400_000, 0.55, 19.4, "지수", "KRW", 0],
+	["Tesla", "TSLA", 6_100_000, -2.1, -9.8, "자동차", "USD", 0],
+	["예수금(원)", "KRW", 8_300_000, 0, 0, "현금", "KRW", 0],
+	["예수금(달러)", "USD", 4_900_000, 0, 0, "현금", "USD", 0],
+	["전세보증금 (수동)", "—", 26_318_600, 0, 0, "부동산", "KRW", 0],
+];
+const total = H.reduce((s, h) => s + h[2], 0);
+let lens = "day";
+
+function color(p) {
+	if (lens === "sector" || lens === "ccy") return null;
+	const v = Math.max(-1, Math.min(1, p / (lens === "day" ? 4 : 60)));
+	const dark = document.documentElement.dataset.theme === "dark";
+	if (Math.abs(v) < .02) return dark ? "#3a3a44" : "#a9a9b2";
+	const [r, g, b] = v > 0 ? [229, 56, 59] : [47, 111, 237];
+	const a = .35 + Math.abs(v) * .65;
+	return `rgba(${r},${g},${b},${a})`;
+}
+const catColor = { 반도체: "#6b4eff", IT: "#2f6fed", 지수: "#138a52", 가상자산: "#c27a00", 자동차: "#e5383b", 현금: "#6c6c78", 부동산: "#8a5a3c", KRW: "#e5383b", USD: "#2f6fed" };
+
+// squarified treemap
+function squarify(items, x, y, w, h, out) {
+	if (!items.length) return;
+	const sum = items.reduce((s, i) => s + i.v, 0);
+	if (items.length === 1) { out.push({ ...items[0], x, y, w, h }); return; }
+	const short = Math.min(w, h); let row = [], best = Infinity, k = 0;
+	for (; k < items.length; k++) {
+		const r = [...row, items[k]], rs = r.reduce((s, i) => s + i.v, 0) / sum * w * h;
+		const ratio = Math.max(...r.map((i) => { const a = i.v / sum * w * h, s = rs / short, l = a / s; return Math.max(s / l, l / s); }));
+		if (ratio > best) break; best = ratio; row = r;
+	}
+	const rsum = row.reduce((s, i) => s + i.v, 0), frac = rsum / sum;
+	let off = 0;
+	if (w >= h) { const rw = w * frac; row.forEach((i) => { const ih = h * i.v / rsum; out.push({ ...i, x, y: y + off, w: rw, h: ih }); off += ih; }); squarify(items.slice(row.length), x + rw, y, w - rw, h, out); }
+	else { const rh = h * frac; row.forEach((i) => { const iw = w * i.v / rsum; out.push({ ...i, x: x + off, y, w: iw, h: rh }); off += iw; }); squarify(items.slice(row.length), x, y + rh, w, h - rh, out); }
+}
+function draw() {
+	const el = document.getElementById("tm"), W = el.clientWidth, Hh = el.clientHeight;
+	let items = H.map((h, i) => ({ i, v: h[2] })).sort((a, b) => b.v - a.v);
+	if (lens === "sector" || lens === "ccy") {
+		const key = lens === "sector" ? 5 : 6;
+		items.sort((a, b) => H[a.i][key].localeCompare(H[b.i][key]) || b.v - a.v);
+	}
+	const out = []; squarify(items, 0, 0, W, Hh, out);
+	if (!el.children.length) H.forEach((_, i) => { const d = document.createElement("div"); d.className = "tile"; d.onclick = () => detail(i); el.appendChild(d); });
+	out.forEach((t) => {
+		const h = H[t.i], d = el.children[t.i];
+		const p = lens === "total" ? h[4] : h[3];
+		Object.assign(d.style, { left: t.x + "px", top: t.y + "px", width: t.w + "px", height: t.h + "px", background: color(p) || catColor[lens === "sector" ? h[5] : h[6]] });
+		const tag = lens === "sector" ? h[5] : lens === "ccy" ? h[6] : AF.pct(p);
+		d.innerHTML = t.w > 70 && t.h > 44 ? `<div class="n">${h[0]}</div><div class="p">${tag}</div><div class="w">${(h[2] / total * 100).toFixed(1)}%</div>` : "";
+		d.title = `${h[0]} ${AF.won(h[2])}`;
+	});
+}
+function detail(i) {
+	const h = H[i], el = document.getElementById("detail");
+	document.getElementById("ctx").textContent = "▦ " + h[0];
+	el.className = "card detail open";
+	el.innerHTML = `<div style="display:flex;justify-content:space-between"><div><div class="eyebrow">${h[1]} · ${h[5]}</div><div style="font-size:20px;font-weight:700;margin-top:4px">${h[0]}</div></div><button class="chip" onclick="this.closest('.detail').className='card detail'">✕</button></div>
+		<div style="color:var(--${h[3] >= 0 ? "up" : "down"});margin:12px 0">${AF.spark(AF.walk(40, 100, .03, h[3] / 400, i + 3), 300, 70)}</div>
+		<div class="row"><span class="muted">평가액</span><b class="num">${AF.won(h[2])}</b></div>
+		<div class="row"><span class="muted">오늘</span><b class="num ${AF.tone(h[3])}">${AF.pct(h[3])}</b></div>
+		<div class="row"><span class="muted">누적 수익률</span><b class="num ${AF.tone(h[4])}">${AF.pct(h[4])}</b></div>
+		<div class="row"><span class="muted">비중</span><b class="num">${(h[2] / total * 100).toFixed(1)}%</b></div>
+		<div style="display:flex;gap:8px;margin-top:12px"><a class="btn chip" href="order.html">매수/매도</a><a class="chip" href="timeline.html">매매 일지</a><span class="chip">🔔 감시</span></div>`;
+	AF.haptic();
+}
+document.getElementById("lens").onclick = (e) => {
+	const b = e.target.closest("button"); if (!b) return;
+	lens = b.dataset.l; document.querySelectorAll("#lens button").forEach((x) => x.classList.toggle("on", x === b)); draw(); AF.haptic(5);
+};
+// what-if
+const usd = H.filter((h) => h[6] === "USD").reduce((s, h) => s + h[2], 0);
+const semi = H.filter((h) => h[7]).reduce((s, h) => s + h[2], 0);
+const kr = H.filter((h) => h[6] === "KRW" && !["현금", "부동산"].includes(h[5])).reduce((s, h) => s + h[2], 0);
+function whatif() {
+	const fx = +document.getElementById("fx").value, se = +document.getElementById("se").value, ko = +document.getElementById("ko").value;
+	document.getElementById("fxv").textContent = fx.toLocaleString();
+	document.getElementById("sev").textContent = (se > 0 ? "+" : "") + se + "%";
+	document.getElementById("kov").textContent = (ko > 0 ? "+" : "") + ko + "%";
+	const d = usd * (fx / 1392 - 1) + semi * se / 100 + kr * ko / 100 * 0.85;
+	const el = document.getElementById("impact");
+	el.textContent = (d >= 0 ? "+" : "") + AF.won(d); el.className = "impact num " + AF.tone(d);
+	document.getElementById("impact2").textContent = AF.pct(d / total * 100) + " → " + AF.won(total + d);
+}
+["fx", "se", "ko"].forEach((id) => document.getElementById(id).oninput = whatif);
+function reset() { fx.value = 1392; se.value = 0; ko.value = 0; whatif(); }
+// 어트리뷰션
+document.getElementById("attr").innerHTML = [["#e5383b", 46, "+₩4.1M"], ["#6b4eff", 28, "+₩2.5M"], ["#c27a00", 18, "+₩1.6M"], ["#2f6fed", 8, "−₩0.7M"]].map(([c, f, t]) => `<i style="background:${c};flex:${f}">${t}</i>`).join("");
+addEventListener("resize", draw);
+draw(); whatif();
+if (location.hash === "#whatif") { setTimeout(() => { const f = document.getElementById("fx"); let v = 1392; const t = setInterval(() => { v += 4; f.value = v; whatif(); if (v >= 1450) clearInterval(t); }, 16); }, 500); }
+</script>
+</body>
+</html>

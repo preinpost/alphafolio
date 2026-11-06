@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>설정 · Alphafolio Pro</title>
+<link rel="stylesheet" href="assets/styles.css" />
+<style>
+  .set-page { padding-top: 12px; }
+  .lim { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .lim .who { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; }
+  .tool-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .tool-row .grow { flex: 1; min-width: 0; }
+  .tool-row .tn { font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 600; }
+  .tool-row .td { font-size: 12px; color: var(--tx-3); margin-top: 2px; }
+  .srv-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .one-time { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--accent-line); background: var(--accent-bg); display: flex; align-items: center; gap: 8px; }
+  .one-time code { font-family: "JetBrains Mono", monospace; font-size: 14px; font-weight: 600; flex: 1; letter-spacing: .04em; }
+  .inv-form { display: flex; flex-wrap: wrap; gap: 8px; }
+  .inv-form .input { flex: 1 1 160px; }
+  @media (min-width: 900px) {
+    .set-page { padding-top: 24px; }
+    .lim { flex-direction: row; align-items: center; padding: 10px 16px; }
+    .lim .who { width: 200px; flex: none; }
+    .lim .edit { flex: 1; display: flex; gap: 6px; }
+    .tool-row { padding: 10px 16px; }
+  }
+</style>
+</head>
+<body data-page="settings">
+<div class="app">
+  <nav class="rail"></nav>
+  <main class="view">
+    <header class="top"><div class="t"><h1>설정</h1></div></header>
+    <div class="page set-page">
+      <div class="set-wrap">
+        <div class="set-tabs" role="tablist" aria-label="설정 분류" id="tabs"></div>
+
+        <div>
+          <!-- 계정 -->
+          <section class="set-panel" data-tab="account" role="tabpanel">
+            <div class="panel-h"><h2>계정</h2><p>로그인 정보와 이 계정으로 들어온 기기입니다.</p></div>
+            <form class="card" onsubmit="event.preventDefault()">
+              <div class="card-h"><h2>비밀번호 바꾸기</h2><span class="sp"></span><span class="eyebrow">ms</span></div>
+              <div class="card-b" style="display:flex;flex-direction:column;gap:12px">
+                <label class="field"><span>현재 비밀번호</span><input class="input" type="password" autocomplete="current-password" /></label>
+                <div class="grid2">
+                  <label class="field"><span>새 비밀번호</span><input class="input" type="password" placeholder="10자 이상" autocomplete="new-password" /></label>
+                  <label class="field"><span>새 비밀번호 확인</span><input class="input" type="password" autocomplete="new-password" /></label>
+                </div>
+                <div class="form-actions" style="margin-top:0"><button class="btn">비밀번호 바꾸기</button></div>
+              </div>
+            </form>
+            <section class="card">
+              <div class="card-h"><h2>다른 기기</h2></div>
+              <div class="row bt" style="flex-wrap:wrap"><span class="grow"><span class="name">이 기기만 남기고 모두 로그아웃</span><span class="meta" style="white-space:normal">폰을 잃어버렸거나 남의 기기에서 로그인했을 때</span></span><button class="btn danger sm" onclick="confirm('다른 모든 기기에서 로그아웃할까요?')">모든 기기 로그아웃</button></div>
+            </section>
+          </section>
+
+          <!-- 연결 -->
+          <section class="set-panel" data-tab="connect" role="tabpanel">
+            <div class="panel-h"><h2>연결</h2><p>증권사·거래소 키와 알림 받을 곳을 설정합니다.</p></div>
+            <div class="notice"><span data-i="shield"></span><span>키는 사용자별로 암호화되어 저장됩니다. 저장한 값은 화면으로 다시 내려오지 않으니, 바꾸려면 새 값을 입력하세요.</span></div>
+            <div id="keygroups" style="display:flex;flex-direction:column;gap:12px"></div>
+          </section>
+
+          <!-- MCP -->
+          <section class="set-panel" data-tab="mcp" role="tabpanel">
+            <div class="panel-h"><h2>MCP 서버</h2><p>외부 도구 서버를 붙이면 에이전트가 조회 툴은 바로 쓰고, 쓰기 툴은 확인 카드로 묻습니다.</p></div>
+            <section class="card">
+              <div class="card-h"><h2>연결한 서버</h2><span class="sp"></span><span class="eyebrow">원격(https) 서버만</span></div>
+              <div class="rows">
+                <div class="row" style="align-items:flex-start;flex-wrap:wrap"><span class="grow"><span class="name"><span>Notion</span><span class="badge ok">연결됨 · 자동 갱신</span></span><span class="meta mono">https://mcp.notion.com/mcp</span><div class="srv-acts"><button class="btn sm">연결 테스트</button><button class="btn ghost sm">연결 해제</button></div></span><button class="icon-btn sm" aria-label="Notion 삭제" data-open="mcp-del" data-i="trash"></button></div>
+                <div class="row" style="align-items:flex-start;flex-wrap:wrap"><span class="grow"><span class="name"><span>사내 문서 검색</span><span class="badge warn">연결 필요</span></span><span class="meta mono">https://docs.example.com/mcp</span><div class="srv-acts"><button class="btn pri sm">연결</button><button class="btn sm">연결 테스트</button></div></span><button class="icon-btn sm" aria-label="사내 문서 검색 삭제" data-open="mcp-del" data-i="trash"></button></div>
+              </div>
+              <div style="padding:12px 14px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px">
+                <button class="btn sm"><span data-i="plus"></span>Linear</button><button class="btn sm"><span data-i="plus"></span>GitHub</button><button class="btn ghost sm"><span data-i="plus"></span>직접 추가</button>
+              </div>
+              <p class="foot-note">에이전트는 조회는 바로 하고, 알림·관심목록 변경 같은 <b>쓰기는 확인 카드</b>로 묻습니다. [확인]을 눌러야 실행됩니다. 로그인 토큰과 헤더 값은 암호화되어 서버에만 남습니다.</p>
+            </section>
+            <section class="card">
+              <div class="card-h"><h2>툴<span class="cnt">14</span></h2><span class="sp"></span><div class="seg" role="group" aria-label="서버 고르기"><button aria-pressed="true">Notion <span class="num mut">14</span></button><button aria-pressed="false">사내 문서 검색</button></div></div>
+              <div class="tools"><label class="search"><span data-i="search"></span><span class="sr-only">툴 검색</span><input class="input sm" type="search" placeholder="툴 이름·설명 검색" /></label>
+                <div class="hscroll" data-single role="group" aria-label="판정으로 거르기"><button class="chip" aria-pressed="true">전체 <span class="n">14</span></button><button class="chip" aria-pressed="false">조회 <span class="n">9</span></button><button class="chip" aria-pressed="false">쓰기 <span class="n">5</span></button></div></div>
+              <div class="bt">
+                <div class="tool-row" style="border-top:0"><span class="grow"><div class="tn">notion-search</div><div class="td">워크스페이스 페이지·데이터베이스 검색</div></span><span class="badge">조회</span></div>
+                <div class="tool-row"><span class="grow"><div class="tn">notion-fetch</div><div class="td">페이지 본문 가져오기</div></span><span class="badge">조회</span></div>
+                <div class="tool-row"><span class="grow"><div class="tn">notion-create-pages</div><div class="td">새 페이지 만들기</div></span><span class="badge warn">쓰기</span></div>
+                <div class="tool-row"><span class="grow"><div class="tn">notion-update-page</div><div class="td">페이지 속성·본문 고치기</div></span><span class="badge warn">쓰기</span></div>
+                <div class="tool-row"><span class="grow"><div class="tn">notion-delete-block</div><div class="td">블록 지우기</div></span><span class="badge bad">쓰기 · 삭제</span></div>
+              </div>
+            </section>
+          </section>
+
+          <!-- 감시 -->
+          <section class="set-panel" data-tab="watch" role="tabpanel">
+            <div class="panel-h"><h2>감시</h2><p>챗에서 켠 감시와 자동 매매 한도입니다. 새 감시는 챗에서 말로 만드세요.</p></div>
+            <section class="card">
+              <div class="card-h"><h2>자동 매매 한도</h2></div>
+              <p class="card-b" style="font-size:12.5px;color:var(--tx-3)">하루(시장 현지 날짜 — 코인은 UTC) 동안 자동 매수에 쓸 수 있는 최대 금액입니다. 한도가 없으면 매수 감시를 켤 수 없고, 넘으면 신호가 와도 주문하지 않습니다. 매도(손절·익절)는 보유 수량으로만 제한합니다.</p>
+              <form class="lim" onsubmit="event.preventDefault()"><div class="who">국장 (원) <span class="badge ok">하루 1,000,000원</span></div><div class="edit tools-1"><input class="input sm num" inputmode="decimal" value="1,000,000" aria-label="국장 (원) 하루 한도" /><button class="btn sm" style="height:36px" disabled>저장</button></div></form>
+              <form class="lim" onsubmit="event.preventDefault()"><div class="who">미장 ($) <span class="badge warn">한도 없음</span></div><div class="edit tools-1"><input class="input sm num" inputmode="decimal" placeholder="없음 — 매수 감시를 켤 수 없음" aria-label="미장 ($) 하루 한도" /><button class="btn sm" style="height:36px" disabled>저장</button></div></form>
+              <form class="lim" onsubmit="event.preventDefault()"><div class="who">코인 (USDT) <span class="badge ok">하루 2,000 USDT</span></div><div class="edit tools-1"><input class="input sm num" inputmode="decimal" value="2,000" aria-label="코인 (USDT) 하루 한도" /><button class="btn sm" style="height:36px" disabled>저장</button></div></form>
+            </section>
+
+            <section class="card">
+              <div class="card-h"><h2>감시 목록<span class="cnt">3</span></h2><span class="sp"></span><button class="btn danger sm" onclick="confirm('켜진 감시 2개를 모두 일시정지할까요? 진행 중인 자동 매매도 걸린 주문을 취소하고 멈춥니다.')"><span data-i="stop"></span>비상 정지</button></div>
+              <div class="rows">
+                <div class="row w-row">
+                  <span class="grow"><span class="name"><span>BTC 4시간봉 돌파 매수</span><span class="badge ok">켜짐</span></span>
+                    <span class="cond">BTCUSDT 4h close &gt; 103,500</span>
+                    <span class="meta"><span class="badge warn" style="margin-right:4px">자동 매매</span>Binance 현물 · 매수 0.012 BTC · 최악 104,020</span>
+                    <span class="meta">발동 1/1회 · 만료 2026-12-05 · 다음 확인 13:00 · <span class="mono">w_7f2</span></span>
+                    <a href="chat.html" class="text-link" style="margin-top:4px">만든 대화 열기</a></span>
+                  <span class="w-acts"><button class="icon-btn sm" aria-label="일시정지" data-i="pause"></button><button class="icon-btn sm" aria-label="BTC 4시간봉 돌파 매수 삭제" data-i="trash"></button></span>
+                </div>
+                <div class="row w-row">
+                  <span class="grow"><span class="name"><span>ETH 박스권 반복</span><span class="badge ok">켜짐</span></span>
+                    <span class="cond">ETHUSDT 1h 3,700 ~ 4,050 · 손절 3,520</span>
+                    <span class="meta"><span class="badge warn" style="margin-right:4px">자동 매매</span>매수 0.2 ETH ↔ 매도</span>
+                    <div class="range-st"><span>보유 중 · 종료된 회차 4회</span><span>전략 보유분 0.2 ETH · 매입원가 742.10 USDT</span><span>실현 순손익 <b class="up">+86.42 USDT</b> (비용 추정 포함)</span></div>
+                    <span class="meta">발동 9회 · 정지할 때까지 반복 · 마지막 11/05 21:00 · <span class="mono">w_3c9</span></span></span>
+                  <span class="w-acts"><button class="icon-btn sm" aria-label="일시정지" onclick="confirm('전략을 일시정지할까요? 손절 감시도 중단되며 보유분은 매도하지 않습니다.')" data-i="pause"></button><button class="icon-btn sm" aria-label="ETH 박스권 반복 삭제" disabled title="보유분 또는 확인이 필요한 주문이 있습니다" data-i="trash"></button></span>
+                </div>
+                <div class="row w-row dim">
+                  <span class="grow"><span class="name"><span>삼성전자 7만 이탈 알림</span><span class="badge warn">일시정지</span></span>
+                    <span class="cond">005930 1d close &lt; 70,000</span>
+                    <span class="meta">발동 0/3회 · 만료 2026-11-30 · <span class="mono">w_1a0</span></span></span>
+                  <span class="w-acts"><button class="icon-btn sm" aria-label="다시 켜기" data-i="play"></button><button class="icon-btn sm" aria-label="삼성전자 7만 이탈 알림 삭제" data-i="trash"></button></span>
+                </div>
+              </div>
+              <p class="foot-note">봉이 닫힌 뒤의 값으로 판정하고, 조건이 이어지는 동안은 다시 울리지 않습니다. 텔레그램에서는 /list 로 보고, 일시정지·삭제·/stop(비상 정지)을 할 수 있습니다 — 다시 켜기는 여기서만.</p>
+            </section>
+
+            <section class="card">
+              <div class="card-h"><h2>최근 자동 매매</h2></div>
+              <div class="rows">
+                <div class="row" style="align-items:flex-start"><span class="badge ok" style="min-width:56px;justify-content:center">체결</span><span class="grow"><span class="name" style="font-weight:500"><span><span class="up">매수</span> BTCUSDT 0.012/0.012 BTC · 평균 103,880</span></span><span class="meta">Binance 현물 · 최악 104,020 · 주문 1건 · 슬리피지 4bp</span></span><span class="hist-when" style="width:auto">11/05 09:00</span></div>
+                <div class="row" style="align-items:flex-start"><span class="badge warn" style="min-width:56px;justify-content:center">일부 체결</span><span class="grow"><span class="name" style="font-weight:500"><span><span class="dn">매도</span> ETHUSDT 0.12/0.2 ETH · 평균 4,048.1</span></span><span class="meta">Binance 현물 · 최악 4,030 · 주문 2건</span></span><span class="hist-when" style="width:auto">11/04 18:00</span></div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-h"><h2>최근 기록</h2></div>
+              <div class="rows">
+                <div class="row" style="min-height:44px"><span class="hist-when">11/05 09:00</span><span class="grow" style="font-size:13px">발동 · BTC 4시간봉 돌파 매수 · close 103,880</span></div>
+                <div class="row" style="min-height:44px"><span class="hist-when">11/05 09:00</span><span class="grow" style="font-size:13px">주문 · 매수 0.012/0.012 BTC @103,880 · 체결</span></div>
+                <div class="row" style="min-height:44px"><span class="hist-when">11/03 22:10</span><span class="grow mut" style="font-size:13px">일시정지 · 삼성전자 7만 이탈 알림 (텔레그램)</span></div>
+              </div>
+            </section>
+          </section>
+
+          <!-- AI 모델 -->
+          <section class="set-panel" data-tab="ai" role="tabpanel">
+            <div class="panel-h"><h2>AI 모델</h2><p>챗이 쓰는 모델의 키입니다. 비워두면 서버의 기본 계정으로 호출합니다. 넣으면 내 키로 과금되며, 서버를 다시 시작하지 않아도 바로 적용됩니다.</p></div>
+            <div class="notice"><span data-i="shield"></span><span>키는 사용자별로 암호화되어 저장됩니다. 저장한 값은 화면으로 다시 내려오지 않으니, 바꾸려면 새 값을 입력하세요.</span></div>
+            <div id="llm"></div>
+          </section>
+
+          <!-- 화면 -->
+          <section class="set-panel" data-tab="display" role="tabpanel">
+            <div class="panel-h"><h2>화면</h2><p>이 기기에만 적용됩니다.</p></div>
+            <section class="card">
+              <div class="card-h"><h2>테마</h2></div>
+              <div class="card-b">
+                <div class="theme-opts" role="radiogroup" aria-label="테마" id="themes">
+                  <button class="theme-opt" role="radio" aria-checked="false" data-v="light"><span class="pv" style="background:linear-gradient(90deg,#eef0f3 22%,#fff 22%)"></span>라이트</button>
+                  <button class="theme-opt" role="radio" aria-checked="true" data-v="dark"><span class="pv" style="background:linear-gradient(90deg,#16181c 22%,#0a0b0d 22%)"></span>다크</button>
+                  <button class="theme-opt" role="radio" aria-checked="false" data-v="system"><span class="pv" style="background:linear-gradient(135deg,#f3f4f6 50%,#0a0b0d 50%)"></span>시스템</button>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <!-- 관리자 -->
+          <section class="set-panel" data-tab="admin" role="tabpanel">
+            <div class="panel-h"><h2>관리자</h2><p>이 서버의 저장소와 사용자입니다.</p></div>
+            <section class="card">
+              <div class="card-h"><h2>서버 DB</h2><span class="sp"></span><span class="badge ok">준비됨</span></div>
+              <div class="card-b">
+                <p style="font-size:13px;color:var(--tx-2);margin-bottom:10px">가계부·계정·개인 키가 저장되는 곳입니다. 접속 정보는 서버 환경변수(<span class="mono">AF_D1_*</span>)에서만 바꿉니다.</p>
+                <dl class="kv" style="border:0;padding:0"><dt>설정 출처</dt><dd><span class="badge">서버 env</span></dd><dt>서버 버전</dt><dd class="mono">v2.14.0</dd><dt>모델</dt><dd class="mono">claude-sonnet-5-5</dd></dl>
+                <div class="form-actions"><span class="msg-ok">연결됨 · 38ms</span><button class="btn">연결 테스트</button></div>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-h"><h2>초대 코드</h2><span class="sp"></span><span class="eyebrow">한 번 쓰면 끝나는 코드</span></div>
+              <div class="card-b">
+                <form class="inv-form" onsubmit="event.preventDefault()"><input class="input" placeholder="누구에게 (메모, 선택)" aria-label="메모" /><select class="input" style="width:auto;flex:none" aria-label="유효 기간"><option>1일</option><option selected>7일</option><option>30일</option></select><button class="btn pri" style="height:42px"><span data-i="link"></span>발급</button></form>
+                <div class="one-time"><code>K7QF-29MX</code><button class="btn ghost sm" data-toast="복사했습니다">복사</button><button class="btn ghost sm" data-toast="가입 링크를 복사했습니다">링크</button></div>
+                <p class="field-hint" style="margin-top:6px">초대 코드 (11/13까지) — 지금만 보입니다. 닫으면 다시 볼 수 없어요.</p>
+              </div>
+              <div class="rows">
+                <div class="row"><span class="badge ac">대기</span><span class="grow"><span class="name" style="font-weight:500">엄마</span><span class="meta">11/13까지</span></span><button class="btn ghost sm">취소</button></div>
+                <div class="row"><span class="badge ok">사용됨</span><span class="grow"><span class="name" style="font-weight:500">지수</span><span class="meta">10/02 · 지수 가입</span></span></div>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-h"><h2>계정<span class="cnt">3</span></h2></div>
+              <div class="rows">
+                <div class="row"><span class="avatar">MS</span><span class="grow"><span class="name">ms</span><span class="meta">관리자 · 서버 설정 계정 · 나</span></span></div>
+                <div class="row" style="flex-wrap:wrap"><span class="avatar" style="background:linear-gradient(135deg,#7cc7ff,#8b7cff)">지수</span><span class="grow"><span class="name">지수</span><span class="meta">2026-10-02 가입 · ms 초대</span></span><span style="display:flex;gap:2px"><button class="btn ghost sm">임시 비밀번호</button><button class="btn ghost sm" style="color:var(--bad)">비활성화</button></span></div>
+                <div class="row" style="flex-wrap:wrap"><span class="avatar" style="background:var(--bg-3);color:var(--tx-3)">MI</span><span class="grow"><span class="name"><span>minho</span><span class="badge bad">비활성</span></span><span class="meta">2026-06-11 가입</span></span><span style="display:flex;gap:2px"><button class="btn ghost sm">임시 비밀번호</button><button class="btn ghost sm">다시 켜기</button></span></div>
+              </div>
+            </section>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<nav class="tabbar"></nav>
+
+<section class="sheet" id="mcp-del" role="dialog" aria-modal="true" aria-labelledby="md-t">
+  <div class="grab"></div>
+  <div class="sheet-h"><h2 id="md-t">서버를 삭제할까요?</h2><button class="icon-btn" data-close aria-label="닫기" data-i="x"></button></div>
+  <div class="sheet-b"><p style="font-size:14px;color:var(--tx-2)"><b style="color:var(--tx)">Notion</b> 연결과 저장된 로그인 토큰이 지워집니다. 에이전트는 이 서버의 툴을 더 이상 쓰지 않습니다.</p></div>
+  <div class="sheet-f"><button class="btn" data-close>취소</button><button class="btn danger" style="flex:1" data-close data-toast="Notion 을 삭제했습니다">삭제</button></div>
+</section>
+
+<script src="assets/app.js"></script>
+<script>
+  const TABS = [["account", "계정"], ["connect", "연결"], ["mcp", "MCP 서버"], ["watch", "감시"], ["ai", "AI 모델"], ["display", "화면"], ["admin", "관리자"]];
+  const tabs = document.getElementById("tabs");
+  tabs.innerHTML = TABS.map(([v, l]) => `<button role="tab" data-t="${v}" aria-selected="false">${l}</button>`).join("");
+  window.selTab = (v) => {
+    tabs.querySelectorAll("button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.t === v)));
+    document.querySelectorAll(".set-panel").forEach((p) => p.classList.toggle("on", p.dataset.tab === v));
+    tabs.querySelector(`[data-t="${v}"]`).scrollIntoView({ inline: "center", block: "nearest" });
+    window.scrollTo(0, 0); document.querySelector(".view").scrollTop = 0;
+  };
+  tabs.addEventListener("click", (e) => { const b = e.target.closest("[data-t]"); if (b) selTab(b.dataset.t); });
+  selTab(new URLSearchParams(location.search).get("tab") || "account");
+
+  const SRC = { user: ["내 설정", "ok"], env: ["서버 env", ""], none: ["미설정", ""] };
+  const row = ([label, src, pv, hint]) => `<form class="key-row" onsubmit="event.preventDefault()"><div class="who"><span class="name">${label}</span><span class="badge ${SRC[src][1]}">${SRC[src][0]}</span>${pv ? `<span class="pv mono" style="width:100%">${pv}</span>` : ""}</div><div class="edit"><input class="input sm" type="password" aria-label="${label} 새 값" placeholder="${pv ? "새 값으로 교체" : hint || "입력"}" autocomplete="off" /><button class="btn sm" style="height:36px" disabled>저장</button>${src === "user" ? `<button type="button" class="btn ghost sm" style="height:36px" onclick="confirm('${label} — 내 설정 값을 지울까요? 서버 기본값이 있으면 그걸 씁니다.')">지우기</button>` : ""}</div></form>`;
+  const card = (g, rows, extra = "") => `<section class="card"><div class="card-h"><h2>${g}</h2></div><div class="rows">${rows.map(row).join("")}${extra}</div></section>`;
+  document.getElementById("keygroups").innerHTML = [
+    card("증권 (KIS)", [["한국투자 App Key", "user", "PSxa••••••••3kQ"], ["한국투자 App Secret", "user", "••••••••"], ["한국투자 계좌번호", "user", "5012••••-01"]]),
+    card("증권 (토스)", [["토스증권 Client ID", "user", "tsc_••••a91"], ["토스증권 Client Secret", "user", "••••••••"]]),
+    card("코인 (Binance)", [["Binance API Key", "user", "vK3m••••••Qz"], ["Binance Secret Key", "user", "••••••••"], ["Binance 환경", "none", "", "testnet 이라고 넣으면 테스트넷, 비우면 실계좌"]]),
+    card("데이터 (해외)", [["Finnhub API 키", "env", ""], ["Twelve Data API 키", "none", "", "twelvedata.com 무료 가입 (분당 8회)"], ["CoinGecko Demo API 키", "none", "", "없어도 공개 한도로 동작"]]),
+    card("뉴스 (네이버)", [["네이버 API Key ID", "env", ""], ["네이버 API Key", "env", ""]]),
+    card("알림 (텔레그램)", [["텔레그램 봇 토큰", "user", "7712••••:AA••••"], ["텔레그램 채팅 ID", "user", "48••••21"]],
+      `<div style="padding:12px 14px;border-top:1px solid var(--line)"><p style="font-size:12.5px;color:var(--tx-3)">① @BotFather 에서 /newbot 으로 봇을 만들어 토큰을 넣고 ② 텔레그램에서 그 봇에게 아무 메시지나 보낸 뒤 ③ 연결 테스트를 누르세요. 알림에는 종목·수량·체결가만 담고 잔고·평가금액은 보내지 않습니다.</p><div class="form-actions"><span class="msg-ok">테스트 메시지를 보냈습니다</span><button class="btn">연결 테스트</button></div></div>`),
+  ].join("");
+  document.getElementById("llm").innerHTML = card("LLM", [["OpenRouter API 키", "none", "", "비우면 서버 기본 계정"], ["Anthropic API 키", "user", "sk-ant-••••••••Xw"]]);
+
+  const th = document.getElementById("themes");
+  th.querySelectorAll("[data-v]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.v === document.documentElement.dataset.theme)));
+  th.addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return;
+    th.querySelectorAll("[data-v]").forEach((x) => x.setAttribute("aria-checked", String(x === b)));
+    const v = b.dataset.v === "system" ? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : b.dataset.v;
+    document.documentElement.dataset.theme = v; localStorage.setItem("af-c-theme", v); });
+  paintIcons();
+</script>
+</body>
+</html>

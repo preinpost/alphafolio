@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>새 대화 · Agent Canvas</title>
+<link rel="stylesheet" href="assets/canvas.css" />
+</head>
+<body data-page="chat" data-empty>
+<div class="app">
+  <nav data-rail></nav>
+  <main class="main">
+    <div class="wrap">
+      <header class="topbar">
+        <button class="icon-btn mob" data-open="drawer" aria-label="대화 목록"><i data-i="menu"></i></button>
+        <div class="title"><b>새 대화</b></div>
+        <span class="status">Claude Sonnet</span>
+        <a class="icon-btn mob" href="chat-new.html" aria-label="새 대화"><i data-i="plus"></i></a>
+      </header>
+
+      <section class="empty-chat">
+        <span class="orb lg"></span>
+        <h2>무엇을 <em>도와</em>드릴까요?</h2>
+        <p>계좌·가계부·매매일지를 같이 봅니다. 주문과 감시는 확인 카드로 묻고, 누르기 전엔 실행하지 않습니다.</p>
+        <div class="starters desk">
+          <a class="starter" href="chat.html"><span class="ic"><i data-i="trend"></i></span><span><b>삼성전자 얼마야</b><small>시세 조회</small></span></a>
+          <a class="starter" href="chat.html"><span class="ic"><i data-i="pie"></i></span><span><b>내 보유 종목 점검해줘</b><small>포트폴리오</small></span></a>
+          <a class="starter" href="chat.html"><span class="ic"><i data-i="wallet"></i></span><span><b>이번 달 지출 얼마나 썼어?</b><small>가계부</small></span></a>
+          <a class="starter" href="chat.html"><span class="ic"><i data-i="chat"></i></span><span><b>오늘 증시 주도주 어디야?</b><small>시장 요약</small></span></a>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<div data-composer data-chips-mobile data-chips="삼성전자 얼마야|내 보유 종목 점검해줘|이번 달 지출 얼마나 썼어?|오늘 증시 주도주 어디야?"></div>
+<nav data-tabbar></nav>
+<aside class="drawer" id="drawer" aria-label="대화 목록"></aside>
+<script src="assets/canvas.js"></script>
+</body>
+</html>

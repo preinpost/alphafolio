@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>투자 — Alphafolio B</title>
+<link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="portfolio">
+<main class="app">
+  <header class="topbar">
+    <h1>투자</h1>
+    <span class="sub">계좌 4곳 · 11월 6일 14:32 갱신</span>
+    <span class="spacer"></span>
+    <button class="btn xs line" aria-label="새로고침" data-icon="refresh" data-toast="새로 불러왔습니다"><span class="desktop-only">새로고침</span></button>
+  </header>
+
+  <div class="section desk-grid">
+    <div class="col">
+      <!-- 총자산 -->
+      <section class="card" style="order:1" aria-labelledby="nw-label">
+        <div class="eyebrow" id="nw-label">총자산</div>
+        <div class="big-num num" style="margin-top:4px"><span data-count="487326410">0</span><small>원</small></div>
+        <div class="deltas num">
+          <span class="up"><span>전일 대비</span>+1,842,300원 (+0.38%)</span>
+          <span class="up"><span>이번 달</span>+4,128,400원 (+0.85%)</span>
+        </div>
+        <div class="num" style="font-size:13px;margin-top:6px"><span class="muted">주식 평가손익</span> <b class="up">+52,418,200원</b></div>
+        <div class="seg sm" style="margin-top:14px" role="group" aria-label="차트 기간">
+          <button data-range="31">1개월</button><button class="on" data-range="92">3개월</button><button data-range="183">6개월</button><button data-range="366">1년</button>
+        </div>
+        <div class="nw-chart" id="chart" role="img" aria-label="총자산 추이"></div>
+        <div class="nw-foot"><span>점선: 계좌 구성 변경 — 그 사이는 비교하지 않습니다 · <span style="color:var(--warn)">○</span> 일부 계좌 누락</span></div>
+        <div class="nw-foot"><span id="chartRange" class="num">8월 6일 → 11월 6일</span><span>입출금 포함 · 평일 16시 스냅샷</span></div>
+      </section>
+
+      <!-- 보유 자산 -->
+      <section class="card" style="order:4" aria-labelledby="hold-title">
+        <div class="card-h" style="flex-wrap:wrap;gap:8px">
+          <h2 id="hold-title">보유 자산 <span class="muted num" id="holdCount" style="font-weight:500;font-size:14px"></span></h2>
+          <span id="acctPill"></span>
+          <span class="spacer"></span>
+          <div class="seg sm inline" role="group" aria-label="보기 방식"><button class="on" id="vAcct">계좌별</button><button id="vSym">종목별</button></div>
+        </div>
+        <div class="tools">
+          <label class="search"><span data-icon="search"></span><span class="sr">종목 검색</span><input class="input sm" type="search" id="q" placeholder="종목명·티커 검색" autocomplete="off" /></label>
+          <label><span class="sr">정렬</span><select class="select sm" id="sort"><option value="value">평가금액순</option><option value="pnl">수익률순</option><option value="name">이름순</option></select></label>
+        </div>
+        <div class="chips flush inset" style="margin-top:10px" role="group" aria-label="자산 종류" data-one id="kinds">
+          <button class="chip sm on" data-k="all">전체</button><button class="chip sm" data-k="kr">국내주식</button><button class="chip sm" data-k="us">해외주식</button><button class="chip sm" data-k="crypto">코인</button><button class="chip sm" data-k="manual">직접 입력</button>
+        </div>
+        <div id="holdings" role="list" style="margin-top:6px"></div>
+        <button class="row-more" id="dustBtn"></button>
+        <button class="row-more" data-open="manual" onclick="manualNew()" data-icon="plus">직접 입력 자산 추가</button>
+      </section>
+    </div>
+
+    <div class="col">
+      <!-- 자산 배분 -->
+      <section class="card" style="order:2">
+        <div class="card-h"><h2>자산 배분</h2></div>
+        <div class="stackbar" role="img" aria-label="국내주식 46%, 해외주식 21%, 코인 12%, 현금성 15%, 기타 6%">
+          <span style="flex:46;background:#5b4dff"></span><span style="flex:21;background:#a35bff;animation-delay:.08s"></span><span style="flex:12;background:#f59f00;animation-delay:.16s"></span><span style="flex:15;background:#12b886;animation-delay:.24s"></span><span style="flex:6;background:#8b95a1;animation-delay:.32s"></span>
+        </div>
+        <div class="legend num">
+          <div><i style="background:#5b4dff"></i>국내주식<b>46%</b></div>
+          <div><i style="background:#a35bff"></i>해외주식<b>21%</b></div>
+          <div><i style="background:#f59f00"></i>코인<b>12%</b></div>
+          <div><i style="background:#12b886"></i>현금성<b>15%</b></div>
+          <div><i style="background:#8b95a1"></i>기타<b>6%</b></div>
+        </div>
+      </section>
+
+      <!-- 계좌 -->
+      <section class="card" style="order:3">
+        <div class="card-h"><h2>계좌</h2><span class="eyebrow">누르면 해당 계좌만</span></div>
+        <div id="accts"></div>
+      </section>
+
+      <!-- 미체결 주문 -->
+      <section class="card" style="order:5">
+        <div class="card-h"><h2>미체결 주문 <span class="muted num" style="font-weight:500;font-size:14px">2</span></h2></div>
+        <div class="list-row" id="oo1">
+          <span class="pill down" style="flex:none">매도</span>
+          <div class="main"><div class="t">SK하이닉스</div><div class="s num">3주 · 218,500 · 접수</div></div>
+          <button class="btn xs line" data-open="cancel">취소</button>
+        </div>
+        <div class="list-row">
+          <span class="pill up" style="flex:none">매수</span>
+          <div class="main"><div class="t">BTCUSDT</div><div class="s num">0.012 · 67,400 · NEW</div></div>
+          <button class="btn xs line" data-open="cancel">취소</button>
+        </div>
+      </section>
+
+      <!-- 화폐별 -->
+      <section class="card" style="order:6">
+        <div class="card-h"><h2>화폐별</h2></div>
+        <div class="list-row"><div class="main"><div class="t">원화</div></div><div class="r num"><div class="t">331,804,210원</div><div class="s">68%</div></div></div>
+        <div class="list-row"><div class="main"><div class="t">달러</div></div><div class="r num"><div class="t">$74,120.38</div><div class="s">≈ 102,450,100원 · 21%</div></div></div>
+        <div class="list-row"><div class="main"><div class="t">코인 (USDT 환산)</div></div><div class="r num"><div class="t">38,442.10 USDT</div><div class="s">≈ 53,072,100원 · 11%</div></div></div>
+        <div class="list-row"><div class="main"><div class="t">예수금</div><div class="s">주문에 바로 쓸 수 있는 현금</div></div><div class="r num"><div class="t">7,624,000원</div><div class="s">$1,204.50</div></div></div>
+      </section>
+
+      <!-- 시세 조회 -->
+      <section class="card" style="order:7">
+        <div class="card-h"><h2>시세 조회</h2></div>
+        <form id="quoteForm" style="display:flex;gap:8px">
+          <label style="flex:1"><span class="sr">종목코드 또는 티커</span><input class="input" id="quoteQ" placeholder="종목코드 또는 티커 (예: 005930, AAPL)" value="005930" /></label>
+          <button class="btn primary" style="height:48px">조회</button>
+        </form>
+        <div id="quoteOut" hidden style="margin-top:14px;padding:16px;border-radius:16px;background:var(--bg-sunk)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:16px">삼성전자 <span class="muted num" style="font-weight:500;font-size:13px">005930 · KRX</span></b></div>
+          <div class="big-num num" style="font-size:28px;margin-top:4px">61,400<small style="font-size:16px">원</small></div>
+          <div class="num up" style="font-size:13px;font-weight:600">전일 대비 +1.32%</div>
+          <a class="btn soft block sm" style="margin-top:12px" href="chat.html">챗에서 분석·주문 준비하기</a>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<!-- 직접 입력 자산 추가·수정 -->
+<div class="sheet" id="sheet-manual" role="dialog" aria-labelledby="manualTitle">
+  <div class="grab"></div>
+  <div class="sheet-h"><h3 id="manualTitle">직접 입력 자산</h3><button class="icon-btn" data-close aria-label="닫기" data-icon="x"></button></div>
+  <p class="hint" style="margin:4px 0 0">API가 없는 곳(은행 예금·연금·부동산·다른 거래소)의 금액. 저장하면 총자산·배분·계좌(“직접 입력”)에 바로 들어갑니다.</p>
+  <label class="field"><span>이름</span><input class="input" id="mName" placeholder="이름 (예: 주택청약, 퇴직연금)" /></label>
+  <div class="field"><span>종류</span><div class="pick" id="mKind"><button>예금·현금</button><button class="on">연금</button><button>부동산</button><button>기타 투자</button><button>기타</button></div></div>
+  <div class="row2">
+    <label class="field"><span>금액</span><input class="input num" id="mAmt" inputmode="decimal" placeholder="금액" /></label>
+    <div class="field"><span>통화</span><div class="seg"><button class="on">원</button><button>달러</button></div></div>
+  </div>
+  <label class="field"><span>메모 (선택)</span><input class="input" placeholder="메모 (선택)" /></label>
+  <div class="actions">
+    <button class="btn danger" id="mDel" style="flex:0 0 auto" data-close data-toast="퇴직연금 DC을(를) 지웠습니다">삭제</button>
+    <button class="btn" data-close>취소</button>
+    <button class="btn primary" data-close data-toast="저장했습니다">저장</button>
+  </div>
+</div>
+
+<!-- 미체결 주문 취소 확인 -->
+<div class="sheet" id="sheet-cancel" role="dialog" aria-label="주문 취소">
+  <div class="grab"></div>
+  <h3>주문을 취소할까요?</h3>
+  <p class="lead num">SK하이닉스 매도 3주 · 218,500 · 한국투자</p>
+  <div class="actions"><button class="btn" data-close>그대로 두기</button><button class="btn danger" data-close data-toast="주문을 취소했습니다">주문 취소</button></div>
+</div>
+
+<script src="assets/app.js"></script>
+<script>
+  /* ---------- mock data ---------- */
+  const A = { kis: ["한국투자", "#e5292f"], toss: ["토스증권", "#3182f6"], bn: ["Binance", "#f0b90b"], manual: ["직접 입력", "#8b95a1"] };
+  const H = [
+    ["SK하이닉스", "000660", "kis", "kr", 218500, 87400000, 38.3, "400주"],
+    ["삼성전자", "005930", "kis", "kr", 61400, 42980000, 4.2, "700주"],
+    ["삼성전자", "005930", "toss", "kr", 61400, 6140000, -1.8, "100주"],
+    ["KODEX 200", "069500", "kis", "kr", 35210, 21126000, 6.1, "600주"],
+    ["카카오", "035720", "toss", "kr", 37850, 7570000, -22.4, "200주"],
+    ["NVIDIA", "NVDA", "toss", "us", "$142.80", 49280000, 51.2, "250주"],
+    ["Tesla", "TSLA", "toss", "us", "$231.40", 22790000, -8.4, "70주"],
+    ["Apple", "AAPL", "kis", "us", "$226.10", 30380000, 12.9, "95주"],
+    ["비트코인", "BTC", "bn", "crypto", "$68,920", 37980000, 21.6, "0.4 BTC"],
+    ["이더리움", "ETH", "bn", "crypto", "$2,584", 16030000, -4.1, "4.5 ETH"],
+    ["퇴직연금 DC", "연금", "manual", "manual", null, 29200000, null, "직접 입력"],
+    ["주택청약", "예금·현금", "manual", "manual", null, 18400000, null, "직접 입력"],
+  ];
+  const DUST = [["PEPE", "PEPE"], ["SHIB", "SHIB"], ["BNB 잔량", "BNB"]];
+  const won = n => Math.round(n).toLocaleString("ko-KR") + "원";
+  const pct = n => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toFixed(1) + "%";
+  let only = null, view = "acct", kind = "all", sortBy = "value", qs = "", dustOpen = false;
+
+  /* 계좌 */
+  const SRC = [["kis", 181886000, "정상", "", "국내 · 해외 · 예수금"], ["toss", 85780000, "일부 누락", "warn", "해외 시세 지연 1종목"], ["bn", 54010000, "정상", "", "현물 · 선물 · Earn"], ["manual", 47600000, "", "", "2건"]];
+  const total = SRC.reduce((a, s) => a + s[1], 0);
+  function renderAccts() {
+    accts.innerHTML = SRC.map(([k, v, st, tone, d]) => `<button class="acct-row ${only === k ? "on" : ""}" data-acct="${k}" aria-pressed="${only === k}">
+      <span class="logo-sq" style="background:${A[k][1]};width:36px;height:36px;font-size:12px">${A[k][0].slice(0, 2)}</span>
+      <span class="main"><span class="t">${A[k][0]}${st && st !== "정상" ? `<span class="tag ${tone}">${st}</span>` : ""}</span><span class="s">${d}</span></span>
+      <span class="r num">${won(v)}<small>${(v / total * 100).toFixed(1)}%</small></span></button>`).join("");
+  }
+  accts.addEventListener("click", e => { const b = e.target.closest("[data-acct]"); if (!b) return; only = only === b.dataset.acct ? null : b.dataset.acct; render(); });
+
+  function row(h, i) {
+    const [n, t, a, k, price, val, p, qty] = h;
+    const manual = a === "manual";
+    const tag = manual ? "button" : "div";
+    return `<${tag} class="hold-row" role="listitem" ${manual ? `data-open="manual" data-i="${i}" title="눌러서 금액 고치기"` : ""}>
+      <span class="logo-sq" style="background:${A[a][1]};font-size:11px">${n.slice(0, 2)}</span>
+      <span style="min-width:0"><div class="t">${n}</div><div class="s num">${manual ? t + " · 직접 입력" : `${t} · ${qty}${view === "sym" ? "" : ""}`}</div></span>
+      <span class="c-price num">${price == null ? "" : typeof price === "number" ? price.toLocaleString("ko-KR") : price}</span>
+      <span class="r num"><div class="t">${won(val)}</div><div class="s ${p == null ? "muted" : p >= 0 ? "up" : "down"}">${p == null ? (manual ? "직접 입력" : "손익 없음") : pct(p)}</div></span>
+    </${tag}>`;
+  }
+  function render() {
+    renderAccts();
+    acctPill.innerHTML = only ? `<span class="filter-pill">${A[only][0]}만<button aria-label="계좌 필터 해제" onclick="only=null;render()">${ICONS.x.replace("<svg", '<svg width="13" height="13"')}</button></span>` : "";
+    let rows = H.map((h, i) => [h, i]).filter(([h]) => (!only || h[2] === only) && (kind === "all" || h[3] === kind) && (!qs || (h[0] + h[1]).toLowerCase().includes(qs)));
+    if (view === "sym") { // 종목별 — 같은 종목은 합친다
+      const m = new Map();
+      rows.forEach(([h, i]) => { const c = m.get(h[1]); if (c) { c[0][5] += h[5]; c[0][7] = "2개 계좌"; } else m.set(h[1], [[...h], i]); });
+      rows = [...m.values()];
+    }
+    const by = { value: (a, b) => b[0][5] - a[0][5], pnl: (a, b) => (b[0][6] ?? -999) - (a[0][6] ?? -999), name: (a, b) => a[0][0].localeCompare(b[0][0], "ko") }[sortBy];
+    rows.sort(by);
+    holdCount.textContent = rows.length;
+    if (!rows.length) { holdings.innerHTML = `<div class="empty">조건에 맞는 자산이 없습니다.</div>`; }
+    else if (view === "acct") {
+      const groups = {};
+      rows.forEach(r => (groups[r[0][2]] ||= []).push(r));
+      holdings.innerHTML = Object.entries(groups).map(([a, rs]) => `<div class="eyebrow" style="margin:12px 0 2px;font-weight:700">${A[a][0]}</div>` + rs.map(([h, i]) => row(h, i)).join("")).join("");
+    } else holdings.innerHTML = rows.map(([h, i]) => row(h, i)).join("");
+    const showDust = kind === "all" || kind === "crypto";
+    dustBtn.hidden = !showDust;
+    dustBtn.innerHTML = dustOpen ? "1달러 미만 코인 접기" : `1달러 미만 코인 ${DUST.length}개 더 보기`;
+    if (dustOpen && showDust) holdings.insertAdjacentHTML("beforeend", DUST.map(([n, t]) => `<div class="hold-row" role="listitem"><span class="logo-sq" style="background:#f0b90b;font-size:11px">${n.slice(0, 2)}</span><span><div class="t">${n}</div><div class="s">${t} · Binance</div></span><span class="c-price"></span><span class="r num"><div class="t">1,120원</div><div class="s muted">$0.81</div></span></div>`).join(""));
+  }
+  vAcct.onclick = () => { view = "acct"; render(); };
+  vSym.onclick = () => { view = "sym"; render(); };
+  kinds.addEventListener("click", e => { const b = e.target.closest("[data-k]"); if (b) { kind = b.dataset.k; render(); } });
+  document.getElementById("sort").onchange = e => { sortBy = e.target.value; render(); };
+  q.oninput = e => { qs = e.target.value.trim().toLowerCase(); render(); };
+  dustBtn.onclick = () => { dustOpen = !dustOpen; render(); };
+  render();
+
+  /* 직접 입력 시트 */
+  window.manualNew = () => { manualTitle.textContent = "직접 입력 자산 추가"; mName.value = ""; mAmt.value = ""; mDel.hidden = true; };
+  holdings.addEventListener("click", e => {
+    const b = e.target.closest("[data-i]"); if (!b) return;
+    const h = H[+b.dataset.i];
+    manualTitle.textContent = "금액 고치기"; mName.value = h[0]; mAmt.value = h[5].toLocaleString("ko-KR"); mDel.hidden = false;
+    mDel.dataset.toast = `${h[0]}을(를) 지웠습니다`;
+  });
+
+  /* 총자산 차트 (mock) */
+  const all = []; let v = 452e6;
+  for (let i = 0; i < 366; i++) { v += Math.sin(i / 9) * 9e5 + Math.cos(i / 23) * 6e5 + 2.1e5; all.push(v); }
+  const k = 487326410 / all[all.length - 1]; all.forEach((p, i) => all[i] = p * k);
+  function chart(days) {
+    const pts = all.slice(-days), W = 360, Hh = 140;
+    const mn = Math.min(...pts), mx = Math.max(...pts);
+    const x = i => i / (pts.length - 1) * W, y = p => 8 + (1 - (p - mn) / (mx - mn)) * (Hh - 16);
+    const gap = Math.floor(pts.length * .58); // 계좌 구성 변경 지점
+    const line = (a, b) => pts.slice(a, b + 1).map((p, j) => `${j ? "L" : "M"}${x(a + j).toFixed(1)},${y(p).toFixed(1)}`).join("");
+    const up = pts[pts.length - 1] >= pts[0];
+    const c = up ? "var(--up)" : "var(--down)";
+    const partial = Math.floor(pts.length * .3);
+    chart_.innerHTML = `<svg viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">
+      <defs><linearGradient id="g1" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity=".2"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient></defs>
+      <path d="${line(0, pts.length - 1)}L${W},${Hh}L0,${Hh}Z" fill="url(#g1)"/>
+      <path d="${line(0, gap)}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      <path d="M${x(gap)},${y(pts[gap])}L${x(gap + 1)},${y(pts[gap + 1])}" stroke="var(--text-4)" stroke-dasharray="3 3" stroke-width="2" vector-effect="non-scaling-stroke"/>
+      <path d="${line(gap + 1, pts.length - 1)}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    </svg><span class="mark" style="left:${x(partial) / W * 100}%;top:${y(pts[partial]) / Hh * 100}%" title="일부 계좌 누락"></span>`;
+    const d = n => { const t = new Date(2026, 10, 6); t.setDate(t.getDate() - n); return `${t.getFullYear() !== 2026 ? t.getFullYear() + "년 " : ""}${t.getMonth() + 1}월 ${t.getDate()}일`; };
+    chartRange.textContent = `${d(days - 1)} → 11월 6일`;
+  }
+  const chart_ = document.getElementById("chart");
+  document.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", () => chart(+b.dataset.range)));
+  chart(92);
+
+  quoteForm.onsubmit = e => { e.preventDefault(); quoteOut.hidden = false; };
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AlphaFolio Next-Gen 프로토타입</title>
+<link rel="stylesheet" href="shared.css" />
+<style>
+	.wrap { max-width: 880px; margin: 0 auto; padding: 60px 24px; }
+	h1 { font-size: 44px; letter-spacing: -.04em; margin: 8px 0; }
+	.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 32px; }
+	.grid a { text-decoration: none; transition: transform .2s var(--ease); } .grid a:hover { transform: translateY(-3px); }
+	.grid h3 { margin: 10px 0 6px; } .grid p { margin: 0; font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+	.icon { font-size: 26px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<div class="eyebrow">Direction A · Agent Canvas</div>
+	<h1>AlphaFolio Next-Gen</h1>
+	<p class="muted">빌드 없이 브라우저에서 바로 여는 클릭 프로토타입. 모든 화면에서 <kbd>⌘K</kbd> / <kbd>Ctrl K</kbd> 팔레트, 우상단 라이트/다크 토글. 데이터는 가상의 샘플입니다. 상세 비전: <a href="../VISION.md">VISION.md</a></p>
+	<div class="grid">
+		<a class="card" href="home.html"><div class="icon">◎</div><h3>1. 브리핑 홈</h3><p>에이전트가 아침 브리핑을 스트리밍하며 생성형 위젯(기여도·알림·예산)을 함께 띄움.</p></a>
+		<a class="card" href="portfolio.html"><div class="icon">▦</div><h3>2. 포트폴리오 딥뷰</h3><p>렌즈 전환 트리맵, 종목 드로어, What-if 슬라이더(환율·섹터·KOSPI), 수익 어트리뷰션.</p></a>
+		<a class="card" href="order.html"><div class="icon">⇅</div><h3>3. 주문 확인 흐름</h3><p>주문 티켓, 영향 미리보기, 길게 눌러 실행, 토큰 만료, 라이브 액티비티, 일지 연결.</p></a>
+		<a class="card" href="timeline.html"><div class="icon">≡</div><h3>4. 머니 타임라인</h3><p>매매·일지·가계부·알림·수입을 하나의 시간축으로. 인라인 AI 인사이트.</p></a>
+	</div>
+</div>
+<script src="shared.js"></script>
+<script>AF.init("");</script>
+</body>
+</html>
