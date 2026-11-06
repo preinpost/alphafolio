@@ -34,9 +34,9 @@ const SOURCE: Record<SecretStatus["source"], { label: string; tone: string }> = 
 };
 
 const THEMES: Array<{ value: ThemeMode; label: string; preview: string; side: string }> = [
-	{ value: "light", label: "라이트", preview: "oklch(0.977 0.004 255)", side: "oklch(0.95 0.006 255)" },
-	{ value: "dark", label: "다크", preview: "oklch(0.165 0.018 258)", side: "oklch(0.205 0.02 258)" },
-	{ value: "system", label: "시스템", preview: "linear-gradient(135deg, oklch(0.977 0.004 255) 50%, oklch(0.165 0.018 258) 50%)", side: "transparent" },
+	{ value: "light", label: "라이트", preview: "#f2f4f6", side: "#ffffff" },
+	{ value: "dark", label: "다크", preview: "#0b0d12", side: "#17191f" },
+	{ value: "system", label: "시스템", preview: "linear-gradient(135deg, #f2f4f6 50%, #0b0d12 50%)", side: "transparent" },
 ];
 
 type Tab = "account" | "connect" | "mcp" | "watch" | "ai" | "display" | "admin";

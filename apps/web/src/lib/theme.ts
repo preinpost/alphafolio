@@ -11,8 +11,8 @@ export type ThemeMode = "light" | "dark" | "system";
 
 export const STORAGE_KEY = "af_theme";
 
-/** 주소창·상태바 색 = styles.css 의 --bg (oklch 0.977 / 0.165 를 hex 로). index.html 인라인 스크립트도 같은 값 */
-const THEME_COLOR = { light: "#f6f8fa", dark: "#090f16" } as const;
+/** 주소창·상태바 색 = styles.css 의 --bg (라이트·다크 배경 hex). index.html 인라인 스크립트도 같은 값 */
+const THEME_COLOR = { light: "#f2f4f6", dark: "#0b0d12" } as const;
 
 export function getThemeMode(): ThemeMode {
 	try {

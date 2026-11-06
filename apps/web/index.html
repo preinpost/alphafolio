@@ -6,7 +6,7 @@
 			name="viewport"
 			content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no"
 		/>
-		<meta name="theme-color" content="#f6f8fa" />
+		<meta name="theme-color" content="#f2f4f6" />
 		<!-- 웹폰트 (styles.css @import) — 연결을 미리 열어 첫 글자가 늦게 바뀌지 않게 -->
 		<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -27,7 +27,7 @@
 						(mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 					if (dark) document.documentElement.classList.add("dark");
 					var meta = document.querySelector('meta[name="theme-color"]');
-					if (meta) meta.setAttribute("content", dark ? "#090f16" : "#f6f8fa");
+					if (meta) meta.setAttribute("content", dark ? "#0b0d12" : "#f2f4f6");
 				} catch (e) {}
 			})();
 		</script>

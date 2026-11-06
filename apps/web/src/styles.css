@@ -11,7 +11,6 @@
 
 /* 웹폰트 — 못 받으면(오프라인 앱) 시스템 글꼴로 내려간다 */
 @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css");
-@import url("https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css");
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
@@ -50,61 +49,78 @@
 /* 글꼴 — 아래 CSS 가 var(--font-*) 로 직접 쓰므로 변수를 항상 내보낸다 */
 @theme static {
   --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
-  --font-display: "SUIT Variable", "SUIT", "Pretendard Variable", "Pretendard", -apple-system, "Apple SD Gothic Neo", system-ui, sans-serif;
+  --font-display: "Pretendard Variable", "Pretendard", -apple-system, "Apple SD Gothic Neo", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 /* ─── 토큰 ─────────────────────────────────────────────────────────────── */
+/*
+ * 시안 B (docs/design/next-gen/option-b-money-timeline) — 밝은 회색 캔버스 위 그림자만 있는 흰 카드,
+ * 바이올렛 브랜드는 주요 버튼·선택·포커스·에이전트에만. 상승=레드 / 하락=블루 (한국 관례).
+ */
 :root {
   color-scheme: light;
 
   /* 기준 (light) */
-  --bg: oklch(0.977 0.004 255);
-  --surface: oklch(1 0 0);
-  --fg: oklch(0.22 0.035 262);
-  --muted: oklch(0.49 0.03 260);
-  --border: oklch(0.92 0.008 255);
-  --accent: oklch(0.55 0.19 262);
+  --bg: #f2f4f6;
+  --surface: #ffffff;
+  --fg: #191f28;
+  --fg-2: #4e5968;
+  /* 보조 글자 — 시안의 #8b95a1 은 흰 바탕 대비가 모자라 한 단계 진하게 */
+  --muted: #6b7684;
+  --faint: #8b95a1;
+  --border: #e5e8eb;
+  --line: rgba(15, 23, 42, 0.07);
+  --accent: #5b4dff;
+  --accent-2: #8b7bff;
 
   /* 도메인 시맨틱 — 상승=레드, 하락=블루 (한국 주식 관례). 손익 숫자에만 쓴다 */
-  --up: oklch(0.57 0.2 25);
-  --down: oklch(0.52 0.17 257);
-  --ok: oklch(0.55 0.13 155);
-  --warn: oklch(0.6 0.13 70);
-  --danger: oklch(0.55 0.2 27);
+  --up: #f04452;
+  --down: #3182f6;
+  --ok: #12b886;
+  --warn: #f59f00;
+  --danger: #f04452;
+  --up-soft: #fdecee;
+  --down-soft: #e8f3ff;
+  --ok-soft: #e6f8f2;
+  --warn-soft: #fff4e0;
 
   /* 데이터 팔레트 (배분·카테고리) */
-  --d1: oklch(0.52 0.16 262);
-  --d2: oklch(0.58 0.15 300);
-  --d3: oklch(0.76 0.14 75);
-  --d4: oklch(0.66 0.11 185);
-  --d5: oklch(0.74 0.02 255);
-  --d6: oklch(0.64 0.15 20);
+  --d1: #5b4dff;
+  --d2: #a35bff;
+  --d3: #f59f00;
+  --d4: #12b886;
+  --d5: #8b95a1;
+  --d6: #f06595;
 
   /* 로고 (Logo.tsx · 파비콘과 같은 도형) */
-  --logo-bg: oklch(0.2 0.025 255);
-  --logo-fg: oklch(0.94 0.01 255);
-  --logo-bar: oklch(0.72 0.14 252);
+  --logo-bg: #1b2030;
+  --logo-fg: #eef0f4;
+  --logo-bar: #8b7bff;
 
-  --btn-bg: var(--fg);
-  --btn-fg: var(--surface);
-  --btn-hover: oklch(0.32 0.045 262);
+  /* 주요 버튼 — 브랜드 바이올렛 (파랑은 하락색이라 버튼 채움에 쓰지 않는다) */
+  --btn-bg: var(--accent);
+  --btn-fg: #ffffff;
+  --btn-hover: #4b3df0;
 
   /* 파생 */
-  --sunken: color-mix(in oklch, var(--fg) 3.5%, var(--surface));
-  --hover: color-mix(in oklch, var(--fg) 5%, transparent);
-  --selected: color-mix(in oklch, var(--fg) 8%, transparent);
-  --accent-soft: color-mix(in oklch, var(--accent) 12%, var(--surface));
+  --sunken: #e9ecf0;
+  --hover: color-mix(in srgb, var(--fg) 5%, transparent);
+  --selected: color-mix(in srgb, var(--fg) 7%, transparent);
+  --accent-soft: #efedff;
   /* Tailwind 의 --shadow-* 와 겹치지 않게 접두사를 붙인다 */
-  --af-shadow-sm: 0 1px 2px color-mix(in oklch, var(--fg) 6%, transparent);
-  --af-shadow-md: 0 8px 24px -8px color-mix(in oklch, var(--fg) 18%, transparent), 0 2px 6px color-mix(in oklch, var(--fg) 6%, transparent);
+  --af-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(15, 23, 42, 0.04);
+  --af-shadow-md: 0 10px 40px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  --r-sm: 8px;
-  --r: 12px;
-  --r-lg: 16px;
+  --r-sm: 12px;
+  --r: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
   --sidebar-w: 256px;
   --topbar-h: 56px;
-  --tabbar-h: 58px;
+  --tabbar-h: 60px;
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
 
@@ -115,22 +131,22 @@
 
   /* 예전 이름 (--c-*) — 유틸리티로 그린 컴포넌트·SVG 용 별칭 */
   --c-canvas: var(--bg);
-  --c-sidebar: color-mix(in oklch, var(--bg) 60%, var(--sunken));
+  --c-sidebar: color-mix(in srgb, var(--surface) 50%, var(--bg));
   --c-card: var(--surface);
   --c-line: var(--border);
   --c-ink: var(--fg);
   --c-muted: var(--muted);
-  --c-faint: color-mix(in oklch, var(--muted) 86%, var(--surface));
+  --c-faint: var(--faint);
   --c-accent: var(--accent);
-  --c-accent-ink: var(--surface);
+  --c-accent-ink: #ffffff;
   --c-accent-soft: var(--accent-soft);
-  --c-bubble: color-mix(in oklch, var(--fg) 7%, var(--bg));
+  --c-bubble: var(--sunken);
   --c-hover: var(--hover);
   --c-selected: var(--selected);
   --c-inset: var(--sunken);
-  --c-code-bg: color-mix(in oklch, var(--accent) 9%, var(--surface));
-  --c-code-border: color-mix(in oklch, var(--accent) 26%, var(--border));
-  --c-code-text: color-mix(in oklch, var(--accent) 85%, var(--fg));
+  --c-code-bg: var(--sunken);
+  --c-code-border: transparent;
+  --c-code-text: var(--fg-2);
   --c-danger: var(--danger);
   --c-success: var(--ok);
   --c-up: var(--up);
@@ -140,32 +156,42 @@
 .dark {
   color-scheme: dark;
 
-  --bg: oklch(0.165 0.018 258);
-  --surface: oklch(0.205 0.02 258);
-  --fg: oklch(0.94 0.008 255);
-  --muted: oklch(0.72 0.02 258);
-  --border: oklch(0.29 0.02 258);
-  --accent: oklch(0.72 0.14 252);
+  --bg: #0b0d12;
+  --surface: #17191f;
+  --fg: #f2f4f6;
+  --fg-2: #b0b8c1;
+  --muted: #8f99a5;
+  --faint: #6b7380;
+  --border: #262931;
+  --line: rgba(255, 255, 255, 0.06);
+  --accent: #7d70ff;
+  --accent-2: #a79dff;
 
   /* 다크에서도 상태 색의 대비가 떨어지지 않게 따로 맞춘다 */
-  --up: oklch(0.69 0.19 25);
-  --down: oklch(0.72 0.13 250);
-  --ok: oklch(0.74 0.14 155);
-  --warn: oklch(0.8 0.13 75);
-  --danger: oklch(0.7 0.18 25);
+  --up: #ff5a66;
+  --down: #4c9aff;
+  --ok: #20c997;
+  --warn: #fab005;
+  --danger: #ff5a66;
+  --up-soft: rgba(255, 90, 102, 0.14);
+  --down-soft: rgba(76, 154, 255, 0.14);
+  --ok-soft: rgba(18, 184, 134, 0.14);
+  --warn-soft: rgba(245, 159, 0, 0.14);
 
-  --d1: oklch(0.68 0.14 258);
-  --d2: oklch(0.7 0.13 300);
-  --d3: oklch(0.8 0.13 75);
-  --d4: oklch(0.74 0.1 185);
-  --d5: oklch(0.6 0.02 255);
-  --d6: oklch(0.7 0.14 20);
+  --d1: #7d70ff;
+  --d2: #b77dff;
+  --d3: #fab005;
+  --d4: #20c997;
+  --d5: #6b7380;
+  --d6: #f783ac;
 
-  --btn-hover: oklch(0.84 0.01 255);
-  --sunken: color-mix(in oklch, var(--bg) 55%, var(--surface));
-  --af-shadow-md: 0 10px 30px -10px oklch(0 0 0 / 0.55), 0 2px 6px oklch(0 0 0 / 0.3);
+  --btn-hover: #8f84ff;
+  --sunken: #101217;
+  --accent-soft: rgba(125, 112, 255, 0.16);
+  --af-shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --af-shadow-md: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
 
-  --c-bubble: color-mix(in oklch, var(--fg) 10%, var(--bg));
+  --c-bubble: #1f2229;
 }
 
 /* ─── 베이스 ───────────────────────────────────────────────────────────── */
@@ -199,6 +225,7 @@ body {
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
