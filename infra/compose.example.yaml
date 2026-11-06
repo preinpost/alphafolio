@@ -18,10 +18,12 @@ name: alphafolio
 
 services:
   app:
-    # 금융 앱이라 latest 대신 버전을 고정한다 (Actions → Bump & release 로 나온 버전)
-    # 로컬 빌드로 띄우려면: image: alphafolio:local + pull_policy: missing  (task docker:build)
-    image: ghcr.io/preinpost/alphafolio:latest
-    pull_policy: always
+    # 금융 앱이라 latest 대신 버전을 고정한다 — X.Y.Z 를 Actions → Bump & release 로 나온 버전으로 바꾼다
+    # (GitHub Release 태그에서 앞의 v 를 뗀 값, 예: 0.0.41). 버전 올리기 = 이 태그만 바꾸고 docker compose up -d.
+    # 고정 태그는 내용이 바뀌지 않으므로 missing — 로컬에 없을 때만 받는다.
+    # 로컬 빌드로 띄우려면: image: alphafolio:local  (task docker:build)
+    image: ghcr.io/preinpost/alphafolio:X.Y.Z
+    pull_policy: missing
     init: true              # PID 1 = tini — 시그널·좀비 처리
     restart: unless-stopped
     ports:

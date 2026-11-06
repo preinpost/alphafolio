@@ -1,4 +1,4 @@
-# 재사용 — typecheck · 단위 테스트 · 웹 빌드
+# 재사용 — typecheck · 단위 테스트 · 웹 빌드 · 앱 번들 복사 · 의존성 감사
 #
 # ci.yml(PR·푸시)과 bump.yml(릴리스 전 검사)이 같은 검사를 쓴다.
 # 스모크(task smoke)는 실제 D1 과 LLM 키가 필요해 CI 에서 돌리지 않는다 — 로컬 `task check` 전용.
@@ -38,3 +38,19 @@ jobs:
       - run: pnpm -r --if-present typecheck
       - run: pnpm -r --if-present test
       - run: pnpm --filter @alphafolio/web build
+
+      # iOS 앱(apps/mobile) — 네이티브 툴체인 없이 되는 데까지만: 앱용 웹 번들 빌드 → cap copy ios
+      # (Taskfile mobile:build 와 같은 경로. cap sync·xcodebuild 는 macOS 가 필요해 로컬 전용)
+      - name: mobile bundle (cap copy ios)
+        env:
+          VITE_AF_API_BASE: http://localhost:8080
+        run: |
+          pnpm --filter @alphafolio/web exec vite build --outDir ../mobile/www --emptyOutDir
+          cd apps/mobile && pnpm exec cap copy ios
+          test -f ios/App/App/public/index.html
+
+      # 런타임 의존성의 알려진 취약점 — high 이상만 보고, 실패시키지 않는다
+      # (고칠 수 있는 업그레이드는 dependabot 이 PR 로 올린다. 막아야 할 때는 continue-on-error 를 뗀다)
+      - name: pnpm audit (prod, high+)
+        continue-on-error: true
+        run: pnpm audit --prod --audit-level high

@@ -59,8 +59,8 @@ COPY --from=web /build/apps/web/dist apps/web/dist
 COPY agent-config/ /app/agent-config/
 
 # pi 확장 설치 (web_search·fetch_content 등). pi 는 <agentDir>/npm/node_modules 에서 찾는다.
-# 락파일이 커밋돼 있어 빌드가 재현 가능하다.
-RUN cd /app/agent-config/npm && npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+# 락파일이 커밋돼 있어 빌드가 재현 가능하다. npm ci 만 쓴다 — 락파일과 어긋나면 빌드가 실패해야 한다.
+RUN cd /app/agent-config/npm && npm ci --no-audit --no-fund
 
 # 세션·에이전트 상태 (볼륨 마운트 지점).
 # 가계부 데이터는 D1(원격)에 있으므로 이 볼륨에는 대화 이력만 들어간다.

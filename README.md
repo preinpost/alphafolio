@@ -104,14 +104,9 @@ docker compose up -d
 (b)는 서버가 기동 시 auth.json을 쓰기 가능한 `/data`로 복사해서 쓴다 — pi 자격증명 스토어가
 파일 옆에 락 디렉터리를 만들기 때문에 읽기 전용 마운트를 직접 쓸 수 없다.
 
-## 스파이크 (Phase 0, 검증 완료)
+## 스파이크
 
-```bash
-pnpm spike:sdk            # pi SDK 인프로세스 세션 + customTool
-pnpm spike:d1             # D1 REST 왕복
-pnpm spike:agent-ledger   # 자연어 → ledger_* → D1
-node spike/00-d1-doctor.ts   # D1 자격증명 진단 (401/403 원인 좁히기)
-```
+`spike/` 는 Phase 0 검증 스크립트 모음이다 (기록: [docs/history/plan-archive.md](docs/history/plan-archive.md) §13). 지금 쓰는 것은 D1 자격증명 진단뿐 — `task d1:doctor`.
 
 ## 환경변수
 

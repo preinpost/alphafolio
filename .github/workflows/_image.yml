@@ -8,6 +8,9 @@
 #   latest=true     → + latest
 #   그 외           → sha-<short>
 # 라벨(org.opencontainers.image.source 등)이 GHCR 패키지를 저장소에 연결한다.
+#
+# 푸시 전에 Trivy 로 이미지를 검사한다 (OS·npm 패키지의 HIGH/CRITICAL, 고칠 버전이 있는 것만).
+# 결과는 로그·잡 요약에 남기고 빌드를 막지는 않는다 — 고칠 수 없는 베이스 이미지 취약점으로 배포가 막히지 않게.
 
 name: image
 
@@ -69,6 +72,34 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=raw,value=latest,enable=${{ inputs.latest }}
             type=sha,format=short
+
+      # 푸시 전에 같은 캐시로 로컬 이미지를 만들어 검사한다 (두 번째 빌드는 캐시 적중)
+      - name: build for scan
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: alphafolio:scan
+          cache-from: type=gha
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 — 서드파티라 SHA 로 고정 (2026-03 태그 변조 사고)
+        continue-on-error: true
+        with:
+          image-ref: alphafolio:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1" # continue-on-error 와 함께 — 발견 시 단계만 실패로 표시된다
+          format: table
+          output: trivy.txt
+
+      - name: Trivy summary
+        if: always()
+        run: |
+          [ -f trivy.txt ] || exit 0
+          { echo '### Trivy (HIGH/CRITICAL, fixable)'; echo '```'; cat trivy.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - id: build
         uses: docker/build-push-action@v7

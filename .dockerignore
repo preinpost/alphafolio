@@ -10,3 +10,10 @@ apps/mobile/ios
 spike
 *.log
 .DS_Store
+
+# 런타임·웹 빌드에 필요 없는 것 (테스트·개발 스크립트·문서)
+**/test
+**/*.test.ts
+packages/broker/scripts
+apps/server/scripts
+docs

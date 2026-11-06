@@ -1,0 +1,44 @@
+# 의존성 업데이트 — 주 1회, 생태계마다 PR 하나로 묶는다.
+#
+# pnpm-workspace.yaml 의 minimumReleaseAge(1일)와 같은 취지로 cooldown 을 둔다 (게시 직후 릴리스 회피).
+# 보안 업데이트는 그룹·주기와 무관하게 따로 올라온다.
+
+version: 2
+updates:
+  - package-ecosystem: npm # pnpm 락파일도 이 생태계로 처리된다
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
+
+  # pi 확장 (agent-config/npm — 컨테이너에서 npm ci 로 설치)
+  - package-ecosystem: npm
+    directory: /agent-config/npm
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    cooldown:
+      default-days: 3
+    groups:
+      agent-extensions:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    groups:
+      actions:
+        patterns: ["*"]
