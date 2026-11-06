@@ -1238,11 +1238,6 @@ html.ua-keyboard .hide-on-keyboard {
     color: var(--accent);
     background: var(--accent-soft);
   }
-  .badge.solid {
-    background: var(--fg);
-    color: var(--surface);
-    border-color: var(--fg);
-  }
 
   /* 스위치 (role="switch" aria-checked) */
   .switch {
@@ -1481,18 +1476,6 @@ html.ua-keyboard .hide-on-keyboard {
     text-align: right;
     font-variant-numeric: tabular-nums;
     overflow-wrap: anywhere;
-  }
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 14px;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-  .legend span {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
   }
 
   .notice {
@@ -2144,33 +2127,6 @@ html.ua-keyboard .hide-on-keyboard {
   .side-tag.sell {
     color: var(--down);
     background: var(--down-soft);
-  }
-  .cond {
-    margin: 12px 18px 0;
-    padding: 12px 14px;
-    border: 0;
-    border-radius: 14px;
-    background: var(--sunken);
-    font-family: var(--font-mono);
-    font-size: 13.5px;
-    overflow-wrap: anywhere;
-  }
-  .auto-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
-    border-top: 1px solid var(--line);
-  }
-  .auto-row .grow {
-    flex: 1;
-    min-width: 0;
-    font-size: 13.5px;
-  }
-  .auto-row small {
-    display: block;
-    font-size: 12px;
-    color: var(--muted);
   }
 
   /* 첫 화면 */
@@ -3686,27 +3642,6 @@ html.ua-keyboard .hide-on-keyboard {
     background-position: -200% 0;
   }
 }
-@keyframes caret-blink {
-  0%,
-  45% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-/* 스트리밍 단어가 blur 에서 또렷하게 해소된다 */
-@keyframes stream-in {
-  from {
-    opacity: 0;
-    filter: blur(3px);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
-  }
-}
 @keyframes pop-in {
   from {
     opacity: 0;
@@ -3764,25 +3699,6 @@ html.ua-keyboard .hide-on-keyboard {
   animation: shimmer-text 1.6s linear infinite;
 }
 
-/* 스트리밍 텍스트 끝의 깜빡이는 커서 */
-.stream-cursor {
-  display: inline-block;
-  width: 1.5px;
-  height: 1em;
-  margin-left: 1px;
-  vertical-align: -0.15em;
-  border-radius: 999px;
-  background: var(--fg);
-  animation: caret-blink 1s steps(1) infinite;
-}
-
-/* 스트리밍 단어 — fade/blur 해소 */
-.stream-word {
-  display: inline;
-  will-change: filter, opacity;
-  animation: stream-in 260ms ease-out both;
-}
-
 /* 소스 칩·아바타·맨 아래로 버튼 팝인 */
 .pop-in {
   animation: pop-in 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
@@ -3799,9 +3715,6 @@ html.ua-keyboard .hide-on-keyboard {
   .shimmer-text {
     background: none;
     color: var(--fg);
-  }
-  .stream-word {
-    filter: none;
   }
 }
 
