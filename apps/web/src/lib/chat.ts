@@ -12,6 +12,7 @@ import { getToken, wsUrl } from "./auth.ts";
 export interface RunningTool {
 	id: string;
 	name: string;
+	args: unknown;
 }
 
 export interface ChatState {
@@ -120,7 +121,7 @@ export function useChat(opts: ChatOptions): ChatState {
 					setPending("");
 					return;
 				case "tool_start":
-					setRunningTools((t) => [...t, { id: msg.id, name: msg.name }]);
+					setRunningTools((t) => [...t, { id: msg.id, name: msg.name, args: msg.args }]);
 					return;
 				case "tool_end":
 					setRunningTools((t) => t.filter((x) => x.id !== msg.id));

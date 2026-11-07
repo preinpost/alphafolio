@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { UIContentBlock, UIMessage } from "@alphafolio/protocol";
-import { pickThinkingLine, pickToolFlavorLine, type ToolFlavorState } from "../lib/toolFlavor.ts";
+import { toolLabelText, type ToolState } from "../lib/toolLabel.ts";
 import { toast } from "../lib/toast.ts";
 import { CardView } from "./cards/index.tsx";
 import { AlertIcon, ArrowDownIcon, CheckIcon, CopyIcon } from "./icons.tsx";
@@ -117,7 +117,7 @@ export function MessageList({ messages, pending, streaming, runningTools, onSugg
 	// message_end 로 이미 메시지에 들어간 툴 호출은 그 자리에서 진행 상태를 그린다 (칩 중복 방지)
 	const shownToolIds = new Set(messages.flatMap((m) => m.content.flatMap((b) => (b.type === "toolCall" ? [b.id] : []))));
 	const live = streaming ? (
-		<LiveBlocks pending={pending} runningTools={runningTools.filter((t) => !shownToolIds.has(t.id))} seed={String(messages.length)} />
+		<LiveBlocks pending={pending} runningTools={runningTools.filter((t) => !shownToolIds.has(t.id))} />
 	) : null;
 
 	return (
@@ -258,10 +258,10 @@ function Block({ block, busy }: { block: UIContentBlock; busy: boolean }) {
 
 	if (block.type === "toolCall") {
 		// 결과가 없으면 아직 실행 중 — 단, 턴이 끝났는데도 없으면(중지 등) 끝나지 못한 것으로 본다
-		const state: ToolFlavorState = block.result ? (block.result.isError ? "error" : "done") : busy ? "running" : "error";
+		const state: ToolState = block.result ? (block.result.isError ? "error" : "done") : busy ? "running" : "stopped";
 		return (
 			<>
-				<ToolChip name={block.name} state={state} seed={block.id} />
+				<ToolChip name={block.name} args={block.args} state={state} />
 				{block.result?.card && <CardView card={block.result.card} outcome={block.result.outcome} />}
 			</>
 		);
@@ -273,31 +273,33 @@ function Block({ block, busy }: { block: UIContentBlock; busy: boolean }) {
 	return null;
 }
 
-function ToolChip({ name, state, seed }: { name: string; state: ToolFlavorState; seed: string }) {
+function ToolChip({ name, args, state }: { name: string; args: unknown; state: ToolState }) {
+	const failed = state === "error" || state === "stopped";
+	const label = toolLabelText(name, args, state);
 	return (
-		<div className={`tool-chip ${state === "running" ? "running" : state === "error" ? "err" : ""}`}>
-			{state === "running" ? <PixelLoader /> : state === "error" ? <AlertIcon size={14} /> : <CheckIcon size={14} />}
-			<span className={`label ${state === "running" ? "shimmer-text" : ""}`}>{pickToolFlavorLine(name, state, seed, "ko")}</span>
+		<div className={`tool-chip ${state === "running" ? "running" : failed ? "err" : ""}`} title={label} aria-label={label}>
+			{state === "running" ? <PixelLoader /> : failed ? <AlertIcon size={14} /> : <CheckIcon size={14} />}
+			<span className={`label ${state === "running" ? "shimmer-text" : ""}`}>{label}</span>
 		</div>
 	);
 }
 
 /** 아직 message_end 로 확정되지 않은 스트리밍 텍스트 + 실행 중인 툴 + 생각 중 표시 */
-function LiveBlocks({ pending, runningTools, seed }: { pending: string; runningTools: RunningTool[]; seed: string }) {
+function LiveBlocks({ pending, runningTools }: { pending: string; runningTools: RunningTool[] }) {
 	return (
 		<>
 			{pending && <Markdown text={pending} />}
 			{runningTools.length > 0 && (
 				<div className="tools">
 					{runningTools.map((t) => (
-						<ToolChip key={t.id} name={t.name} state="running" seed={t.id} />
+						<ToolChip key={t.id} name={t.name} args={t.args} state="running" />
 					))}
 				</div>
 			)}
 			{!pending && runningTools.length === 0 && (
 				<div className="thinking">
 					<PixelLoader className="text-accent" />
-					<span className="shimmer-text">{pickThinkingLine("running", seed, "ko")}</span>
+					<span className="shimmer-text">답변 준비 중</span>
 				</div>
 			)}
 		</>
