@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseCard, serializeMessages } from "../src/serialize.ts";
+import { innerCalls, parseCard, serializeMessages } from "../src/serialize.ts";
 
 const user = (text: string) => ({ role: "user", content: text });
 const fail = (msg = "Request timed out.") => ({ role: "assistant", content: [], stopReason: "error", errorMessage: msg });
@@ -64,5 +64,35 @@ describe("확장 custom 메시지", () => {
 		const out = serializeMessages([user("오늘 장 왜 안좋니?"), ok("찾아볼게요"), ready, ok("정리하면")]);
 		assert.deepEqual(out.map((m) => m.role), ["user", "assistant", "assistant"]);
 		assert.ok(out.every((m) => !JSON.stringify(m.content).includes("Content fetched")));
+	});
+});
+
+describe("codemode 안에서 부른 툴", () => {
+	it("details.calls 를 결과의 calls 로 넘긴다 (잘린 인자는 빈 인자)", () => {
+		const out = serializeMessages([
+			{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "codemode", arguments: { code: "..." } }] },
+			{
+				role: "toolResult",
+				toolCallId: "c1",
+				content: [{ type: "text", text: "ok" }],
+				details: {
+					calls: [
+						{ id: "c1/1", name: "market_price", args: '{"symbol":"NVDA"}', status: "ok" },
+						{ id: "c1/2", name: "market_news", args: '{"query":"나스…', status: "error" },
+					],
+				},
+			},
+		]);
+		const block = out[0]!.content[0]!;
+		assert.ok(block.type === "toolCall");
+		assert.deepEqual(block.result?.calls, [
+			{ name: "market_price", args: { symbol: "NVDA" } },
+			{ name: "market_news", args: {}, isError: true },
+		]);
+	});
+
+	it("calls 가 없는 결과에는 붙이지 않는다", () => {
+		assert.equal(innerCalls({ kind: "x" }), undefined);
+		assert.equal(innerCalls(undefined), undefined);
 	});
 });

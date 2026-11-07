@@ -45,6 +45,8 @@ interface PiEvent {
 	toolCallId?: string;
 	isError?: boolean;
 	args?: unknown;
+	/** codemode 스크립트 안에서 부른 툴이면 그 codemode 호출 id */
+	parentToolCallId?: string;
 	assistantMessageEvent?: { type: string; delta?: string };
 }
 
@@ -144,6 +146,7 @@ export function attachWebSocket(server: Server, deps: WsDeps): WsHub {
 					id: e.toolCallId ?? "",
 					name: e.toolName ?? "unknown",
 					args: e.args,
+					...(e.parentToolCallId ? { parentId: e.parentToolCallId } : {}),
 				});
 				return;
 			case "tool_execution_end":

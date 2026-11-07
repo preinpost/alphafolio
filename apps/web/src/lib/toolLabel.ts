@@ -219,6 +219,10 @@ const LABELERS: Record<string, Labeler> = {
 	fetch_content: (a) => ({ action: "웹 페이지 읽기", target: urlTarget(a) }),
 	get_search_content: (a) => ({ action: "검색 결과 본문 읽기", target: quoted(str(a.query)) ?? urlTarget(a) }),
 	code_search: (a) => ({ action: "코드 검색", target: firstQuery(a) }),
+	source_check: (a) => ({ action: "출처 확인", target: quoted(str(a.claim)) ?? firstQuery(a) }),
+
+	// pi 메타 툴 — 툴을 찾거나 스크립트로 다른 툴을 부른다. 내부 이름(검색어 "select:…" 등)은 내보내지 않는다
+	tool_search: () => ({ action: "사용할 기능 찾기" }),
 
 	// 외부 MCP — 서버·툴 이름 그대로
 	mcp_call: (a) => {
@@ -229,31 +233,101 @@ const LABELERS: Record<string, Labeler> = {
 	},
 };
 
-/** 모르는 툴: 이름을 사람이 읽기 좋게 ("foo_barBaz" → "foo bar baz") */
-export function humanizeToolName(name: string): string {
-	const s = name
-		.trim()
-		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-		.replace(/[_\-.:/]+/g, " ")
-		.replace(/\s+/g, " ")
-		.trim()
-		.toLowerCase();
-	return s || "도구 실행";
+/** 모르는 툴 — 내부 이름은 보여주지 않는다 */
+export const UNKNOWN_ACTION = "도구 실행";
+
+/** 스크립트로 다른 툴을 부르는 메타 툴 (pi codemode) — 안에서 부르는 툴로 문구를 만든다 */
+export const CODEMODE_TOOL = "codemode";
+const CODEMODE_GENERIC = "데이터 조회·계산";
+const DISCOVERY = "사용할 기능 찾기";
+
+/** codemode 안에서 실제로 부른 툴 (서버가 결과 details.calls 에서 넘긴다) */
+export interface InnerCall {
+	name: string;
+	args: unknown;
 }
 
-export function toolLabel(name: string, args: unknown): ToolLabel {
+/** JS 문자열·숫자 리터럴 하나 */
+const LITERAL = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`$\\]*`|-?\d+(?:\.\d+)?/.source;
+const CALL_RE = /\btools\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([A-Za-z_$][\w$]*)["'`]\s*\])\s*\(\s*(\{[^{}]*\})?/g;
+const PROP_RE = new RegExp(String.raw`([A-Za-z_$][\w$]*|"[^"]*"|'[^']*')\s*:\s*(${LITERAL}|\[(?:\s*(?:${LITERAL})\s*,?)*\])`, "g");
+
+function literalValue(src: string): unknown {
+	const t = src.trim();
+	if (t.startsWith("[")) {
+		const items = [...t.matchAll(new RegExp(LITERAL, "g"))].map((m) => literalValue(m[0]));
+		return items;
+	}
+	if (/^["'`]/.test(t)) return t.slice(1, -1).replace(/\\(.)/g, "$1");
+	const n = Number(t);
+	return Number.isFinite(n) ? n : undefined;
+}
+
+/** 객체 리터럴에서 문자열·숫자 값만 뽑는다 (변수·식은 버린다 — 지어내지 않는다) */
+function literalArgs(obj: string | undefined): Args {
+	const out: Args = {};
+	if (!obj) return out;
+	for (const m of obj.matchAll(PROP_RE)) {
+		const key = m[1]!.replace(/^["']|["']$/g, "");
+		const v = literalValue(m[2]!);
+		if (v !== undefined) out[key] = v;
+	}
+	return out;
+}
+
+/** codemode 스크립트에서 `tools.<이름>({...})` 호출을 정적으로 찾는다 */
+export function parseCodemodeCalls(code: unknown): InnerCall[] {
+	if (typeof code !== "string") return [];
+	const calls: InnerCall[] = [];
+	for (const m of code.matchAll(CALL_RE)) {
+		calls.push({ name: (m[1] ?? m[2])!, args: literalArgs(m[3]) });
+	}
+	return calls;
+}
+
+function summarize(labels: ToolLabel[]): ToolLabel | undefined {
+	if (labels.length === 0) return undefined;
+	const actions = [...new Set(labels.map((l) => l.action))];
+	if (actions.length === 1) {
+		const targets = [...new Set(labels.map((l) => l.target).filter((t): t is string => !!t))];
+		if (targets.length === 0) return { action: actions[0]! };
+		const shown = targets.slice(0, 2).join(", ");
+		return { action: actions[0]!, target: targets.length > 2 ? `${shown} 외 ${targets.length - 2}건` : shown };
+	}
+	const shown = actions.slice(0, 2).join(" · ");
+	return { action: actions.length > 2 ? `${shown} 외 ${actions.length - 2}건` : shown };
+}
+
+function codemodeLabel(a: Args, calls?: readonly InnerCall[]): ToolLabel {
+	const inner = calls && calls.length > 0 ? calls : parseCodemodeCalls(a.code);
+	const labels = inner
+		.filter((c) => c.name !== CODEMODE_TOOL)
+		.map((c) => toolLabel(c.name, c.args));
+	// 아는 툴이 하나라도 있으면 모르는 툴("도구 실행")은 빼고 요약한다
+	const known = labels.filter((l) => l.action !== UNKNOWN_ACTION);
+	const summary = summarize(known.length > 0 ? known : labels);
+	if (summary) return summary;
+	if (typeof a.code === "string" && /\b(searchTools|describeTool|describeNamespace|ALL_TOOLS)\b/.test(a.code)) return { action: DISCOVERY };
+	return { action: CODEMODE_GENERIC };
+}
+
+/**
+ * calls — codemode 안에서 실제로 부른 툴 (끝난 뒤 서버가 넘긴다). 없으면 스크립트를 읽어 짐작한다.
+ */
+export function toolLabel(name: string, args: unknown, calls?: readonly InnerCall[]): ToolLabel {
 	const a: Args = args && typeof args === "object" && !Array.isArray(args) ? (args as Args) : {};
-	const labeler = LABELERS[name.trim()];
-	const label = labeler ? labeler(a) : { action: humanizeToolName(name) };
+	const key = name.trim();
+	const labeler = LABELERS[key];
+	const label = key === CODEMODE_TOOL ? codemodeLabel(a, calls) : labeler ? labeler(a) : { action: UNKNOWN_ACTION };
 	return label.target ? { action: label.action, target: clip(label.target) } : { action: label.action };
 }
 
 /** 화면·aria 에 쓰는 한 줄. 실패·중단이면 동작 뒤에 표시 */
-export function toolLabelText(name: string, args: unknown, state: ToolState): string {
-	const { action, target } = toolLabel(name, args);
+export function toolLabelText(name: string, args: unknown, state: ToolState, calls?: readonly InnerCall[]): string {
+	const { action, target } = toolLabel(name, args, calls);
 	const head = state === "error" ? `${action} 실패` : state === "stopped" ? `${action} 중단됨` : action;
 	return target ? `${head} · ${target}` : head;
 }
 
 /** 이름이 등록된 툴인지 — 테스트용 */
-export const KNOWN_TOOLS: readonly string[] = Object.keys(LABELERS);
+export const KNOWN_TOOLS: readonly string[] = [...Object.keys(LABELERS), CODEMODE_TOOL];

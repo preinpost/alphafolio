@@ -346,6 +346,14 @@ export interface UIToolResult {
 	isError: boolean;
 	card?: UICard;
 	outcome?: CardOutcome;
+	/** codemode 스크립트 안에서 부른 툴 — 화면 문구를 안에서 한 일로 만든다 */
+	calls?: UIInnerCall[];
+}
+
+export interface UIInnerCall {
+	name: string;
+	args: unknown;
+	isError?: boolean;
 }
 
 export type UIContentBlock =
@@ -402,7 +410,8 @@ export type StreamMessage =
 	| ReadyMessage
 	| { type: "text_delta"; delta: string }
 	| { type: "message_end"; messages: UIMessage[] }
-	| { type: "tool_start"; id: string; name: string; args: unknown }
+	/** parentId — codemode 스크립트 안에서 부른 툴이면 그 codemode 호출 id */
+	| { type: "tool_start"; id: string; name: string; args: unknown; parentId?: string }
 	| { type: "tool_end"; id: string; name: string; isError: boolean }
 	| { type: "agent_start" }
 	| { type: "agent_end" }

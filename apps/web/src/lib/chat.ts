@@ -13,6 +13,8 @@ export interface RunningTool {
 	id: string;
 	name: string;
 	args: unknown;
+	/** codemode 스크립트 안에서 부른 툴이면 그 codemode 호출 id — 따로 줄을 만들지 않는다 */
+	parentId?: string;
 }
 
 export interface ChatState {
@@ -121,7 +123,7 @@ export function useChat(opts: ChatOptions): ChatState {
 					setPending("");
 					return;
 				case "tool_start":
-					setRunningTools((t) => [...t, { id: msg.id, name: msg.name, args: msg.args }]);
+					setRunningTools((t) => [...t, { id: msg.id, name: msg.name, args: msg.args, ...(msg.parentId ? { parentId: msg.parentId } : {}) }]);
 					return;
 				case "tool_end":
 					setRunningTools((t) => t.filter((x) => x.id !== msg.id));

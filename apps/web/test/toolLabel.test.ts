@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { humanizeToolName, KNOWN_TOOLS, toolLabel, toolLabelText } from "../src/lib/toolLabel.ts";
+import { KNOWN_TOOLS, parseCodemodeCalls, toolLabel, toolLabelText } from "../src/lib/toolLabel.ts";
 
 /** 서버·확장이 등록하는 툴 전부 (packages/broker·ledger·mcp, pi-web-access) */
 const ALL_TOOLS = [
@@ -17,7 +17,10 @@ const ALL_TOOLS = [
 	"ledger_add", "ledger_list", "ledger_summary", "ledger_update", "ledger_delete", "ledger_budget",
 	"journal_add", "journal_update", "journal_list",
 	"web_enable", "web_search", "fetch_content", "get_search_content",
+	"source_check",
 	"mcp_call",
+	// pi 메타 툴 (agent-config/settings.json defaultTools)
+	"codemode", "tool_search",
 ];
 
 describe("toolLabel", () => {
@@ -64,9 +67,64 @@ describe("toolLabel", () => {
 		assert.ok(t.length <= 40 && t.endsWith("…"));
 	});
 
-	it("모르는 툴은 이름을 풀어 쓴다", () => {
-		assert.equal(humanizeToolName("someNew_tool"), "some new tool");
-		assert.equal(toolLabelText("someNew_tool", { x: 1 }, "done"), "some new tool");
+	it("모르는 툴은 내부 이름 대신 중립 문구", () => {
+		assert.equal(toolLabelText("someNew_tool", { x: 1 }, "done"), "도구 실행");
 		assert.equal(toolLabelText("market_price", null, "done"), "시세 조회");
+	});
+});
+
+describe("codemode", () => {
+	const code = (s: string) => ({ code: s });
+
+	it("'codemode' 라는 이름을 절대 보여주지 않는다", () => {
+		for (const args of [{}, null, code(""), code("return 1"), code("syntax error ((("), code("await tools.unknown_x({})")]) {
+			for (const state of ["running", "done", "error", "stopped"] as const) {
+				assert.doesNotMatch(toolLabelText("codemode", args, state), /codemode|unknown_x/i);
+			}
+		}
+	});
+
+	it("스크립트에서 툴 호출과 리터럴 인자를 읽는다", () => {
+		assert.deepEqual(
+			parseCodemodeCalls(`const r = await tools.market_price({ symbol: "NVDA" });\nconst n = await tools["market_news"]({query:'나스닥', limit: 5});`),
+			[
+				{ name: "market_price", args: { symbol: "NVDA" } },
+				{ name: "market_news", args: { query: "나스닥", limit: 5 } },
+			],
+		);
+		// 변수 인자는 버린다 — 지어내지 않는다
+		assert.deepEqual(parseCodemodeCalls("for (const s of xs) await tools.market_price({ symbol: s })"), [{ name: "market_price", args: {} }]);
+		assert.deepEqual(parseCodemodeCalls(42), []);
+	});
+
+	it("같은 동작이면 대상을 모은다", () => {
+		const c = code(["NVDA", "AAPL", "TSLA", "MSFT"].map((s) => `await tools.market_price({symbol: "${s}"})`).join(";"));
+		assert.equal(toolLabelText("codemode", c, "running"), "시세 조회 · NVDA, AAPL 외 2건");
+		assert.equal(toolLabelText("codemode", code(`await tools.market_price({symbol:"NVDA"})`), "done"), "시세 조회 · NVDA");
+		assert.equal(toolLabelText("codemode", code(`await tools.market_price({symbol:"NVDA"})`), "error"), "시세 조회 실패 · NVDA");
+	});
+
+	it("다른 동작이 섞이면 동작을 나열한다", () => {
+		const c = code(`await tools.market_price({symbol:"NVDA"}); await tools.market_news({query:"x"}); await tools.web_search({query:"y"})`);
+		assert.equal(toolLabelText("codemode", c, "done"), "시세 조회 · 뉴스 검색 외 1건");
+		assert.equal(toolLabelText("codemode", code(`tools.market_price({symbol:"A"}); tools.market_news({})`), "error"), "시세 조회 · 뉴스 검색 실패");
+	});
+
+	it("실제로 부른 툴(calls)이 있으면 그걸 쓴다", () => {
+		assert.equal(
+			toolLabelText("codemode", code("const x = helper(); return x"), "done", [
+				{ name: "portfolio_holdings", args: {} },
+				{ name: "portfolio_holdings", args: {} },
+			]),
+			"보유 종목 불러오기",
+		);
+	});
+
+	it("툴 호출을 못 찾으면 중립 문구", () => {
+		assert.equal(toolLabelText("codemode", code("return 1 + 1"), "done"), "데이터 조회·계산");
+		assert.equal(toolLabelText("codemode", undefined, "running"), "데이터 조회·계산");
+		assert.equal(toolLabelText("codemode", code("await tools.mystery({})"), "done"), "도구 실행");
+		assert.equal(toolLabelText("codemode", code(`return await searchTools("price")`), "done"), "사용할 기능 찾기");
+		assert.equal(toolLabelText("tool_search", { query: "select:market_price" }, "done"), "사용할 기능 찾기");
 	});
 });

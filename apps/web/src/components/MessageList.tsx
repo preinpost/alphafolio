@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { UIContentBlock, UIMessage } from "@alphafolio/protocol";
-import { toolLabelText, type ToolState } from "../lib/toolLabel.ts";
+import { type InnerCall, toolLabelText, type ToolState } from "../lib/toolLabel.ts";
 import { toast } from "../lib/toast.ts";
 import { CardView } from "./cards/index.tsx";
 import { AlertIcon, ArrowDownIcon, CheckIcon, CopyIcon } from "./icons.tsx";
@@ -117,7 +117,7 @@ export function MessageList({ messages, pending, streaming, runningTools, onSugg
 	// message_end 로 이미 메시지에 들어간 툴 호출은 그 자리에서 진행 상태를 그린다 (칩 중복 방지)
 	const shownToolIds = new Set(messages.flatMap((m) => m.content.flatMap((b) => (b.type === "toolCall" ? [b.id] : []))));
 	const live = streaming ? (
-		<LiveBlocks pending={pending} runningTools={runningTools.filter((t) => !shownToolIds.has(t.id))} />
+		<LiveBlocks pending={pending} runningTools={runningTools.filter((t) => !shownToolIds.has(t.id) && !t.parentId)} />
 	) : null;
 
 	return (
@@ -261,7 +261,7 @@ function Block({ block, busy }: { block: UIContentBlock; busy: boolean }) {
 		const state: ToolState = block.result ? (block.result.isError ? "error" : "done") : busy ? "running" : "stopped";
 		return (
 			<>
-				<ToolChip name={block.name} args={block.args} state={state} />
+				<ToolChip name={block.name} args={block.args} state={state} calls={block.result?.calls} />
 				{block.result?.card && <CardView card={block.result.card} outcome={block.result.outcome} />}
 			</>
 		);
@@ -273,9 +273,9 @@ function Block({ block, busy }: { block: UIContentBlock; busy: boolean }) {
 	return null;
 }
 
-function ToolChip({ name, args, state }: { name: string; args: unknown; state: ToolState }) {
+function ToolChip({ name, args, state, calls }: { name: string; args: unknown; state: ToolState; calls?: InnerCall[] }) {
 	const failed = state === "error" || state === "stopped";
-	const label = toolLabelText(name, args, state);
+	const label = toolLabelText(name, args, state, calls);
 	return (
 		<div className={`tool-chip ${state === "running" ? "running" : failed ? "err" : ""}`} title={label} aria-label={label}>
 			{state === "running" ? <PixelLoader /> : failed ? <AlertIcon size={14} /> : <CheckIcon size={14} />}
