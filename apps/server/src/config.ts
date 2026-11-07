@@ -181,7 +181,7 @@ export function loadConfig(): Config {
 
 	return {
 		host: process.env.AF_HOST ?? "0.0.0.0",
-		port: Number(process.env.AF_PORT ?? 8080),
+		port: Number(process.env.AF_PORT ?? 5050),
 		auth: {
 			admin,
 			adminPassword: generatedPassword ? randomBytes(12).toString("base64url") : password,

@@ -8,10 +8,10 @@ import { VitePWA } from "vite-plugin-pwa";
  * 순수 SPA 빌드 — SSR 없음.
  * Capacitor(iOS)가 이 dist를 그대로 webDir로 쓰므로 서버 사이드 렌더링을 도입하면 안 된다 (PLAN.md §8.4).
  *
- * 개발: vite dev 서버(5173)가 /api·/ws 를 서버(8080)로 프록시한다.
+ * 개발: vite dev 서버(5173)가 /api·/ws 를 서버(5050)로 프록시한다.
  * 배포: 서버가 dist를 정적 서빙한다.
  */
-const SERVER_PORT = process.env.AF_PORT ?? "8080";
+const SERVER_PORT = process.env.AF_PORT ?? "5050";
 
 /** 앱 버전 = 루트 package.json (릴리스 워크플로가 올린다). 화면 버전 표시·서버 버전과 비교 (App.tsx) */
 const APP_VERSION = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;

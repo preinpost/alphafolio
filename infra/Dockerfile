@@ -71,14 +71,14 @@ USER 1001
 
 ENV NODE_ENV=production \
     AF_HOST=0.0.0.0 \
-    AF_PORT=8080 \
+    AF_PORT=5050 \
     AF_WEB_DIR=/app/apps/web/dist \
     AF_AGENT_DIR=/app/agent-config \
     PI_CODING_AGENT_DIR=/app/agent-config
 
-EXPOSE 8080
+EXPOSE 5050
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:5050/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "apps/server/src/index.ts"]

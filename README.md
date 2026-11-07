@@ -55,7 +55,7 @@ task setup              # 의존성 + pi 확장(web_search 등) + .env 생성
 task agent:web-config   # (선택) 로컬 pi 의 웹 검색 설정 복사
 
 task dev                # 서버 + 웹 HMR (접속: http://localhost:5173)
-task up / down          # 백그라운드 실행·중지 (단일 포트 8080)
+task up / down          # 백그라운드 실행·중지 (단일 포트 5050)
 task test               # 단위 테스트 (주문 검증·확인 토큰 — 실제 주문 없이)
 task check              # 타입체크 + 테스트 + 빌드 + 스모크
 ```

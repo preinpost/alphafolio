@@ -43,7 +43,7 @@ jobs:
       # (Taskfile mobile:build 와 같은 경로. cap sync·xcodebuild 는 macOS 가 필요해 로컬 전용)
       - name: mobile bundle (cap copy ios)
         env:
-          VITE_AF_API_BASE: http://localhost:8080
+          VITE_AF_API_BASE: http://localhost:5050
         run: |
           pnpm --filter @alphafolio/web exec vite build --outDir ../mobile/www --emptyOutDir
           cd apps/mobile && pnpm exec cap copy ios
