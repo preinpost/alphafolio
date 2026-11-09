@@ -10,7 +10,7 @@
   "dependencies": {
     "@alphafolio/broker": "workspace:*",
     "@alphafolio/ledger": "workspace:*",
-    "@earendil-works/pi-coding-agent": "^1.0.4",
-    "typebox": "^1.3.36"
+    "@earendil-works/pi-coding-agent": "^1.5.0",
+    "typebox": "^1.4.4"
   }
 }
