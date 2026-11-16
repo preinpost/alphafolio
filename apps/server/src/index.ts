@@ -74,7 +74,8 @@ import { TriggerError, TriggerStore } from "./triggers.ts";
 import { Watcher, type WatchEvent } from "./watcher.ts";
 import { OrderRunner } from "./order-runner.ts";
 import { TradeStore } from "./trade-store.ts";
-import { CardOrigins, CardOutcomeStore, outcomeNote } from "./card-outcomes.ts";
+import { CardOrigins, CardOutcomeStore, outcomeNote, tokenNonce } from "./card-outcomes.ts";
+import { announceCardOutcome } from "./card-wake.ts";
 import { TelegramBots } from "./notify/telegram-bot.ts";
 import { handleWatch, watchConfirmSecret, WatchOps, type WatchTokenPayload } from "./watch-api.ts";
 import { createSafeFetch } from "@alphafolio/mcp";
@@ -155,12 +156,20 @@ async function main(): Promise<void> {
 	// 새 결과는 그 카드가 나온 대화의 에이전트에게도 알린다 — 연쇄 카드에서 앞 카드를 눌렀는지 알고 이어 가게
 	const cardOrigins = new CardOrigins();
 	const cardOutcomes = new CardOutcomeStore(join(cfg.dataDir, "card-outcomes.jsonl"), (user, token, outcome) => {
+		const fullNonce = tokenNonce(token) ?? undefined;
+		const who = `user=${user.slice(0, 6)} nonce=${fullNonce?.slice(0, 8) ?? "?"} state=${outcome.state}`;
 		const origin = cardOrigins.get(user, token);
-		if (!origin) return; // 재시작 전에 띄운 카드 — 어느 대화인지 모른다
+		if (!origin) {
+			// 재시작 전에 띄운 카드 — 어느 대화인지 모른다
+			console.info(`[card] 결과 알림 — origin 없음, 기록만 ${who}`);
+			return;
+		}
 		void runtimes
 			.conversation(user, origin.sessionId)
-			.then((conv) => conv?.note("card-outcome", outcomeNote(origin.label, outcome), { state: outcome.state }))
-			.catch((err: unknown) => console.warn(`[card] 에이전트에 결과 알리기 실패: ${err instanceof Error ? err.message : String(err)}`));
+			.then((conv) =>
+				announceCardOutcome(conv, { sessionId: origin.sessionId, noteText: outcomeNote(origin.label, outcome) }, { state: outcome.state, nonce: fullNonce }, who, console),
+			)
+			.catch((err: unknown) => console.warn(`[card] 에이전트에 결과 알리기 실패: ${err instanceof Error ? err.message : String(err)} ${who}`));
 	});
 
 	// 사용자별 원격 MCP 서버 (PLAN §38) — 사용자 입력 URL 로 서버가 요청하므로 SSRF 방어 fetch 만 쓴다

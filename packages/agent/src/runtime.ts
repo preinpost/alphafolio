@@ -25,6 +25,7 @@ import {
 	ModelRuntime,
 	resolveCliModel,
 	SessionManager,
+	type AgentSession,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
@@ -84,6 +85,52 @@ export function parseThinkingLevel(raw: string | undefined): ThinkingLevel {
 	return DEFAULT_THINKING;
 }
 
+/**
+ * 모델에게만 보이는 메시지 넣기 (note) — 쉬고 있을 때의 동작은 wake 로 고른다.
+ * - 응답 중: 어떤 경우든 steer (진행 중인 흐름에 끼운다)
+ * - 쉬는 중, wake 아님: 기록만 (턴 없음)
+ * - 쉬는 중, wake: 새 턴을 연다. 새 턴이 실패하면(다른 입력과 겹침) 기록이라도 남도록 끼워 넣기로 폴백한다.
+ */
+export async function deliverNote(
+	session: Pick<AgentSession, "isStreaming" | "sendCustomMessage" | "messages">,
+	customType: string,
+	text: string,
+	details: unknown,
+	wake: boolean,
+): Promise<void> {
+	const message = { customType, content: text, display: false, details };
+	if (!wake || session.isStreaming) {
+		await session.sendCustomMessage(message);
+		return;
+	}
+	try {
+		await session.sendCustomMessage(message, { triggerTurn: true });
+	} catch (err) {
+		console.warn(`[agent] 결과 턴 시작 실패 — 기록/끼워 넣기로 대신 남긴다: ${err instanceof Error ? err.message : String(err)}`);
+		// 새 턴이 시작되기 전에 실패했다면 메시지는 들어가지 않았다. 들어갔다면(중간 실패) 중복을 막는다.
+		// 중복은 같은 카드(nonce)·같은 상태의 결과로만 본다 — 문구가 같은 다른 카드의 결과는 별개다.
+		if (!hasRecordedNote(session.messages, customType, details)) await session.sendCustomMessage(message);
+	}
+}
+
+/** 같은 종류·같은 카드(details.nonce)·같은 상태의 결과가 이미 기록돼 있는가. nonce 가 없으면 중복이 아니다. */
+function hasRecordedNote(messages: readonly unknown[], customType: string, details: unknown): boolean {
+	const want = details as { nonce?: unknown; state?: unknown } | undefined;
+	if (typeof want?.nonce !== "string") return false;
+	return messages.some((m) => {
+		const x = m as { role?: unknown; customType?: unknown; details?: { nonce?: unknown; state?: unknown } };
+		return x.role === "custom" && x.customType === customType && x.details?.nonce === want.nonce && x.details?.state === want.state;
+	});
+}
+
+/**
+ * 사용자 입력 보내기 — 입력 처리 중에 결과 턴(note wake)이 먼저 시작되면 SDK 가 던지는 대신 뒤에 줄 세운다.
+ * 대화 래퍼(prompt)가 이 함수를 쓴다.
+ */
+export function promptSession(session: Pick<AgentSession, "prompt">, text: string, images?: ImageInput[]): Promise<void> {
+	return session.prompt(text, { ...(images?.length ? { images: toContent(images) } : {}), streamingBehavior: "followUp" });
+}
+
 export interface SessionSummary {
 	path: string;
 	id: string;
@@ -113,10 +160,11 @@ export interface AlphaFolioConversation {
 	steer(text: string, images?: ImageInput[]): Promise<void>;
 	followUp(text: string, images?: ImageInput[]): Promise<void>;
 	/**
-	 * 모델만 보는 메시지를 대화에 넣는다 (화면에는 안 나온다 — serialize 가 custom 을 버린다). 새 답을 시작하지 않는다.
-	 * 응답 중이면 진행 중인 흐름에 끼워 넣고(steer), 쉬고 있으면 기록에만 남아 다음 질문 때 함께 읽힌다.
+	 * 모델만 보는 메시지를 대화에 넣는다 (화면에는 안 나온다 — serialize 가 custom 을 버린다).
+	 * 응답 중이면 진행 중인 흐름에 끼워 넣는다(steer). 쉬고 있으면 — wake 가 아니면 기록에만 남아 다음 질문 때 읽히고,
+	 * wake 면 새 턴을 열어 모델이 이 메시지를 보고 이어 판단하게 한다 (그 턴의 출력은 평소 응답처럼 스트리밍된다).
 	 */
-	note(customType: string, text: string, details?: unknown): Promise<void>;
+	note(customType: string, text: string, details?: unknown, opts?: { wake?: boolean }): Promise<void>;
 	abort(): Promise<void>;
 	/** 지금 모델이 이미지를 읽을 수 있는가 — 못 읽는데 보내면 SDK 가 이미지를 조용히 뺄 수 있어 미리 막는다 */
 	readonly acceptsImages: boolean;
@@ -233,7 +281,7 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 				listeners.add(listener);
 				return () => listeners.delete(listener);
 			},
-			prompt: (text, images) => session.prompt(text, images?.length ? { images: toContent(images) } : undefined),
+			prompt: (text, images) => promptSession(session, text, images),
 			// SDK 0.99+ 는 "handled" | "queued" 를 돌려주지만 서버는 쓰지 않는다
 			steer: async (text, images) => {
 				await session.steer(text, images?.length ? toContent(images) : undefined);
@@ -241,7 +289,7 @@ export async function createAlphaFolioAgent(opts: RuntimeOptions): Promise<Alpha
 			followUp: async (text, images) => {
 				await session.followUp(text, images?.length ? toContent(images) : undefined);
 			},
-			note: (customType, text, details) => session.sendCustomMessage({ customType, content: text, display: false, details }),
+			note: (customType, text, details, opts) => deliverNote(session, customType, text, details, opts?.wake === true),
 			abort: () => session.abort(),
 			get acceptsImages() {
 				const input = (session.model as { input?: string[] } | undefined)?.input;
