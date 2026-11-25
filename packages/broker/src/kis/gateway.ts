@@ -201,10 +201,11 @@ const blankAllowed = (spec: ParamSpec): boolean => /공란|공백|빈\s*값|null
 export function fixedValue(desc: string): string | undefined {
 	const d = desc.trim();
 	if (!d || /경우|\bex\b|예시|예\)|예:|또는|[A-Z0-9]\s*[:：]/i.test(d)) return undefined;
-	const uk = /Unique\s*key\s*\(\s*([0-9A-Z]{3,6})\s*\)/i.exec(d);
+	const uk = /Unique\s*key\s*\(\s*([0-9A-Z]{3,6})\s*\)/i.exec(d) ?? /^([0-9A-Z]{3,6})\s*\(\s*Primary\s*key\s*\)$/i.exec(d);
 	if (uk) return uk[1];
 	const patterns = [
 		/^([A-Z0-9]{1,6})$/, // J · 00
+		/^([A-Z0-9]{1,6})\s*고정\s*입력$/, // J 고정 입력
 		/^["'“]?([A-Z0-9%]{1,6})["'”]?\s*입력$/, // "1" 입력 · 03 입력
 		/^[^()]*\((?:[가-힣A-Za-z]+\s)?([A-Z]{1,2})\)$/, // 시장구분코드 (주식 J) · (W)
 		/^([A-Z]{1,2})\s*\([^()]*\)$/, // W(Unique key) · J(시장 구분 코드)
@@ -232,15 +233,27 @@ function marketDivDefault(api: CatalogApi): string | undefined {
 export function strictValue(desc: string): string | undefined {
 	const d = desc.trim();
 	if (/^["'“]?공란["'”]?\s*(입력)?$/.test(d)) return "";
-	const uk = /^Unique\s*key\s*\(\s*([0-9A-Z]{3,6})\s*\)$/i.exec(d);
+	const uk = /^Unique\s*key\s*\(\s*([0-9A-Z]{3,6})\s*\)$/i.exec(d) ?? /^([0-9A-Z]{3,6})\s*\(\s*Primary\s*key\s*\)$/i.exec(d);
 	if (uk) return uk[1];
 	const put = /^["'“]?([A-Z0-9%]{1,6})["'”]?\s*입력$/.exec(d);
 	if (put) return put[1];
 	return undefined;
 }
 
+/**
+ * 국내주식 시장구분이 "J:KRX, NX:NXT, UN:통합" 같은 선택지면 KRX(J)를 기본으로 — 모델이 NX·UN 을 주면 그 값.
+ * 실측: 모델이 종목코드만 넣고 호출해 시장구분 누락으로 실패 → 재시도가 반복됐다 (FHPTJ04160001 등 20개 API).
+ */
+function marketDivChoiceDefault(api: CatalogApi, desc: string): string | undefined {
+	if (!api.category.startsWith("[국내주식]")) return undefined;
+	return /(^|[\s,(（:：])J(?=\s*([:：,)）]|$))/.test(desc) ? "J" : undefined;
+}
+
 export function defaultFor(api: CatalogApi, code: string, spec: ParamSpec): string | undefined {
-	return fixedValue(spec[2]) ?? (code === "FID_COND_MRKT_DIV_CODE" && !spec[2].trim() ? marketDivDefault(api) : undefined);
+	const fixed = fixedValue(spec[2]);
+	if (fixed !== undefined) return fixed;
+	if (code.toUpperCase() !== "FID_COND_MRKT_DIV_CODE") return undefined;
+	return spec[2].trim() ? marketDivChoiceDefault(api, spec[2]) : marketDivDefault(api);
 }
 
 /**

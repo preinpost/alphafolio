@@ -64,11 +64,19 @@ async function once(ctx: KisContext, opts: CallOptions, token: string): Promise<
 	});
 
 	const text = await res.text();
+	// 모의투자 서버는 재무·투자의견 등 상당수 조회 API 가 없다 — 빈 본문 404 로 답한다 (실측: market_financials).
+	// 파싱 실패로 뭉개지 않고 원인을 알린다.
+	if (res.status === 404 && ctx.creds.env === "paper") {
+		throw new KisError(
+			`${opts.label} 실패: 모의투자 서버는 이 API 를 지원하지 않습니다 — 실전투자 키로 연결해야 조회할 수 있습니다.`,
+			{ status: 404, code: "PAPER_UNSUPPORTED", api: opts.label },
+		);
+	}
 	let json: KisResponse;
 	try {
 		json = JSON.parse(text) as KisResponse;
 	} catch {
-		throw new KisError(`응답을 파싱할 수 없습니다 (HTTP ${res.status}): ${text.slice(0, 200)}`, {
+		throw new KisError(`${opts.label} 실패: 응답을 파싱할 수 없습니다 (HTTP ${res.status}): ${text.slice(0, 200)}`, {
 			status: res.status,
 			api: opts.label,
 		});

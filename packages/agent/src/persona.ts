@@ -201,7 +201,7 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
   "한국투자 리서치 커버 종목이 아님"이라고 구분해 말한다. 조회가 **실패**했으면 커버 여부를
   모르는 것이므로 "미커버"라고 하지 않는다.
 - 국내 종목의 **증권사별 목표주가·투자의견**은 \`kis_call\` FHKST663300C0 (종목투자의견 — 증권사·의견·직전 의견·목표가·날짜,
-  FID_INPUT_ISCD 종목코드, FID_INPUT_DATE_1·2 로 기간). 증권사 한 곳이 낸 의견 목록은 FHKST663400C0.
+  params 예: \`{FID_INPUT_ISCD:"005930", FID_INPUT_DATE_1:"today-90", FID_INPUT_DATE_2:"today"}\` — 날짜 둘 다 필수). 증권사 한 곳이 낸 의견 목록은 FHKST663400C0.
   여러 증권사 목표가의 범위·평균·최근 상향/하향을 정리하고, 현재가 대비 괴리를 말한다.
   추정 실적(예상 매출·EPS)은 \`market_financials\` 가 단위를 믿을 수 없어 해석하지 않는다 — 필요하면 \`web_search\` 로 컨센서스 기사를 찾는다.
   미국 종목은 TradingView 가 연결돼 있으면 \`mcp_call\` mcp-tv-get-forecasts, 아니면 finnhub(\`data_find\` "price target"·"eps estimate")로
@@ -308,6 +308,7 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
   ✓실측 표시가 있는 API 를 우선한다. 기본값이 적힌 파라미터는 생략해도 서버가 채운다.
 - 자주 쓰는 것 (TR ID 로 바로 불러도 된다):
   - 종목 외국인·기관·개인 순매수 (일별): FHPTJ04160001 — 금액 단위 백만원, 당일분은 15:40 이후
+    params 예: \`{FID_INPUT_ISCD:"005930", FID_INPUT_DATE_1:"today"}\` — 날짜 필수 (그 날짜부터 과거로 일별 행)
   - 종목 투자자 동향 (최근): FHKST01010900
   - 공매도 일별 추이: FHPST04830000 · 신용잔고 일별 추이: FHPST04760000 · 대차거래: HHPST074500C0
   - 프로그램매매 종합(일별): FHPPG04600001 · 업종 현재지수: FHPUP02100000 (코스피 0001, 코스닥 1001)

@@ -14,6 +14,7 @@ import { afterEach, describe, it } from "node:test";
 import {
 	buildKisQuery,
 	callKisApi,
+	defaultFor,
 	fixedValue,
 	strictValue,
 	findKisApis,
@@ -202,6 +203,44 @@ describe("파라미터", () => {
 		assert.ok(errors.some((e) => e.includes("FID_INPUT_ISCDD")), errors.join(" / "));
 	});
 
+	it("국내주식 시장구분 선택지(J:KRX, NX:NXT, UN:통합)는 빠뜨리면 J, 주면 그 값 (실측: 종목코드만 넣고 실패)", () => {
+		const missing = buildKisQuery(api(INVESTOR), { FID_INPUT_ISCD: "005930", FID_INPUT_DATE_1: "today" }, null, NOW);
+		assert.deepEqual(missing.errors, []);
+		assert.equal(missing.query.FID_COND_MRKT_DIV_CODE, "J");
+		const given = buildKisQuery(api(INVESTOR), { FID_COND_MRKT_DIV_CODE: "UN", FID_INPUT_ISCD: "005930", FID_INPUT_DATE_1: "today" }, null, NOW);
+		assert.equal(given.query.FID_COND_MRKT_DIV_CODE, "UN");
+	});
+
+	it("괄호 안 선택지(시장구분코드 (J:KRX, NX:NXT), (J: 주식))도 J 가 기본값 (실측: 19개 API 누락)", () => {
+		for (const ref of ["FHPST01720000", "FHKST11860000", "FHPST01740000"]) {
+			const a = api(ref);
+			const [code, spec] = Object.entries(a.params).find(([c]) => c.toUpperCase() === "FID_COND_MRKT_DIV_CODE")!;
+			assert.equal(defaultFor(a, code, spec), "J", ref);
+		}
+	});
+
+	it("'KRX : J , NXT : NX, 통합 : UN' 형태도 J 가 기본값 (FHPPG04600101 등 3개 API 누락)", () => {
+		const a = api("FHPPG04600101");
+		const [code, spec] = Object.entries(a.params).find(([c]) => c.toUpperCase() === "FID_COND_MRKT_DIV_CODE")!;
+		assert.equal(defaultFor(a, code, spec), "J");
+	});
+
+	it("'J 고정 입력' 은 고정값 J (FHPST04320000)", () => {
+		assert.equal(fixedValue("J 고정 입력"), "J");
+		const a = api("FHPST04320000");
+		const [code, spec] = Object.entries(a.params).find(([c]) => c.toUpperCase() === "FID_COND_MRKT_DIV_CODE")!;
+		assert.equal(defaultFor(a, code, spec), "J");
+	});
+
+	it("'16633(Primary key)' 는 고정값 (FHKST663300C0 종목투자의견)", () => {
+		assert.equal(fixedValue("16633(Primary key)"), "16633");
+		assert.equal(strictValue("16633(Primary key)"), "16633");
+		const { query, errors } = buildKisQuery(api("FHKST663300C0"), { FID_INPUT_ISCD: "005930", FID_INPUT_DATE_1: "today-90", FID_INPUT_DATE_2: "today" }, null, NOW);
+		assert.deepEqual(errors, []);
+		assert.equal(query.FID_COND_SCR_DIV_CODE, "16633");
+		assert.equal(query.FID_COND_MRKT_DIV_CODE, "J");
+	});
+
 	it("빠진 필수 파라미터는 한글명·안내와 함께 알린다", () => {
 		const { errors } = buildKisQuery(api(INVESTOR), { FID_COND_MRKT_DIV_CODE: "J" }, null);
 		assert.ok(errors.some((e) => e.includes("FID_INPUT_ISCD") && e.includes("종목")), errors.join(" / "));
@@ -288,6 +327,16 @@ describe("호출", () => {
 		const r = await callKisApi(ctx(), INVESTOR, { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: "005930", FID_INPUT_DATE_1: "20260922", FID_ETC_CLS_CODE: "1" }, { pages: 2 });
 		assert.equal(r.pages.length, 2);
 		assert.equal(r.truncated, true);
+	});
+
+	it("모의투자 서버의 빈 404 는 '모의투자 미지원' 으로 알린다 (실측: 재무 조회가 파싱 실패로 보였다)", async () => {
+		globalThis.fetch = (async (input: string | URL) => {
+			if (new URL(String(input)).pathname === "/oauth2/tokenP") return new Response(JSON.stringify({ access_token: "t", expires_in: 86400 }));
+			return new Response("", { status: 404 });
+		}) as typeof fetch;
+		const c = ctx();
+		c.creds = { ...c.creds, env: "paper" };
+		await assert.rejects(callKisApi(c, INVESTOR, { FID_INPUT_ISCD: "005930", FID_INPUT_DATE_1: "20260922" }), /모의투자 서버는 이 API 를 지원하지 않습니다/);
 	});
 
 	it("KIS 실패(rt_cd≠0)는 메시지와 함께 예외", async () => {
