@@ -14,6 +14,8 @@ import { createOrderTools, resolveExpireDate, validateConditional, type OrderCha
 import type { ConditionalSpec } from "../src/actions.ts";
 import { memoryTokenStore } from "../src/tokens.ts";
 import type { TossContext } from "../src/toss/client.ts";
+import type { KisContext } from "../src/kis/client.ts";
+import { kisOpenOrders } from "../src/kis/orders.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -204,5 +206,70 @@ describe("order_change", () => {
 		const r = await run(access, { action: "modify", orderId: "T-1", price: 695000 });
 		assert.equal(r.prepared.length, 0);
 		assert.match(r.text, /자릿수/);
+	});
+});
+
+// ── 미체결 — 한국투자 한쪽 시장 실패는 경고로 (중복 주문 방지) ──
+
+/** TR ID 로 국내(TTTC0084R)·미국(TTTS3018R) 응답을 나눈다. 실패한 쪽은 rt_cd≠0 */
+function kisOpenFake(fail: "KR" | "US" | "BOTH" | null): void {
+	globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+		const url = new URL(String(input));
+		const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { tr_cont: "D" } });
+		if (url.pathname === "/oauth2/tokenP") return new Response(JSON.stringify({ access_token: "t", expires_in: 86400 }));
+		const trId = ((init?.headers ?? {}) as Record<string, string>).tr_id;
+		if (trId === "TTTC0084R") {
+			if (fail === "KR" || fail === "BOTH") return json({ rt_cd: "1", msg1: "국내 응답 없음" });
+			return json({ rt_cd: "0", msg1: "정상", output: [{ odno: "0000123456", pdno: "005930", prdt_name: "삼성전자", psbl_qty: "5", sll_buy_dvsn_cd: "02", ord_dvsn_cd: "00", ord_unpr: "70000", ord_tmd: "091200", ord_gno_brno: "00950" }] });
+		}
+		if (fail === "US" || fail === "BOTH") return json({ rt_cd: "1", msg1: "미국 응답 없음" });
+		return json({ rt_cd: "0", msg1: "정상", output: [{ odno: "0000999", pdno: "AAPL", prdt_name: "APPLE", nccs_qty: "2", sll_buy_dvsn_cd: "02", ft_ord_unpr3: "200.5", ord_tmd: "2300", ovrs_excg_cd: "NASD" }] });
+	}) as typeof fetch;
+}
+
+function kisCtx(): KisContext {
+	seq++;
+	return { creds: { appKey: `kis-${seq}`, appSecret: "s", env: "real", cano: "12345678", prdtCd: "01" }, store: memoryTokenStore(), owner: `k${seq}` };
+}
+
+async function runKisList(params: Record<string, unknown>): Promise<string> {
+	const [change] = createOrderTools({ brokers: { kis: kisCtx }, prepareOrder: () => ({ token: "tok", expiresAt: 1 }) });
+	const r = (await change!.execute("id", params as never, undefined, undefined, undefined as never)) as { content: Array<{ text: string }> };
+	return r.content[0]!.text;
+}
+
+describe("미체결 — 한쪽 시장 실패", () => {
+	it("국내만 실패 → 미국 주문은 나오고, 국내 실패가 경고로 남는다", async () => {
+		kisOpenFake("KR");
+		const r = await kisOpenOrders(kisCtx());
+		assert.deepEqual(r.orders.map((o) => o.market), ["US"]);
+		assert.ok(r.warnings.some((w) => w.includes("KIS 국내 미체결 조회 실패") && w.includes("이 시장의 미체결은 확인되지 않았습니다")), r.warnings.join(" / "));
+	});
+
+	it("미국만 실패 → 국내 주문은 나오고, 미국 실패가 경고로 남는다", async () => {
+		kisOpenFake("US");
+		const r = await kisOpenOrders(kisCtx());
+		assert.deepEqual(r.orders.map((o) => o.market), ["KR"]);
+		assert.ok(r.warnings.some((w) => w.includes("KIS 미국 미체결 조회 실패")), r.warnings.join(" / "));
+	});
+
+	it("둘 다 실패 → 던진다 (미체결 없음이 아니다)", async () => {
+		kisOpenFake("BOTH");
+		await assert.rejects(kisOpenOrders(kisCtx()), /국내 응답 없음/);
+	});
+
+	it("order_change 목록 — 툴 결과 텍스트에 ⚠️ 경고와 살아 있는 미국 주문이 함께 나온다", async () => {
+		kisOpenFake("KR");
+		const text = await runKisList({ action: "cancel" });
+		assert.match(text, /orderId=0000999/);
+		assert.match(text, /⚠️ KIS 국내 미체결 조회 실패: .* 이 시장의 미체결은 확인되지 않았습니다/);
+	});
+
+	it("order_change 대상 조회 — 실패한 시장의 주문번호는 '없다'가 아니라 경고와 함께 알린다", async () => {
+		kisOpenFake("KR");
+		await assert.rejects(
+			runKisList({ action: "cancel", orderId: "0000123456" }),
+			(e: Error) => /미체결 목록에 없는 주문/.test(e.message) && /KIS 국내 미체결 조회 실패/.test(e.message),
+		);
 	});
 });

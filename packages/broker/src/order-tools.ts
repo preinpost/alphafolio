@@ -137,7 +137,8 @@ export async function openOrders(brokers: BrokerAccess): Promise<{ orders: OpenO
 	if (t.status === "fulfilled" && t.value) for (const o of t.value.orders) { const x = fromToss(o); if (x) orders.push(x); }
 	else if (t.status === "rejected") warnings.push(`토스 미체결 조회 실패: ${(t.reason as Error)?.message ?? t.reason}`);
 	if (k.status === "fulfilled" && k.value) {
-		for (const o of k.value) orders.push({ ...o, broker: "kis", currency: o.market === "KR" ? "KRW" : "USD" });
+		for (const o of k.value.orders) orders.push({ ...o, broker: "kis", currency: o.market === "KR" ? "KRW" : "USD" });
+		warnings.push(...k.value.warnings);
 	} else if (k.status === "rejected") warnings.push(`한국투자 미체결 조회 실패: ${(k.reason as Error)?.message ?? k.reason}`);
 	return { orders, warnings };
 }
@@ -257,7 +258,7 @@ export function createOrderTools(deps: OrderToolDeps) {
 			const o = orders.find((x) => x.orderId === params.orderId!.trim());
 			if (!o) {
 				throw new Error(
-					`미체결 목록에 없는 주문입니다 (이미 체결·취소됐거나 번호가 틀림): ${params.orderId}\n현재 미체결:\n${listText(orders)}`,
+					`미체결 목록에 없는 주문입니다 (이미 체결·취소됐거나 번호가 틀림): ${params.orderId}\n현재 미체결:\n${listText(orders)}${listWarnings.length ? `\n⚠️ ${listWarnings.join("\n⚠️ ")}` : ""}`,
 				);
 			}
 			const quote = await fetchQuote(deps.brokers, o.symbol).catch(() => null);

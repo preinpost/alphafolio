@@ -165,8 +165,9 @@ export interface KisOpenOrder extends OriginalOrder {
 }
 
 /** 정정·취소 가능한 미체결 주문 — 국내(TTTC0084R) + 미국(TTTS3018R, NASD = 미국 전체) */
-export async function kisOpenOrders(ctx: KisContext): Promise<KisOpenOrder[]> {
+export async function kisOpenOrders(ctx: KisContext): Promise<{ orders: KisOpenOrder[]; warnings: string[] }> {
 	const out: KisOpenOrder[] = [];
+	const warnings: string[] = [];
 	const [kr, us] = await Promise.allSettled([
 		callKisApi(ctx, "TTTC0084R", { INQR_DVSN_1: "0", INQR_DVSN_2: "0" }, { pages: 3 }),
 		callKisApi(ctx, "TTTS3018R", { OVRS_EXCG_CD: "NASD", SORT_SQN: "DS" }, { pages: 3 }),
@@ -213,7 +214,11 @@ export async function kisOpenOrders(ctx: KisContext): Promise<KisOpenOrder[]> {
 	}
 	// 둘 다 실패면 "미체결 없음" 이 아니라 조회 실패다 — 정정·취소 준비가 엉뚱한 결론을 내지 않게
 	if (kr.status === "rejected" && us.status === "rejected") throw kr.reason;
-	return out;
+	// 한쪽만 실패하면 그 시장이 조용히 빠진다 — 경고로 남겨 "미체결 없음"으로 읽혀 중복 주문되지 않게
+	const reason = (e: unknown) => (e as Error)?.message ?? String(e);
+	if (kr.status === "rejected") warnings.push(`KIS 국내 미체결 조회 실패: ${reason(kr.reason)} — 이 시장의 미체결은 확인되지 않았습니다`);
+	if (us.status === "rejected") warnings.push(`KIS 미국 미체결 조회 실패: ${reason(us.reason)} — 이 시장의 미체결은 확인되지 않았습니다`);
+	return { orders: out, warnings };
 }
 
 /** 매수 가능 금액 (국내: 원 — 미수 없는 매수 금액 / 미국: 달러 — 해외주문가능금액) */
