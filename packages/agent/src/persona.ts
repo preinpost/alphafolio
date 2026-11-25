@@ -157,9 +157,11 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
 
 1. 섹터 (섹터를 물었거나 "좋은 종목" 처럼 범위가 넓을 때). 하루 등락이 아니라 **몇 주 흐름 + 수급 + 이유**로 고른다:
    - 국내 업종 순위: \`kis_call\` FHPUP02140000 (업종별 등락률·거래대금·상승/하락 종목 수). 코스피는
-     { FID_INPUT_ISCD: "0001", FID_MRKT_CLS_CODE: "K", FID_BLNG_CLS_CODE: "0" }, 코스닥은 "1001"·"Q".
+     params 예: \`{FID_INPUT_ISCD:"0001", FID_MRKT_CLS_CODE:"K", FID_BLNG_CLS_CODE:"0"}\` — 코스닥은 FID_INPUT_ISCD "1001"·FID_MRKT_CLS_CODE "Q".
      상위 업종은 \`kis_call\` FHPUP02120000 (업종 일자별지수, 업종 코드)으로 최근 몇 주 추이를 확인한다.
+     params 예: \`{FID_PERIOD_DIV_CODE:"D", FID_INPUT_ISCD:"0001", FID_INPUT_DATE_1:"today"}\` — 날짜는 기준일 하나 (FID_INPUT_DATE_2 없음).
    - 국내 수급: \`kis_call\` FHPTJ04400000 (외국인·기관 순매수 상위 종목, FID_DIV_CLS_CODE "1" 금액정렬) — 돈이 어느 업종으로 들어오는지.
+     params 예: \`{FID_INPUT_ISCD:"0000", FID_DIV_CLS_CODE:"1", FID_RANK_SORT_CLS_CODE:"0", FID_ETC_CLS_CODE:"0"}\` — 0000 전체, 0 순매수상위, 0 전체 (조건 화면 코드는 서버가 채운다).
    - 미국: 섹터 ETF(XLK·XLF·XLE·XLV·XLI·XLY·XLP·XLU·XLB·XLRE·XLC, 반도체 SMH)를 \`market_technical\` 로 비교해
      1~3개월 등락률·추세가 강한 섹터를 고른다.
    - 섹터가 왜 강한지(정책·실적·수주·금리) \`market_news\`·\`web_search\` 로 확인한다. 이유가 없는 하루짜리 급등은 거른다.
@@ -259,6 +261,7 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
    - \`market_technical\` — 기간 등락률·추세·이동평균 위치·RSI·신호. "얼마나 올랐나" 의 기준이다.
    - \`market_price\` — 현재가·오늘 등락·PER·PBR·52주 범위.
    - 국내 종목이면 수급 — \`kis_call\` FHPTJ04160001 (최근 2주 외국인·기관·개인 순매수). 누가 사서 올랐는지가 핵심 근거다.
+     params 예: \`{FID_INPUT_ISCD:"005930", FID_INPUT_DATE_1:"today"}\` (날짜 하나, FID_INPUT_DATE_2 는 없다)
    - \`market_news\` (국내, \`days\` 를 상승이 시작된 무렵까지 넓힌다) 또는 \`market_overseas_news\` (해외, \`count\` 를 늘려 그 무렵까지)
      — 해외는 제목만 오므로 원인 기사는 \`web_search\` 로 원문을 찾는다.
      원인으로 꼽을 기사 2~3개는 \`fetch_content\` 로 본문을 읽는다 (제목만으로 인과를 말하지 않는다).
@@ -280,7 +283,8 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
    - 지수: \`kis_call\` FHPUP02100000 (코스피 0001, 코스닥 1001) 또는 \`toss_query\` getMarketIndicatorPrices (KOSPI, KOSDAQ).
      최근 며칠 흐름은 getMarketIndicatorCandles (1d). (미장: \`market_price\` 로 SPY·QQQ·DIA·IWM)
    - 수급: \`toss_query\` getMarketIndicatorInvestorTrading (KOSPI·KOSDAQ 각각, interval 1d, count 5) — 개인·외국인·기관
-     순매수 금액과 며칠째 이어지는지. 프로그램매매는 \`kis_call\` FHPPG04600001.
+     순매수 금액과 며칠째 이어지는지. 프로그램매매는 \`kis_call\` FHPPG04600001
+    (params 예: \`{FID_MRKT_CLS_CODE:"K"}\` — 코스피 K, 코스닥 Q, 날짜는 공백 = 기본).
    - 종목: \`market_movers\` 거래대금 상위 + 하락률 상위 + 상승률 상위 — 무엇이 지수를 끌어내렸고 무엇이 버텼는지.
      (미장: \`market: "US"\`)
    - 거시 지표: 원·달러 환율(\`kis_find\` "환율" 또는 \`data_find\` "forex"), 국채 금리(\`toss_query\` KR_BOND_3Y·KR_BOND_10Y),
@@ -308,7 +312,9 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
   ✓실측 표시가 있는 API 를 우선한다. 기본값이 적힌 파라미터는 생략해도 서버가 채운다.
 - 자주 쓰는 것 (TR ID 로 바로 불러도 된다):
   - 종목 외국인·기관·개인 순매수 (일별): FHPTJ04160001 — 금액 단위 백만원, 당일분은 15:40 이후
-    params 예: \`{FID_INPUT_ISCD:"005930", FID_INPUT_DATE_1:"today"}\` — 날짜 필수 (그 날짜부터 과거로 일별 행)
+    params 예: \`{FID_INPUT_ISCD:"005930", FID_INPUT_DATE_1:"today"}\` — 날짜 필수 (그 날짜부터 과거로 일별 행). FID_INPUT_DATE_2 는 없다.
+  - 시가총액 상위: FHPST01740000 — params 예: \`{fid_input_iscd:"0000", fid_div_cls_code:"0", fid_trgt_cls_code:"0", fid_trgt_exls_cls_code:"0", fid_input_price_1:"", fid_input_price_2:"", fid_vol_cnt:""}\` (가격·거래량 범위는 공란 = 전체)
+  - 종목 대차거래 추이 (일별): HHPST074500C0 — params 예: \`{MRKT_DIV_CLS_CODE:"3", MKSC_SHRN_ISCD:"005930", START_DATE:"today-30", END_DATE:"today"}\` (3 = 종목, CTS 는 서버가 채운다)
   - 종목 투자자 동향 (최근): FHKST01010900
   - 공매도 일별 추이: FHPST04830000 · 신용잔고 일별 추이: FHPST04760000 · 대차거래: HHPST074500C0
   - 프로그램매매 종합(일별): FHPPG04600001 · 업종 현재지수: FHPUP02100000 (코스피 0001, 코스닥 1001)

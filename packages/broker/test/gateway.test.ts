@@ -10,6 +10,7 @@
  *   - 응답 필드는 한글 이름으로, 빈 열은 뺀다
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import {
 	buildKisQuery,
@@ -422,5 +423,48 @@ describe("출력", () => {
 		const out = renderKisResult(result([{ output2: [] }]));
 		assert.equal(out.empty, true);
 		assert.match(out.text, /데이터가 없습니다/);
+	});
+});
+
+// ── persona 의 kis_call 예시 ──────────────────────────────────
+// 모델은 persona 의 "params 예" 를 그대로 베낀다. 예시가 서버 규격을 못 채우면 "필수 파라미터 없음" 으로 실패→재시도한다.
+describe("persona 의 kis_call 예시 params", () => {
+	const personaSrc = readFileSync(new URL("../../agent/src/persona.ts", import.meta.url), "utf8");
+	// "params 예: {…}" 마다, 바로 앞에서 가장 가까운 TR ID 를 짝지운다
+	const examples = [...personaSrc.matchAll(/params 예:\s*\\?`(\{[^`]*\})\\?`/g)].map((m) => {
+		const before = personaSrc.slice(Math.max(0, m.index! - 600), m.index!);
+		const trs = [...before.matchAll(/\b[A-Z]{2,5}\d{5,}[A-Z0-9]*\b/g)];
+		return { tr: trs.at(-1)?.[0] ?? "", params: new Function(`return ${m[1]}`)() as Record<string, unknown> };
+	});
+
+	it("실측 실패 TR 은 모두 예시가 있다", () => {
+		for (const tr of ["FHPUP02140000", "FHPUP02120000", "FHPTJ04400000", "FHPST01740000", "HHPST074500C0", "FHPPG04600001", "FHPTJ04160001", "FHKST663300C0"]) {
+			assert.ok(examples.some((e) => e.tr === tr), `예시 없음: ${tr}`);
+		}
+	});
+
+	it("모든 예시 params 는 buildKisQuery errors 가 0 (계좌 없이, 서버가 채울 것 제외)", () => {
+		assert.ok(examples.length >= 4, `예시 파싱 실패: ${examples.length}`);
+		for (const { tr, params } of examples) {
+			const found = resolveKisApi(tr);
+			assert.ok(found, `TR 없음: ${tr}`);
+			const { errors } = buildKisQuery(found.api, params, null);
+			assert.deepEqual(errors, [], `${tr} ${JSON.stringify(params)}`);
+		}
+	});
+
+	it("'숫자(Default)' 고정값은 국내주식에서만 기본값이 된다", () => {
+		const spec: [string, number, string] = ["조건 화면 분류 코드", 1, "16449(Default)"];
+		const dom = { category: "[국내주식] 순위분석", params: {} } as unknown as CatalogApi;
+		const ovs = { category: "[해외주식] 기본시세", params: {} } as unknown as CatalogApi;
+		assert.equal(defaultFor(dom, "FID_COND_SCR_DIV_CODE", spec), "16449");
+		assert.equal(defaultFor(ovs, "FID_COND_SCR_DIV_CODE", spec), undefined);
+	});
+
+	it("연속조회 키 CTS(이전조회KEY) 는 서버가 채운다 — 대차 API 가 CTS 없이 호출된다", () => {
+		const api = resolveKisApi("HHPST074500C0")!.api;
+		const { query, errors } = buildKisQuery(api, { MRKT_DIV_CLS_CODE: "3", MKSC_SHRN_ISCD: "005930", START_DATE: "today-30", END_DATE: "today" }, null);
+		assert.deepEqual(errors, []);
+		assert.equal(query.CTS, "");
 	});
 });

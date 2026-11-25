@@ -188,7 +188,8 @@ export function resolveDateToken(value: string, now: number = Date.now()): strin
 
 /** 대소문자 무관 — 규격에 소문자로 적힌 API 가 있다 (32개). 계좌 보호가 표기 차이로 뚫리지 않게 */
 const isAccountParam = (code: string): boolean => /^(CANO|ACNT_PRDT_CD)$/i.test(code);
-const isContinuationParam = (code: string): boolean => /^CTX_AREA_/i.test(code);
+/** CTX_AREA_* 와 이전조회KEY 인 CTS(대차거래추이 HHPST074500C0 — 필수인데 공란으로 넘기면 "필수 파라미터 없음" 실패) */
+const isContinuationParam = (code: string): boolean => /^CTX_AREA_/i.test(code) || /^CTS$/i.test(code);
 /** 필수지만 "공란 입력" 이라고 적힌 파라미터 — 모델에게 묻지 않고 빈 값으로 */
 const blankAllowed = (spec: ParamSpec): boolean => /공란|공백|빈\s*값|null|space/i.test(spec[2]);
 
@@ -249,9 +250,17 @@ function marketDivChoiceDefault(api: CatalogApi, desc: string): string | undefin
 	return /(^|[\s,(（:：])J(?=\s*([:：,)）]|$))/.test(desc) ? "J" : undefined;
 }
 
+/** 국내주식 "16449(Default)" 같은 숫자 고정값 — 규격이 기본값으로 적어 둔 것 (FHPTJ04400000 조건 화면 분류 코드) */
+function domesticDefaultValue(api: CatalogApi, desc: string): string | undefined {
+	if (!api.category.startsWith("[국내주식]")) return undefined;
+	return /^(\d{2,6})\s*\(\s*Default\s*\)$/i.exec(desc.trim())?.[1];
+}
+
 export function defaultFor(api: CatalogApi, code: string, spec: ParamSpec): string | undefined {
 	const fixed = fixedValue(spec[2]);
 	if (fixed !== undefined) return fixed;
+	const dflt = domesticDefaultValue(api, spec[2]);
+	if (dflt !== undefined) return dflt;
 	if (code.toUpperCase() !== "FID_COND_MRKT_DIV_CODE") return undefined;
 	return spec[2].trim() ? marketDivChoiceDefault(api, spec[2]) : marketDivDefault(api);
 }
