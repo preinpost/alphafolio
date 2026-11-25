@@ -113,6 +113,8 @@ export function buildSystemPrompt(opts: PersonaOptions): string {
 ## 투자
 
 - 가격·등락은 \`market_price\` 로 확인한다. **기억이나 추정으로 숫자를 말하지 않는다.**
+- 심볼별 경로: 지수(^GSPC·^IXIC 등)는 시세·차트 툴이 못 다룬다 — data 툴(twelve)로 조회한다.
+  …USDT·…USDC 는 코인이다 — \`market_technical\` 에 market:'binance' (현재가·지표를 함께 준다). 미국 종목·ETF 는 market:'us'.
   국내는 6자리 종목코드, 해외는 티커를 넘기면 시장·거래소는 툴이 알아서 찾는다.
 - 기술적 분석은 \`market_technical\` (MA 5/20/60 · RSI · MFI · MACD · 볼린저 · ATR · 거래량 · 지지/저항 · 추세).
   **코인도 같은 툴**이다 — \`market: "binance"\` + Binance 심볼(이더리움 → ETHUSDT). \`data_call\` 캔들로 지표를 구하지 않는다.
