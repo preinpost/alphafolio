@@ -81,9 +81,13 @@ describe("watch_alert 자동 매매", () => {
 		assert.match(r.details.order?.worst ?? "", /−2%/);
 	});
 
-	it("계좌가 둘이면 고르지 않고 묻게 한다, 고르면 그 계좌", async () => {
+	it("계좌가 둘이면 고르지 않고 묻게 한다 — 질문은 실패가 아니고, 아무것도 저장하지 않는다, 고르면 그 계좌", async () => {
 		const { run, prepared } = setup({ targets: [KIS, TOSS] });
-		await assert.rejects(run({ ...base, order: { side: "BUY", shares: 1 } }), /사용자에게 물어보세요: kis = 한국투자 \*\*\*\*78-01 · toss = 토스 \*\*\*\*1234/);
+		const q = await run({ ...base, order: { side: "BUY", shares: 1 } });
+		assert.notEqual((q as { isError?: boolean }).isError, true);
+		assert.match(q.content[0]!.text, /사용자에게 물어보세요: kis = 한국투자 \*\*\*\*78-01 · toss = 토스 \*\*\*\*1234/);
+		assert.equal((q.details as unknown as { kind: string }).kind, "watch-question");
+		assert.equal(prepared.length, 0, "질문 단계에서 감시가 만들어지면 안 된다");
 		await run({ ...base, order: { side: "BUY", shares: 1, broker: "toss" } });
 		const a = prepared[0]!.action;
 		assert.deepEqual(a.kind === "order" && a.target, TOSS);
@@ -296,7 +300,10 @@ describe("Binance 미국 주식 직접 거래 (broker: binance_stock)", () => {
 	const ubase = { action: "prepare", symbol: "AAPL", market: "us", interval: "1d", all: [{ left: "close", op: ">", right: 340 }] };
 
 	it("미장 계좌가 여럿이면 묻는다 (Binance 현물 계정은 미장 후보가 아니다)", async () => {
-		await assert.rejects(us().run({ ...ubase, order: { side: "BUY", amount: 100 } }), /kis = 한국투자 \*\*\*\*78-01 · binance_stock = Binance 미국 주식/);
+		const { run, prepared } = us();
+		const q = await run({ ...ubase, order: { side: "BUY", amount: 100 } });
+		assert.match(q.content[0]!.text, /kis = 한국투자 \*\*\*\*78-01 · binance_stock = Binance 미국 주식/);
+		assert.equal(prepared.length, 0);
 	});
 
 	it("금액 매수 — 소수점 주식 추정, 조건 봉은 증권 키 시세, 한도는 USD", async () => {

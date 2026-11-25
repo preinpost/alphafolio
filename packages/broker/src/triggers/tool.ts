@@ -575,12 +575,13 @@ export function createWatchTools(deps: WatchToolDeps) {
 				const targets = targetsFor(venue, (await deps.orderTargets?.()) ?? []);
 				if (targets.length === 0) throw new Error(NO_TARGET(venue));
 				const target = o.broker ? targets.find((t) => t.broker === o.broker) : targets.length === 1 ? targets[0] : undefined;
+				if (!target && !o.broker) {
+					// 계좌를 고르는 질문은 실패가 아니다 — 정상 결과로 돌려주고, 감시·알림·주문은 아무것도 만들지 않는다 (아래 prepareWatch 전에 반환)
+					const text = `주문 계좌를 사용자에게 물어보세요: ${targets.map((t) => `${t.broker} = ${t.accountLabel}`).join(" · ")}\n사용자가 고르면 broker 를 넣어 같은 조건으로 다시 준비한다. 아직 아무것도 켜지지 않았다.`;
+					return { content: [{ type: "text" as const, text }], details: { kind: "watch-question", options: targets.map((t) => ({ broker: t.broker, account: t.accountLabel })) } as unknown as WatchConfirmCard };
+				}
 				if (!target) {
-					throw new Error(
-						o.broker
-							? `${o.broker} 주문 계좌가 없습니다 — 있는 곳: ${targets.map((t) => `${t.broker}(${t.accountLabel})`).join(", ")}`
-							: `주문 계좌를 사용자에게 물어보세요: ${targets.map((t) => `${t.broker} = ${t.accountLabel}`).join(" · ")}`,
-					);
+					throw new Error(`${o.broker} 주문 계좌가 없습니다 — 있는 곳: ${targets.map((t) => `${t.broker}(${t.accountLabel})`).join(", ")}`);
 				}
 				const d = ORDER_DEFAULTS[o.side];
 				const eqGrid = target.broker === "binance_stock" ? await equityOrderGrid(symbol) : null;
