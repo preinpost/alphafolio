@@ -150,6 +150,15 @@ describe("사용자별 도구 등록 계약", () => {
 		const rest = tools.filter((t) => !(CONFIRM_CARD_TOOL_NAMES as readonly string[]).includes(t.name));
 		assert.ok(rest.every((t) => (t as { exposure?: string }).exposure === undefined));
 	});
+
+	it("model-only 도구 설명은 codemode 에서 못 쓴다는 것과 직접 호출 경로를 알려 준다", () => {
+		const tools = createUserTools(registry().opts, "ms");
+		for (const name of CONFIRM_CARD_TOOL_NAMES) {
+			const description = tools.find((t) => t.name === name)!.description;
+			assert.match(description, /codemode/, name);
+			assert.match(description, /직접 호출/, name);
+		}
+	});
 });
 
 describe("시스템 프롬프트와 도구 계약", () => {
@@ -158,6 +167,13 @@ describe("시스템 프롬프트와 도구 계약", () => {
 		const refs = [...prompt.matchAll(/`((?:ledger_|market_|portfolio_|finance_|order_|binance_|kis_|data_|journal_)[a-z_]+|stock_research|toss_query|mcp_call|watch_alert|range_trade)`/g)].map((m) => m[1]!);
 		assert.ok(refs.length > 20);
 		for (const name of refs) assert.ok((CUSTOM_TOOL_NAMES as readonly string[]).includes(name), name);
+	});
+
+	it("codemode 스크립트에서 못 쓰는 도구를 페르소나에 명시한다 (model-only 목록과 일치)", () => {
+		const prompt = buildSystemPrompt({ ledgerEnabled: true, member: "ms" });
+		const section = prompt.slice(prompt.indexOf("codemode"));
+		assert.ok(prompt.includes("codemode"));
+		for (const name of CONFIRM_CARD_TOOL_NAMES) assert.ok(section.includes(`\`${name}\``), name);
 	});
 
 	it("상대 날짜와 주문 조회·정정·취소 경로를 명시한다", () => {

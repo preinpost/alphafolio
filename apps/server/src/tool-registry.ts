@@ -31,6 +31,8 @@ export const CONFIRM_CARD_TOOL_NAMES = [
 	"mcp_call", "watch_alert", "range_trade",
 ] as const;
 const CONFIRM_CARD_TOOLS = new Set<string>(CONFIRM_CARD_TOOL_NAMES);
+/** 모델이 툴 설명만 보고 스크립트에서 부르다 "알 수 없는 툴" 오류를 받지 않도록 설명에 명시한다 */
+const CODEMODE_NOTE = "\n\n[codemode 제한] 이 툴은 codemode 스크립트(tools.<이름>) 안에서 쓸 수 없습니다 — 직접 호출하세요.";
 
 export function createUserTools(opts: ToolOptions, user: string) {
 	return [
@@ -49,5 +51,7 @@ export function createUserTools(opts: ToolOptions, user: string) {
 		...createWatchTools(opts.watch(user)),
 		// 매매일지는 개인 것이고 돈을 움직이지 않는다 — 확인 카드 없이 바로 쓴다
 		...createJournalTools(opts.journal(user)),
-	].map((tool) => (CONFIRM_CARD_TOOLS.has(tool.name) ? { ...tool, exposure: "model-only" as const } : tool));
+	].map((tool) => (CONFIRM_CARD_TOOLS.has(tool.name)
+		? { ...tool, description: `${tool.description}${CODEMODE_NOTE}`, exposure: "model-only" as const }
+		: tool));
 }

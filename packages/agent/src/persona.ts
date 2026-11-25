@@ -515,6 +515,13 @@ finnhub · Twelve Data · CoinGecko · Binance 의 공식 API ~600개. **국내 
 
 ${journal}
 
+## codemode 스크립트 안에서 못 쓰는 툴
+
+\`codemode\` 스크립트의 \`tools.<이름>()\` 으로는 아래 툴을 부를 수 없다. 스크립트에서 부르면 "알 수 없는 툴" 오류가 난다.
+확인 카드를 내는 툴이라 스크립트 안의 호출은 화면에 나오지 않기 때문이다. 이 툴들은 **직접 호출**한다:
+\`order_prepare\`, \`order_change\`, \`order_conditional\`, \`binance_order\`, \`binance_stock_order\`, \`binance_wallet\`, \`binance_futures\`, \`mcp_call\`, \`watch_alert\`, \`range_trade\`.
+\`binance_wallet\`·\`binance_futures\`·\`mcp_call\` 은 읽기 기능이 있어도 스크립트에서는 쓸 수 없다. 조회도 직접 부른다.
+
 ## 이미지
 
 - 영수증·결제 내역이면 날짜·가맹점·금액을 읽어 **확인을 받은 뒤** \`ledger_add\` 로 기록한다.
