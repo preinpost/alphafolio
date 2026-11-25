@@ -30,6 +30,17 @@ export function kstDate(at: number): string {
  * 날짜만 아는 기록의 시각 — 오늘이면 지금, 지난 날이면 그날 KST 정오 (같은 날 기록끼리 순서를 흐트러뜨리지 않게).
  * 미래 날짜는 받지 않는다.
  */
+/**
+ * 모델이 준 날짜 → YYYY-MM-DD. 누락(undefined·null)은 오늘(KST), "today"·"today-N" 은 그 날짜 (AI 는 오늘 날짜를 모른다 — 페르소나: 추측 금지).
+ * 그 밖의 값은 그대로 두고 atOfDate 가 검사한다 (형식·실제 날짜·미래 거절). 저장 전에 끝난다.
+ */
+export function resolveJournalDate(v: unknown, now: number): string {
+	if (typeof v !== "string") return kstDate(now);
+	const m = /^today(?:-(\d{1,4}))?$/i.exec(v.trim());
+	if (!m) return v.trim();
+	return kstDate(now - Number(m[1] ?? 0) * 86_400_000);
+}
+
 export function atOfDate(date: string, now: number): number {
 	if (!DATE_RE.test(date)) throw new JournalValidationError("date 는 YYYY-MM-DD 형식이어야 합니다");
 	const noon = Date.parse(`${date}T12:00:00+09:00`);
@@ -112,7 +123,7 @@ export function parseJournalTrade(body: Record<string, unknown>, partial: true, 
 export function parseJournalTrade(body: Record<string, unknown>, partial: false, now: number): JournalTrade;
 export function parseJournalTrade(body: Record<string, unknown>, partial: boolean, now: number): Partial<JournalTrade> {
 	const out: Partial<JournalTrade> = {};
-	if (!partial || has(body, "date")) out.at = atOfDate(typeof body.date === "string" ? body.date : kstDate(now), now);
+	if (!partial || has(body, "date")) out.at = atOfDate(resolveJournalDate(body.date, now), now);
 	if (!partial || has(body, "symbol")) {
 		const s = typeof body.symbol === "string" ? body.symbol.trim() : "";
 		if (!SYMBOL_RE.test(s)) throw new JournalValidationError("symbol 은 종목코드·티커입니다 (예: 005930, AAPL, BTCUSDT)");

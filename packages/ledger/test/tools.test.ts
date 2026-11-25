@@ -149,6 +149,15 @@ describe("ledger_add 날짜", () => {
 		assert.equal((await run(addTool(), { daysAgo: 1 })).date, "2026-09-29");
 	});
 
+	it("날짜 토큰 — 'today'·'today-N' 은 KST 날짜로 기록하고, 그 밖의 잘못된 값은 저장하지 않는다", async () => {
+		assert.equal((await run(addTool(), { date: "today" } as never)).date, "2026-09-30");
+		assert.equal((await run(addTool(), { date: "today-3" } as never)).date, "2026-09-27");
+		const before = d1.db.prepare("SELECT COUNT(*) n FROM transactions").get()?.n;
+		await assert.rejects(run(addTool(), { date: "today-x" } as never), LedgerValidationError);
+		await assert.rejects(run(addTool(), { date: "tomorrow" } as never), LedgerValidationError);
+		assert.equal(d1.db.prepare("SELECT COUNT(*) n FROM transactions").get()?.n, before);
+	});
+
 	it("명시한 절대 날짜는 그대로 기록한다", async () => {
 		assert.equal((await run(addTool(), { date: "2026-08-15" })).date, "2026-08-15");
 	});

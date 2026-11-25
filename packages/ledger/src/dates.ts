@@ -26,6 +26,13 @@ export function dateFromDaysAgo(daysAgo: number, now: number = Date.now()): stri
 	return new Date(now + KST_OFFSET_MS - daysAgo * 86_400_000).toISOString().slice(0, 10);
 }
 
+/** "today" · "today-N" → KST 날짜 (N일 전). 토큰이 아니면 null — 호출한 쪽이 그대로 검사한다. */
+export function resolveDayToken(value: string, now: number = Date.now()): string | null {
+	const m = /^today(?:-(\d{1,3}))?$/i.exec(value.trim());
+	if (!m) return null;
+	return dateFromDaysAgo(m[1] ? Number(m[1]) : 0, now);
+}
+
 /** KST 기준 이번 달 (YYYY-MM). */
 export function currentMonthKST(now: number = Date.now()): string {
 	return todayKST(now).slice(0, 7);

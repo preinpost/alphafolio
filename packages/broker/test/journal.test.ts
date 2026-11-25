@@ -467,6 +467,22 @@ describe("요약 · 도구", () => {
 		assert.deepEqual(calls.pop(), ["list", { from: Date.parse("2026-10-01T00:00:00+09:00"), limit: 500 }]);
 	});
 
+	it("날짜 토큰 — 'today'·'today-N' 은 KST 날짜로 바꿔 저장하고, 날짜를 생략하면 오늘, 바꿀 수 없는 값은 저장하지 않는다", async () => {
+		const seen: Array<{ at: number }> = [];
+		const [add] = createJournalTools({ now: () => NOW, list: async () => [], add: async (t) => (seen.push(t as { at: number }), entry({})), update: async () => entry({}), sync: async () => ({ added: 0, updated: 0, sources: [], warnings: [] }) });
+		const run = (args: Record<string, unknown>) => add!.execute("t", { symbol: "005930", side: "BUY", quantity: 1, ...args } as never, undefined, undefined, undefined as never);
+		await run({ date: "today" });
+		await run({ date: "today-3" });
+		await run({});
+		assert.deepEqual(seen.map((t) => t.at), [NOW, Date.parse("2026-10-05T12:00:00+09:00"), NOW]);
+		const before = seen.length;
+		await assert.rejects(run({ date: "" }), /YYYY-MM-DD/);
+		await assert.rejects(run({ date: "today-x" }), /YYYY-MM-DD/);
+		await assert.rejects(run({ date: "tomorrow" }), /YYYY-MM-DD/);
+		await assert.rejects(run({ date: "today+1" }), /YYYY-MM-DD/);
+		assert.equal(seen.length, before, "변환 불가 값은 저장소까지 가지 않는다");
+	});
+
 	it("잘못된 직접 기록은 저장소까지 가지 않는다", async () => {
 		let added = 0;
 		const [add] = createJournalTools({ now: () => NOW, list: async () => [], add: async () => (added++, entry({})), update: async () => entry({}), sync: async () => ({ added: 0, updated: 0, sources: [], warnings: [] }) });

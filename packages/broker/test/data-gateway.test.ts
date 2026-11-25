@@ -171,3 +171,14 @@ describe("이름 없는 배열 응답 (Binance)", () => {
 		assert.match(out.text, /84170\.0\t0\.18/);
 	});
 });
+
+describe("epoch ms 시각 파라미터의 날짜 토큰 (Binance 캔들 등)", () => {
+	it("startTime 'today-3' · endTime 'today' → 한국 시간 기준 epoch ms (시작은 자정, 끝은 그날 마지막 ms)", () => {
+		const now = Date.parse("2026-11-25T03:00:00Z"); // KST 2026-11-25 12:00
+		const { built, errors } = buildDataRequest("binance", api("binance", "GET /api/v3/klines"), { symbol: "BTCUSDT", interval: "1d", startTime: "today-3", endTime: "today" }, CREDS, now);
+		assert.deepEqual(errors, []);
+		const u = new URL(built!.url);
+		assert.equal(u.searchParams.get("startTime"), String(Date.parse("2026-11-22T00:00:00+09:00")));
+		assert.equal(u.searchParams.get("endTime"), String(Date.parse("2026-11-25T23:59:59.999+09:00")));
+	});
+});

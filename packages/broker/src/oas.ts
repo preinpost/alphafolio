@@ -43,6 +43,18 @@ export function oasDateToken(value: string, now: number = Date.now()): string {
 	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
+/**
+ * epoch ms 시각 파라미터(Binance startTime·endTime 등: type integer, 설명에 "ms")의 날짜 토큰 → 한국 시간 기준 ms.
+ * 시작은 그날 자정, 끝(endTime)은 그날 마지막 ms — 끝을 자정으로 잡으면 "today" 가 오늘 봉을 뺀다.
+ * 그 밖의 값은 그대로 둔다 (서버가 거절).
+ */
+export function epochTimeToken(name: string, p: OasParam, value: string, now: number = Date.now()): string {
+	if (p.type !== "integer" || !/time/i.test(name) || !/\bms\b|밀리/i.test(p.desc)) return value;
+	if (!/^today(?:[+-]\d{1,4})?$/i.test(value.trim())) return value;
+	const day = oasDateToken(value, now);
+	return String(Date.parse(`${day}T${/end/i.test(name) ? "23:59:59.999" : "00:00:00"}+09:00`));
+}
+
 export interface OasRequest {
 	path: string;
 	query: Record<string, string>;
@@ -71,7 +83,7 @@ export function buildOasRequest(
 		}
 		if (isServer(name)) continue;
 		const raw = v === null || v === undefined ? "" : String(v);
-		given[name] = api.params[name]!.format === "date" ? oasDateToken(raw, opts.now) : raw;
+		given[name] = api.params[name]!.format === "date" ? oasDateToken(raw, opts.now) : epochTimeToken(name, api.params[name]!, raw, opts.now);
 	}
 
 	let path = api.path;

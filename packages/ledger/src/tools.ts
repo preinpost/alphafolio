@@ -11,7 +11,7 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { D1Config } from "./d1.ts";
 import { ensureMigrated } from "./schema.ts";
-import { currentMonthKST, dateFromDaysAgo, resolvePeriod, todayKST, type Period } from "./dates.ts";
+import { currentMonthKST, dateFromDaysAgo, resolveDayToken, resolvePeriod, todayKST, type Period } from "./dates.ts";
 import {
 	addTransaction,
 	budgetStatus,
@@ -96,7 +96,7 @@ const PERIOD_ENUM = Type.Union(
  */
 function resolveDate(params: { date?: string; daysAgo?: number }): string {
 	if (params.daysAgo !== undefined) return dateFromDaysAgo(params.daysAgo);
-	if (params.date !== undefined) return params.date;
+	if (params.date !== undefined) return (typeof params.date === "string" ? resolveDayToken(params.date) : null) ?? params.date; // "today"·"today-N" 은 저장 전에 날짜로
 	return todayKST();
 }
 
