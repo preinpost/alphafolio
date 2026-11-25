@@ -55,6 +55,11 @@ export function quoteAsset(symbol: string): string {
 	return QUOTES.find((q) => symbol.endsWith(q) && symbol.length > q.length) ?? "";
 }
 
+/** 스테이블 호가로 끝나는 코인 페어인가 (ETHUSDT · KORUUSDT · KORUUSDT.P). 이 접미는 미국 주식 티커에 없어 확실한 규칙이다. */
+export function isCryptoPair(raw: string): boolean {
+	return ["USDT", "USDC", "FDUSD"].includes(quoteAsset(parseCryptoSymbol(raw).symbol));
+}
+
 /** 봉 시작 시각(UTC) → YYYYMMDD. 지표 Bar 계약이 날짜 문자열이다. */
 function ymd(t: number): string {
 	return new Date(t).toISOString().slice(0, 10).replace(/-/g, "");
@@ -130,7 +135,12 @@ export async function fetchCryptoAnalysisChart(symbol: string, period: CryptoPer
 	const chart = await fetchCryptoChart(symbol, period, venue ? { venue } : {}).catch((err: unknown) => {
 		// "ETH" 처럼 코인 이름만 온 경우 — 모델이 심볼을 고쳐 다시 부르게 한다
 		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(quoteAsset(parseCryptoSymbol(symbol).symbol) ? msg : `${msg} — Binance 심볼은 호가 자산까지 붙인다 (ETHUSDT)`);
+		if (quoteAsset(parseCryptoSymbol(symbol).symbol)) throw new Error(msg);
+		// 호가 자산 없는 심볼은 코인 이름이거나 미국 주식·ETF 다 (KORU·INTC) — 어느 쪽인지 알려 다시 부르게 한다
+		throw new Error(
+			`${msg} — Binance 심볼은 호가 자산까지 붙인다 (ETHUSDT). ` +
+				`${symbol} 이(가) 미국 주식·ETF 면 market:'us' 로, Binance 무기한(TradFi)이면 호가 자산까지 붙여 (예: KORUUSDT) 다시 부르세요`,
+		);
 	});
 	if (chart.venue !== "futures") return { ...chart, futures: null, notes: ["Binance 현물 기준"] };
 	const [rules, mark] = await Promise.all([futuresRules(chart.symbol).catch(() => null), futuresMark(chart.symbol).catch(() => null)]);

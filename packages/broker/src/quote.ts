@@ -32,6 +32,7 @@ import { localClock, localDate, MARKETS, mondayOf, SPECIAL_DAYS } from "./trigge
 import { NoBrokerConfiguredError, type BrokerAccess } from "./portfolio.ts";
 import { tossCandles, tossPrices } from "./toss/api.ts";
 import type { TossContext } from "./toss/client.ts";
+import { isCryptoPair } from "./crypto-chart.ts";
 
 export function isDomesticSymbol(symbol: string): boolean {
 	return /^\d{6}$/.test(symbol.trim());
@@ -75,9 +76,49 @@ export function isTradablePrice(price: number): boolean {
 
 export class QuoteNotFoundError extends Error {
 	constructor(symbol: string) {
-		super(`${symbol} 시세가 없습니다 — 종목코드가 틀렸거나 상장되지 않은(거래정지·상장폐지) 종목일 수 있습니다.`);
+		super(
+			`${symbol} 시세가 없습니다 — 종목코드가 틀렸거나 상장되지 않은(거래정지·상장폐지) 종목일 수 있습니다. ` +
+				"지수·원자재·비상장 상품은 시세 툴 대상이 아닙니다 (원자재·지수는 data 툴 twelve).",
+		);
 		this.name = "QuoteNotFoundError";
 	}
+}
+
+/**
+ * 이 툴이 다루지 않는 심볼이면 브로커를 부르기 전에 이유를 돌려준다.
+ * ^지수 는 토스 /prices 가 "요청 필드가 올바르지 않습니다" 로 거절한다 (실측 7건).
+ * USDT·USDC 접미 코인은 주식 시세에 없다 — 코인은 market_technical(binance) 가 현재가·지표를 같이 준다.
+ */
+export function unsupportedSymbolError(symbol: string): Error | null {
+	if (symbol.startsWith("^")) {
+		return new Error(`${symbol} 은(는) 지수라 시세·차트 툴이 지원하지 않습니다 — 해외 지수는 data 툴(twelve)로 조회하세요.`);
+	}
+	if (isCryptoPair(symbol)) {
+		return new Error(
+			`${symbol} 은(는) 코인(Binance) 심볼입니다 — 주식 시세가 아닙니다. market_technical 에 market='binance' 로 조회하세요 (현재가·지표 함께).`,
+		);
+	}
+	return null;
+}
+
+const BROKER_LABEL: Record<BrokerId, string> = { kis: "KIS", toss: "토스" };
+
+interface BrokerFailure {
+	id: BrokerId;
+	err: unknown;
+}
+
+/**
+ * 모든 브로커가 실패했을 때 돌려줄 에러. 한 곳뿐이면 그 에러를 그대로(기존 메시지 유지),
+ * 여러 곳이면 **각 브로커의 사유를 전부** 합친다 — 앞 브로커의 원인(KIS 모의투자 미지원 등)이 뒤 브로커의 "찾지 못함"에 가려지지 않게.
+ */
+export function combineBrokerFailures(failures: BrokerFailure[], fallback: string): unknown {
+	const [only] = failures;
+	if (failures.length === 0) return new Error(fallback);
+	if (failures.length === 1) return only?.err;
+	return new Error(
+		failures.map((f) => `${BROKER_LABEL[f.id]}: ${f.err instanceof Error ? f.err.message : String(f.err)}`).join(" · "),
+	);
 }
 
 export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promise<QuoteResult> {
@@ -89,7 +130,10 @@ export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promi
 	const withName = async (q: QuoteResult): Promise<QuoteResult> =>
 		q.name && q.name !== q.symbol ? q : { ...q, name: await resolveName(access, q.symbol) };
 
-	let lastError: unknown;
+	const unsupported = unsupportedSymbolError(symbol);
+	if (unsupported) throw unsupported;
+
+	const failures: BrokerFailure[] = [];
 	for (const broker of brokers) {
 		try {
 			if (broker.id === "kis") {
@@ -100,7 +144,7 @@ export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promi
 				// 성공으로 받으면 시세 0원이 화면에 뜨고, order_prepare 의 괴리율 검사가 0% 가 되어
 				// 자릿수 오타 방어가 꺼진다. 다음 브로커로 넘긴다.
 				if (!isTradablePrice(q.price)) {
-					lastError = new QuoteNotFoundError(symbol);
+					failures.push({ id: "kis", err: new QuoteNotFoundError(symbol) });
 					continue;
 				}
 				return await withName({ ...q, source: "kis" });
@@ -109,13 +153,13 @@ export async function fetchQuote(access: BrokerAccess, rawSymbol: string): Promi
 			const prices = await tossPrices(broker.ctx, [symbol]);
 			const hit = prices[0];
 			if (hit && Number(hit.lastPrice) > 0) return await withName({ ...toTossQuote(hit), source: "toss" });
-			lastError = new QuoteNotFoundError(symbol);
+			failures.push({ id: "toss", err: new QuoteNotFoundError(symbol) });
 		} catch (err) {
-			lastError = err;
+			failures.push({ id: broker.id, err });
 		}
 	}
 
-	throw lastError ?? new Error(`시세를 찾지 못했습니다: ${symbol}`);
+	throw combineBrokerFailures(failures, `시세를 찾지 못했습니다: ${symbol}`);
 }
 
 /**
@@ -156,8 +200,10 @@ export async function fetchChart(
 	const symbol = normalizeSymbol(rawSymbol);
 	const brokers = available(access);
 	if (brokers.length === 0) throw new NoBrokerConfiguredError();
+	const unsupported = unsupportedSymbolError(symbol);
+	if (unsupported) throw unsupported;
 
-	let lastError: unknown;
+	const failures: BrokerFailure[] = [];
 	for (const broker of brokers) {
 		try {
 			if (broker.id === "kis") {
@@ -194,7 +240,7 @@ export async function fetchChart(
 			const page = await tossCandles(broker.ctx, symbol, { interval: "1d", count: 200 });
 			const bars = toTossBars(page.candles);
 			if (bars.length === 0) {
-				lastError = new Error(`토스에서 ${symbol} 차트를 찾지 못했습니다.`);
+				failures.push({ id: "toss", err: new Error(`토스에서 ${symbol} 차트를 찾지 못했습니다.`) });
 				continue;
 			}
 			return {
@@ -207,9 +253,15 @@ export async function fetchChart(
 				note: period === "D" ? undefined : "토스는 일봉만 제공해 일봉으로 조회했습니다.",
 			};
 		} catch (err) {
-			lastError = err;
+			failures.push({ id: broker.id, err });
 		}
 	}
 
-	throw lastError ?? new Error(`차트를 찾지 못했습니다: ${symbol}`);
+	const err = combineBrokerFailures(failures, `차트를 찾지 못했습니다: ${symbol}`);
+	// 없다는 응답이면 데이터 소스 밖의 종목일 수 있다 — 다음 행동을 알려준다 (원자재·비상장·폐지 종목 실측)
+	const msg = err instanceof Error ? err.message : String(err);
+	if (err instanceof Error && /찾을 수 없|찾지 못|없습니다/.test(msg)) {
+		err.message = `${msg}\n※ 주식 차트 소스에 없는 종목입니다 — 원자재·지수·비상장·폐지 종목일 수 있습니다 (원자재는 data 툴 twelve, 관련 ETF 티커로 다시 조회).`;
+	}
+	throw err;
 }

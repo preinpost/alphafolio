@@ -8,7 +8,7 @@ import type { KisContext } from "../kis/client.ts";
 import { KisCredentialsMissingError } from "../kis/types.ts";
 import { resolveName } from "../names.ts";
 import { evaluateTiming, fallbackTick, tickGrid, type Horizon, type TimingInput, type TimingResult } from "../timing.ts";
-import { coinPrice, fetchCryptoAnalysisChart } from "../crypto-chart.ts";
+import { coinPrice, fetchCryptoAnalysisChart, isCryptoPair } from "../crypto-chart.ts";
 import { futuresPositions } from "../binance/futures.ts";
 import { symbolRules, type BinanceCreds } from "../binance/trade.ts";
 import type { BinanceVenue } from "../triggers/bars.ts";
@@ -340,6 +340,7 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 			"실적·공시·거시 이벤트 리스크는 이 툴이 보지 않으므로 필요하면 market_news 로 확인해 덧붙인다. " +
 			"결과는 매매 권유가 아니라 규칙 기반 판정임을 밝힌다. " +
 			"코인·Binance 선물은 market='binance' + Binance 심볼(ETHUSDT · 선물 KORUUSDT) — 현물에 없으면 선물로 자동, venue 로 고를 수 있다. " +
+			"USDT·USDC 로 끝나는 심볼은 market 을 빼도 코인으로 간다. " +
 			"코인·선물 판정은 **롱(매수) 기준**이다 (숏 진입 판정은 하지 않는다). 선물이면 손절 폭에 따른 레버리지별 증거금 손실·강제청산 한도를 툴이 계산한다 — 그 숫자를 인용한다.",
 		parameters: Type.Object({
 			symbol: Type.String({ description: "6자리 국내 종목코드 · 해외 티커 · Binance 심볼(현물 ETHUSDT · 선물 KORUUSDT)" }),
@@ -357,7 +358,7 @@ export function createAnalysisTools(deps: BrokerToolDeps) {
 			),
 		}),
 		execute: async (_id, params) => {
-			if (params.market === "binance" || params.venue) {
+			if (params.market === "binance" || params.venue || isCryptoPair(params.symbol)) {
 				const venue = params.venue as BinanceVenue | undefined;
 				return cryptoTiming(deps, params.symbol, params.horizon ? [params.horizon] : ["swing", "short"], venue);
 			}

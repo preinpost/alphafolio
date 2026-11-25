@@ -9,6 +9,7 @@ import { coinPrice, fetchCryptoAnalysisChart, type CryptoPeriod } from "../crypt
 import type { BinanceVenue } from "../triggers/bars.ts";
 import { analyze } from "../indicators.ts";
 import { marketOf } from "../orders.ts";
+import { isCryptoPair } from "../crypto-chart.ts";
 import { fetchQuote, fetchChart, stockBarOpen } from "../quote.ts";
 import type { BrokerToolDeps, QuoteDetails, TechnicalDetails, MoversDetails, NewsDetails, OverseasNewsDetails } from "./contracts.ts";
 import { money, signed, usd, volumeLine } from "./format.ts";
@@ -75,7 +76,7 @@ export function createMarketTools(deps: BrokerToolDeps) {
 			"기간별 시세로 기술적 지표를 계산한다 — 이동평균(5/20/60)·RSI(14)·MFI(14)·MACD·볼린저·ATR·" +
 			"거래량(20봉 평균 대비)·지지/저항·추세·신호 라벨. '차트 분석', '추세 어때?', 'RSI 얼마야?' 같은 **지표 확인** 요청에 쓴다. " +
 				"매수·매도 판단이나 손절가가 필요하면 이 툴이 아니라 market_timing 을 쓴다. " +
-			"코인은 market='binance' + Binance 심볼(ETHUSDT 처럼 호가 자산까지) — 키 없이 된다. " +
+			"코인은 market='binance' + Binance 심볼(ETHUSDT 처럼 호가 자산까지) — 키 없이 된다. USDT·USDC 로 끝나면 market 을 빼도 코인으로 간다. " +
 			"Binance 선물도 같은 market='binance' 다 — 현물에 없는 심볼은 USDⓈ-M 선물에서 자동으로 찾는다. " +
 			"주식·원자재 기반 TradFi 무기한(KORUUSDT·TSLAUSDT·XAUUSDT 등)은 선물에만 있다. " +
 			"사용자가 심볼에 USDT 를 붙였거나 'KORUUSDT.P'·'선물'이라고 했으면 주식 티커로 바꾸지 말고 market='binance' 로 부른다 (선물이면 venue='futures'). " +
@@ -104,7 +105,7 @@ export function createMarketTools(deps: BrokerToolDeps) {
 		execute: async (_id, params) => {
 			const period = (params.period as "D" | "W" | "M" | undefined) ?? "D";
 			const chart =
-				params.market === "binance" || params.venue
+				params.market === "binance" || params.venue || isCryptoPair(params.symbol)
 					? await cryptoTechnicalChart(params.symbol, period, params.venue as BinanceVenue | undefined)
 					: await fetchChart(deps.brokers, params.symbol, period);
 			const currency = "quote" in chart ? chart.quote : marketOf(chart.symbol) === "KR" ? "KRW" : "USD";
